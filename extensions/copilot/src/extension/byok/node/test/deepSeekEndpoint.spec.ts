@@ -94,4 +94,18 @@ describe('DeepSeekEndpoint', () => {
 		expect(body.store).toBeUndefined();
 		expect(body.previous_response_id).toBeUndefined();
 	});
+
+	it('normalizes empty and invalid Responses tool schemas to object-root JSON Schema', () => {
+		const endpoint = instantiationService.createInstance(DeepSeekEndpoint, metadata('deepseek-v4-flash-responses', ModelSupportedEndpoint.Responses), 'secret', 'https://api.deepseek.com/responses');
+		const body = endpoint.createRequestBody(options('high'));
+		body.tools = [
+			{ type: 'function', name: 'missing_schema', description: '', parameters: {} },
+			{ type: 'function', name: 'null_schema', description: '', parameters: { type: null, properties: null } },
+		];
+		endpoint.interceptBody(body);
+		expect(body.tools).toEqual([
+			{ type: 'function', name: 'missing_schema', description: '', parameters: { type: 'object', properties: {} } },
+			{ type: 'function', name: 'null_schema', description: '', parameters: { type: 'object', properties: {} } },
+		]);
+	});
 });

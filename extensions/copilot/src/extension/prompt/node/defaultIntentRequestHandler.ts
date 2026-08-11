@@ -698,7 +698,8 @@ class DefaultToolCallingLoop extends ToolCallingLoop<IDefaultToolLoopOptions> {
 			`${ChatLocation.toStringShorter(this.options.location)}/${this.options.intent?.id}`;
 		const location = this.options.overrideRequestLocation ?? this.options.location;
 		const isThinkingLocation = location === ChatLocation.Agent || location === ChatLocation.MessagesProxy;
-		const rawEffort = this.options.request.modelConfiguration?.reasoningEffort;
+		const rawEffort = this.resolveNikaAgentThinkingEffort()
+			?? this.options.request.modelConfiguration?.reasoningEffort;
 		const reasoningEffort = typeof rawEffort === 'string' ? rawEffort : undefined;
 		const isSubagent = !!this.options.request.subAgentInvocationId;
 		const modeChanged = this.didModeChangeSincePreviousRequest();
@@ -744,6 +745,24 @@ class DefaultToolCallingLoop extends ToolCallingLoop<IDefaultToolLoopOptions> {
 			interactionTypeOverride: this.options.request.subAgentInvocationId ? 'conversation-subagent' : undefined,
 			enableRetryOnFilter: true
 		}, token);
+	}
+
+	private resolveNikaAgentThinkingEffort(): string | undefined {
+		if (this.options.invocation.endpoint.modelProvider.toLowerCase() !== 'nika') {
+			return undefined;
+		}
+		const subAgentName = this.options.request.subAgentName?.toLowerCase();
+		if (subAgentName === 'explore') {
+			return this._configurationService.getNonExtensionConfig<string>('nika.agent.exploreThinkingEffort') ?? 'none';
+		}
+		const modeName = this.options.request.modeInstructions2?.name.toLowerCase();
+		if (modeName === 'plan') {
+			return this._configurationService.getNonExtensionConfig<string>('nika.agent.planThinkingEffort') ?? 'max';
+		}
+		if (this.options.location === ChatLocation.Editor) {
+			return this._configurationService.getNonExtensionConfig<string>('nika.agent.inlineChatThinkingEffort') ?? 'none';
+		}
+		return undefined;
 	}
 
 	private didModeChangeSincePreviousRequest(): boolean {

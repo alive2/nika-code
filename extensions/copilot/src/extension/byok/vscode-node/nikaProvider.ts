@@ -21,12 +21,14 @@ import {
 	isNikaDeepSeekModel,
 	isNikaGeminiModel,
 	isNikaModelId,
+	isNikaThinkingEffort,
 	NIKA_DEEPSEEK_SECRET,
 	NIKA_GEMINI_MODEL_IDS,
 	NIKA_GEMINI_SECRET,
 	NIKA_GEMMA_MODEL_ID,
 	NIKA_PROVIDER_ID,
 	NIKA_PROVIDER_NAME,
+	NIKA_RESPONSES_MODEL,
 	NikaModelId,
 	resolveNikaTokenLimits,
 } from './nikaModels';
@@ -85,7 +87,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		]);
 		const limits = this._limits();
 		const modelIds = getVisibleNikaModelIds(!!deepseekKey, !!geminiKey);
-		const defaultModel = vscode.workspace.getConfiguration('nika').get<string>('defaultModel', 'nika/deepseek-v4-flash').replace(/^nika\//, '');
+		const defaultModel = vscode.workspace.getConfiguration('nika').get<string>('defaultModel', NIKA_RESPONSES_MODEL).replace(/^nika\//, '');
 
 		return modelIds.map(id => {
 			const capabilities = getNikaModelCapabilities(id, limits);
@@ -120,8 +122,12 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			try {
 				const endpoint = this._createDeepSeekEndpoint(model.id, key);
 				const processed = await this._attachmentProcessor.process(messages, token);
+				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
+				const effectiveOptions = isNikaThinkingEffort(requestedEffort)
+					? { ...options, modelConfiguration: { ...options.modelConfiguration, reasoningEffort: requestedEffort } }
+					: options;
 				for (const marker of processed.replayMarkers) { progress.report(marker); }
-				return await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, progress, token);
+				return await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, effectiveOptions, options.requestInitiator, progress, token);
 			} catch (error) {
 				if (model.id === 'deepseek-v4-flash-responses' && !token.isCancellationRequested) {
 					const switchAction = vscode.l10n.t('Use Flash Chat Completions');

@@ -66,6 +66,8 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 				e.affectsConfiguration(ProductionEndpointProvider.UTILITY_MODEL_CONFIG_KEY)
 				|| e.affectsConfiguration(ProductionEndpointProvider.UTILITY_SMALL_MODEL_CONFIG_KEY)
 				|| e.affectsConfiguration(ProductionEndpointProvider.BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY)
+				|| e.affectsConfiguration('nika.agent.utilityThinkingEffort')
+				|| e.affectsConfiguration('nika.agent.utilitySmallThinkingEffort')
 			) {
 				this._logService.trace(`[ProductionEndpointProvider] Utility model configuration changed; invalidating alias endpoints.`);
 				// Clear telemetry fingerprints so a re-applied override emits
@@ -318,7 +320,14 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 
 		this._logService.trace(`[ProductionEndpointProvider] Applying ${configKey} override: ${model.vendor}/${model.id}`);
 		this._reportOverrideAppliedTelemetry(family);
-		return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, model);
+		const endpoint = this._instantiationService.createInstance(ExtensionContributedChatEndpoint, model);
+		if (vendor === 'nika') {
+			const effortKey = family === 'copilot-utility-small'
+				? 'nika.agent.utilitySmallThinkingEffort'
+				: 'nika.agent.utilityThinkingEffort';
+			endpoint.setReasoningEffortOverride(this._configService.getNonExtensionConfig<string>(effortKey));
+		}
+		return endpoint;
 	}
 
 	private _reportOverrideAppliedTelemetry(family: ChatEndpointFamily): void {

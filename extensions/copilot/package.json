@@ -3207,7 +3207,7 @@
         "properties": {
           "nika.defaultModel": {
             "type": "string",
-            "default": "nika/deepseek-v4-flash",
+            "default": "nika/deepseek-v4-flash-responses",
             "markdownDescription": "%nika.config.defaultModel%"
           },
           "nika.outputTokens": {
@@ -3306,28 +3306,83 @@
           },
           "nika.agent.plan": {
             "type": "string",
-            "default": "nika/deepseek-v4-pro",
+            "default": "nika/deepseek-v4-flash-responses",
             "markdownDescription": "%nika.config.agent.plan%"
           },
           "nika.agent.explore": {
             "type": "string",
-            "default": "nika/deepseek-v4-flash",
+            "default": "nika/deepseek-v4-flash-responses",
             "markdownDescription": "%nika.config.agent.explore%"
           },
           "nika.agent.utility": {
             "type": "string",
-            "default": "nika/deepseek-v4-flash",
+            "default": "nika/deepseek-v4-flash-responses",
             "markdownDescription": "%nika.config.agent.utility%"
           },
           "nika.agent.utilitySmall": {
             "type": "string",
-            "default": "nika/gemini-2.5-flash-lite",
+            "default": "nika/deepseek-v4-flash-responses",
             "markdownDescription": "%nika.config.agent.utilitySmall%"
           },
           "nika.agent.inlineChat": {
             "type": "string",
-            "default": "nika/deepseek-v4-flash",
+            "default": "nika/deepseek-v4-flash-responses",
             "markdownDescription": "%nika.config.agent.inlineChat%"
+          },
+          "nika.agent.planThinkingEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "high",
+              "max"
+            ],
+            "default": "max",
+            "markdownDescription": "%nika.config.agent.planThinkingEffort%"
+          },
+          "nika.agent.exploreThinkingEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "high",
+              "max"
+            ],
+            "default": "none",
+            "markdownDescription": "%nika.config.agent.exploreThinkingEffort%"
+          },
+          "nika.agent.utilityThinkingEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "high",
+              "max"
+            ],
+            "default": "high",
+            "markdownDescription": "%nika.config.agent.utilityThinkingEffort%"
+          },
+          "nika.agent.utilitySmallThinkingEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "high",
+              "max"
+            ],
+            "default": "none",
+            "markdownDescription": "%nika.config.agent.utilitySmallThinkingEffort%"
+          },
+          "nika.agent.inlineChatThinkingEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "high",
+              "max"
+            ],
+            "default": "none",
+            "markdownDescription": "%nika.config.agent.inlineChatThinkingEffort%"
           },
           "nika.logLevel": {
             "type": "string",

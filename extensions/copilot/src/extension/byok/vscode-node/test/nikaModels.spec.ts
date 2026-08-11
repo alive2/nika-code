@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it } from 'vitest';
-import { getNikaModelCapabilities, getVisibleNikaModelIds, isNikaDeepSeekModel, isNikaGeminiModel, isNikaModelId, resolveNikaTokenLimits } from '../nikaModels';
+import { getNikaModelCapabilities, getVisibleNikaModelIds, isNikaDeepSeekModel, isNikaGeminiModel, isNikaModelId, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, resolveNikaTokenLimits } from '../nikaModels';
 
 describe('Nika model metadata', () => {
 	it('uses the documented default budgets', () => {
@@ -47,5 +47,15 @@ describe('Nika model metadata', () => {
 		expect(getVisibleNikaModelIds(false, true)).toEqual([
 			'gemma4:31b', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
 		]);
+	});
+
+	it('uses the Responses model with role-specific thinking defaults', () => {
+		expect(NIKA_AGENT_DEFAULTS).toEqual({
+			plan: { model: NIKA_RESPONSES_MODEL, effort: 'max' },
+			explore: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
+			utility: { model: NIKA_RESPONSES_MODEL, effort: 'high' },
+			utilitySmall: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
+			inlineChat: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
+		});
 	});
 });

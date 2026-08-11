@@ -45,6 +45,7 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 	public readonly multiplier: number | undefined = undefined;
 	public readonly isExtensionContributed = true;
 	public readonly supportedEditTools?: readonly EndpointEditToolName[] | undefined;
+	private _reasoningEffortOverride: string | undefined;
 
 	constructor(
 		private readonly languageModel: vscode.LanguageModelChat,
@@ -112,6 +113,10 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 		return false;
 	}
 
+	setReasoningEffortOverride(effort: string | undefined): void {
+		this._reasoningEffortOverride = effort;
+	}
+
 	get policy(): 'enabled' | { terms: string } {
 		return 'enabled';
 	}
@@ -170,6 +175,7 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 		location,
 		source,
 		telemetryProperties,
+		modelCapabilities,
 	}: IMakeChatRequestOptions, token: CancellationToken): Promise<ChatResponse> {
 		const vscodeMessages = convertToApiChatMessage(messages, {
 			ignoreStatefulMarker,
@@ -185,6 +191,7 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 		// - Gemini: inside GeminiNativeBYOKLMProvider
 		const activeTraceCtx = this._otelService.getActiveTraceContext();
 		const telemetryTurn = getTelemetryTurnFromProperties(telemetryProperties);
+		const reasoningEffort = this._reasoningEffortOverride ?? modelCapabilities?.reasoningEffort;
 
 		const vscodeOptions: vscode.LanguageModelChatRequestOptions = {
 			tools: ((requestOptions?.tools ?? []) as OpenAiFunctionTool[]).map(tool => ({
@@ -197,6 +204,7 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 				_capturingTokenCorrelationId: ourRequestId,
 				_otelTraceContext: activeTraceCtx ?? null,
 				...(telemetryTurn !== undefined ? { _telemetryTurn: telemetryTurn } : {}),
+				...(reasoningEffort ? { _nikaThinkingEffort: reasoningEffort } : {}),
 			}
 		};
 

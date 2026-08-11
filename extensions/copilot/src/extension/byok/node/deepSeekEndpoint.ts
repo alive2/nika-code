@@ -4,12 +4,43 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IChatEndpoint, ICreateEndpointBodyOptions, IEndpointBody } from '../../../platform/networking/common/networking';
+import { isOpenAiFunctionTool, OpenAiResponsesFunctionTool } from '../../../platform/networking/common/fetch';
 import { OpenAIEndpoint } from './openAIEndpoint';
+
+function ensureObjectRootSchema(parameters: object | undefined): object {
+	if (!parameters || Array.isArray(parameters)) {
+		return { type: 'object', properties: {} };
+	}
+	const schema = parameters as Record<string, unknown>;
+	if (schema.type === 'object') {
+		return parameters;
+	}
+	return {
+		...schema,
+		type: 'object',
+		properties: typeof schema.properties === 'object' && schema.properties !== null ? schema.properties : {},
+	};
+}
+
+export function normalizeDeepSeekToolSchemas(body: IEndpointBody): void {
+	if (!body.tools) {
+		return;
+	}
+	for (const tool of body.tools) {
+		if (isOpenAiFunctionTool(tool)) {
+			tool.function.parameters = ensureObjectRootSchema(tool.function.parameters);
+		} else if (tool.type === 'function') {
+			const responsesTool = tool as OpenAiResponsesFunctionTool;
+			responsesTool.parameters = ensureObjectRootSchema(responsesTool.parameters);
+		}
+	}
+}
 
 /** DeepSeek's OpenAI-compatible APIs differ in several important body fields. */
 export class DeepSeekEndpoint extends OpenAIEndpoint {
 	override createRequestBody(options: ICreateEndpointBodyOptions): IEndpointBody {
 		const body = super.createRequestBody(options);
+		normalizeDeepSeekToolSchemas(body);
 		const temperature = this._configurationService.getNonExtensionConfig<number>('nika.temperature') ?? 0.7;
 		const defaultEffort = this._configurationService.getNonExtensionConfig<string>('nika.thinkingEffort') ?? 'high';
 		const configuredEffort = options.modelCapabilities?.reasoningEffort;
@@ -47,6 +78,7 @@ export class DeepSeekEndpoint extends OpenAIEndpoint {
 		if (!body) {
 			return;
 		}
+		normalizeDeepSeekToolSchemas(body);
 		if (this.useResponsesApi) {
 			body.model = this.model === 'deepseek-v4-flash-responses' ? 'deepseek-v4-flash' : this.model;
 			body.max_output_tokens = this.maxOutputTokens;

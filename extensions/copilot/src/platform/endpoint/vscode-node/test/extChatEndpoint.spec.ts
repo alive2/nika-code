@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import type { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { ChatFetchResponseType, ChatLocation } from '../../../chat/common/commonTypes';
+import type { IMakeChatRequestOptions } from '../../../networking/common/networking';
 import { NoopOTelService, resolveOTelConfig } from '../../../otel/common/index';
 import { CustomDataPartMimeTypes } from '../../common/endpointTypes';
 import { decodeStatefulMarker } from '../../common/statefulMarkerContainer';
@@ -37,6 +38,32 @@ describe('ExtensionContributedChatEndpoint', () => {
 
 		expect(result.type).toBe(ChatFetchResponseType.Success);
 		expect(capturedOptions?.modelOptions?._telemetryTurn).toBe(5);
+	});
+
+	it('forwards per-role Nika thinking effort and honors a utility override', async () => {
+		const capturedOptions: vscode.LanguageModelChatRequestOptions[] = [];
+		const endpoint = new ExtensionContributedChatEndpoint(
+			createLanguageModel(options => capturedOptions.push(options), undefined, 'nika'),
+			createInstantiationService(),
+			new NoopOTelService(resolveOTelConfig({ env: {}, extensionVersion: '1.0.0', sessionId: 'test' })),
+		);
+
+		const request: IMakeChatRequestOptions = {
+			debugName: 'test',
+			messages: [{
+				role: Raw.ChatRole.User,
+				content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: 'hello' }]
+			}],
+			finishedCb: undefined,
+			location: ChatLocation.Panel,
+			requestOptions: {},
+			modelCapabilities: { reasoningEffort: 'high' },
+		};
+		await endpoint.makeChatRequest2(request, new vscode.CancellationTokenSource().token);
+		endpoint.setReasoningEffortOverride('none');
+		await endpoint.makeChatRequest2(request, new vscode.CancellationTokenSource().token);
+
+		expect(capturedOptions.map(options => options.modelOptions?._nikaThinkingEffort)).toEqual(['high', 'none']);
 	});
 
 	it('only forwards telemetry turn for base-10 non-negative integer request properties', async () => {

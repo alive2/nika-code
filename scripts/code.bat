@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-title nika code Dev
+title NikaCode Dev
 
 pushd %~dp0\..
 

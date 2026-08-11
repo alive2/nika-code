@@ -55,6 +55,16 @@ export const NIKA_OUTPUT_PRESETS = {
 export type NikaContextPreset = keyof typeof NIKA_CONTEXT_PRESETS;
 export type NikaOutputPreset = keyof typeof NIKA_OUTPUT_PRESETS;
 export type NikaThinkingEffort = 'none' | 'low' | 'high' | 'max';
+export type NikaAgentRole = 'plan' | 'explore' | 'utility' | 'utilitySmall' | 'inlineChat';
+
+export const NIKA_RESPONSES_MODEL = 'nika/deepseek-v4-flash-responses';
+export const NIKA_AGENT_DEFAULTS: Record<NikaAgentRole, { readonly model: string; readonly effort: NikaThinkingEffort }> = {
+	plan: { model: NIKA_RESPONSES_MODEL, effort: 'max' },
+	explore: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
+	utility: { model: NIKA_RESPONSES_MODEL, effort: 'high' },
+	utilitySmall: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
+	inlineChat: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
+};
 
 export interface NikaTokenLimits {
 	readonly contextWindow: number;
@@ -86,6 +96,10 @@ export function isNikaDeepSeekModel(value: string): value is NikaModelId {
 
 export function isNikaGeminiModel(value: string): value is NikaModelId {
 	return NIKA_GEMINI_MODEL_IDS.includes(value as NikaModelId);
+}
+
+export function isNikaThinkingEffort(value: unknown): value is NikaThinkingEffort {
+	return value === 'none' || value === 'low' || value === 'high' || value === 'max';
 }
 
 export function getVisibleNikaModelIds(hasDeepSeekKey: boolean, hasGeminiKey: boolean): NikaModelId[] {
