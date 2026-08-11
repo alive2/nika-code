@@ -36,6 +36,11 @@
 	"urlProtocol": "nika-code",
 	"agentsTelemetryAppName": "agents",
 	"webviewContentExternalBaseUrlTemplate": "https://{{uuid}}.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/",
+	"extensionsGallery": {
+		"serviceUrl": "https://open-vsx.org/vscode/gallery",
+		"itemUrl": "https://open-vsx.org/vscode/item",
+		"resourceUrlTemplate": "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}"
+	},
 	"builtInExtensions": [
 		{
 			"name": "ms-vscode.js-debug-companion",
@@ -83,6 +88,22 @@
 					"flags": "verified"
 				},
 				"publisherDisplayName": "Microsoft"
+			}
+		},
+		{
+			"name": "PKief.material-icon-theme",
+			"version": "5.37.0",
+			"sha256": "ade9adefe3909cea92aed52850ddd00975d1dc1b62fe558831f6fb8b88f7c3ce",
+			"repo": "https://github.com/material-extensions/vscode-material-icon-theme",
+			"metadata": {
+				"id": "5db78037-f674-459f-a236-db622c427c5b",
+				"publisherId": {
+					"publisherId": "f9e5bc2f-fea1-4075-917f-d83e01e69f56",
+					"publisherName": "PKief",
+					"displayName": "Philipp Kief",
+					"flags": "verified"
+				},
+				"publisherDisplayName": "Philipp Kief"
 			}
 		}
 	],
