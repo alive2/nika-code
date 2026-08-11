@@ -291,7 +291,13 @@ export class AgentHostByokLmHandler extends Disposable implements IAgentHostByok
 					result.push({ type: 'text', value: part.text });
 				}
 			} else {
-				result.push({ type: 'image_url', value: { mimeType: this._toChatImageMimeType(part.mimeType), data: decodeBase64(part.data) } });
+				if (part.type === 'document') {
+					// Preserve PDFs as binary data so the selected provider can extract
+					// or forward them instead of receiving an attachment-free turn.
+					result.push({ type: 'data', mimeType: part.mimeType, data: decodeBase64(part.data) });
+				} else {
+					result.push({ type: 'image_url', value: { mimeType: this._toChatImageMimeType(part.mimeType), data: decodeBase64(part.data) } });
+				}
 			}
 		}
 		return result.length ? result : [{ type: 'text', value: '' }];

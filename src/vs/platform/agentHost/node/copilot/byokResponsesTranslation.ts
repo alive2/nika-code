@@ -18,6 +18,7 @@ interface IResponsesContentPart {
 	readonly type?: string;
 	readonly text?: string;
 	readonly image_url?: string;
+	readonly file_data?: string;
 }
 
 interface IResponsesSummaryPart {
@@ -117,6 +118,22 @@ function toContentParts(content: string | IResponsesContentPart[] | undefined, i
 				};
 			}
 			throw new ResponsesTranslationError(`Unsupported input[${itemIndex}].content[${contentIndex}].image_url`);
+		}
+		if (part.type === 'input_file' && typeof part.file_data === 'string') {
+			const match = /^data:application\/pdf(?:;[^,]*)?;base64,(?<data>.*)$/.exec(part.file_data);
+			if (!match?.groups) {
+				throw new ResponsesTranslationError(`Unsupported input[${itemIndex}].content[${contentIndex}].file_data`);
+			}
+			try {
+				decodeBase64(match.groups.data);
+			} catch {
+				throw new ResponsesTranslationError(`Invalid input[${itemIndex}].content[${contentIndex}].file_data`);
+			}
+			return {
+				type: 'document' as const,
+				mimeType: 'application/pdf' as const,
+				data: match.groups.data,
+			};
 		}
 		throw new ResponsesTranslationError(`Unsupported input[${itemIndex}].content[${contentIndex}] type '${part.type ?? ''}'`);
 	});

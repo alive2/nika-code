@@ -33,7 +33,15 @@ export interface IByokLmImagePart {
 	readonly data: string;
 }
 
-export type IByokLmContentPart = IByokLmTextPart | IByokLmImagePart;
+/** A PDF supplied through the OpenAI Responses `input_file` contract. */
+export interface IByokLmDocumentPart {
+	readonly type: 'document';
+	readonly mimeType: 'application/pdf';
+	/** Base64-encoded document bytes. */
+	readonly data: string;
+}
+
+export type IByokLmContentPart = IByokLmTextPart | IByokLmImagePart | IByokLmDocumentPart;
 
 export interface IByokLmMessageItem {
 	readonly type: 'message';

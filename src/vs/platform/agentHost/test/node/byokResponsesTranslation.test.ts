@@ -71,6 +71,21 @@ suite('byokResponsesTranslation', () => {
 		]);
 	});
 
+	test('maps PDF input files to bridge documents', () => {
+		assert.deepStrictEqual(responsesRequestToBridge('nika', {
+			model: 'deepseek-v4-flash',
+			input: [{
+				type: 'message',
+				role: 'user',
+				content: [{ type: 'input_file', file_data: 'data:application/pdf;base64,JVBERi0xLjQ=' }],
+			}],
+		}).input, [{
+			type: 'message',
+			role: 'user',
+			content: [{ type: 'document', mimeType: 'application/pdf', data: 'JVBERi0xLjQ=' }],
+		}]);
+	});
+
 	test('rejects missing models and unsupported input items', () => {
 		assert.throws(() => responsesRequestToBridge('acme', { input: [] }), ResponsesTranslationError);
 		assert.throws(() => responsesRequestToBridge('acme', {

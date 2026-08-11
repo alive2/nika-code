@@ -336,6 +336,7 @@ suite('AgentHostByokLmHandler', () => {
 						content: [
 							{ type: 'text', text: 'hi' },
 							{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' },
+							{ type: 'document', mimeType: 'application/pdf', data: 'JVBERi0xLjQ=' },
 						],
 					},
 				],
@@ -371,6 +372,7 @@ suite('AgentHostByokLmHandler', () => {
 					content: [
 						{ type: 'text', value: 'hi' },
 						{ type: 'image_url', value: { mimeType: 'image/png', data: VSBuffer.fromString('image') } },
+						{ type: 'data', mimeType: 'application/pdf', data: '%PDF-1.4' },
 					],
 				},
 			],
