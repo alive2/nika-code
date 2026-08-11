@@ -1,6 +1,7 @@
 {
 	"nameShort": "NikaCode",
 	"nameLong": "NikaCode",
+	"defaultColorTheme": "Default High Contrast",
 	"applicationName": "nika-code",
 	"dataFolderName": ".nika-code",
 	"sharedDataFolderName": ".nika-code-shared",
