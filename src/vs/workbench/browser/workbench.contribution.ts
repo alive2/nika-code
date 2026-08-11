@@ -7,6 +7,7 @@ import { isStandalone } from '../../base/browser/browser.js';
 import { isLinux, isMacintosh, isNative, isWeb, isWindows } from '../../base/common/platform.js';
 import { localize } from '../../nls.js';
 import { Extensions as ConfigurationExtensions, ConfigurationScope, IConfigurationRegistry } from '../../platform/configuration/common/configurationRegistry.js';
+import { MenuId, MenuRegistry } from '../../platform/actions/common/actions.js';
 import product from '../../platform/product/common/product.js';
 import { Registry } from '../../platform/registry/common/platform.js';
 import { ConfigurationKeyValuePairs, ConfigurationMigrationWorkbenchContribution, DynamicWindowConfiguration, DynamicWorkbenchSecurityConfiguration, Extensions, IConfigurationMigrationRegistry, problemsConfigurationNodeBase, windowConfigurationNodeBase, workbenchConfigurationNodeBase } from '../common/configuration.js';
@@ -18,6 +19,24 @@ import { ActivityBarPosition, EditorActionsLocation, EditorTabsMode, LayoutSetti
 import { defaultWindowTitle, defaultWindowTitleSeparator } from './parts/titlebar/windowTitle.js';
 
 const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
+
+MenuRegistry.appendMenuItem(MenuId.GlobalActivity, {
+	command: {
+		id: 'nika.openSettings',
+		title: localize('nikaSettings', "Nika Settings"),
+	},
+	group: '2_configuration',
+	order: 4,
+});
+
+MenuRegistry.appendMenuItem(MenuId.MenubarPreferencesMenu, {
+	command: {
+		id: 'nika.openSettings',
+		title: localize({ key: 'miNikaSettings', comment: ['&& denotes a mnemonic'] }, "&&Nika Settings"),
+	},
+	group: '2_configuration',
+	order: 4,
+});
 
 // Configuration
 (function registerConfiguration(): void {

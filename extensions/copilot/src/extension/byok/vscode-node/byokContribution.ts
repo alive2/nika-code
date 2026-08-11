@@ -22,6 +22,7 @@ import { OllamaLMProvider } from './ollamaProvider';
 import { OAIBYOKLMProvider } from './openAIProvider';
 import { OpenRouterLMProvider } from './openRouterProvider';
 import { XAIBYOKLMProvider } from './xAIProvider';
+import { NikaLMProvider } from './nikaProvider';
 
 export class BYOKContrib extends Disposable implements IExtensionContribution {
 	public readonly id: string = 'byok-contribution';
@@ -31,6 +32,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	private _providersRegistered = false;
 	private _knownModelsRefreshed = false;
 	private _knownModelsRefreshTargets: ReadonlyArray<readonly [string, AbstractLanguageModelChatProvider]> = [];
+	private readonly _nikaProvider: NikaLMProvider;
 
 	constructor(
 		@IFetcherService private readonly _fetcherService: IFetcherService,
@@ -41,6 +43,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	) {
 		super();
 		this._byokStorageService = new BYOKStorageService(extensionContext);
+		this._nikaProvider = this._register(this._instantiationService.createInstance(NikaLMProvider, this._byokStorageService));
 		this._applyPolicy();
 		this._register(this._authService.onDidAuthenticationChange(() => this._applyPolicy()));
 	}
@@ -62,6 +65,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		this._providers.set(AzureBYOKModelProvider.providerId, instantiationService.createInstance(AzureBYOKModelProvider, this._byokStorageService));
 		this._providers.set(CustomOAIBYOKModelProvider.providerId, instantiationService.createInstance(CustomOAIBYOKModelProvider, this._byokStorageService));
 		this._providers.set(CustomEndpointBYOKModelProvider.providerId, instantiationService.createInstance(CustomEndpointBYOKModelProvider, this._byokStorageService));
+		this._providers.set(NikaLMProvider.providerId, this._nikaProvider);
 
 		this._knownModelsRefreshTargets = [
 			[AnthropicLMProvider.providerName, anthropic],

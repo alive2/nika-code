@@ -1850,6 +1850,37 @@ describe('phase commentary followed by phase final_answer', () => {
 	});
 });
 
+describe('DeepSeek Responses compatibility', () => {
+	it('streams response.reasoning_text.delta as thinking', async () => {
+		const services = createPlatformServices();
+		const accessor = services.createTestingAccessor();
+		const deltas: Array<{ thinking?: { id?: string; text?: string | string[] } }> = [];
+		const events = [
+			{ type: 'response.reasoning_text.delta', item_id: 'deepseek-thought', delta: 'checking the tools' },
+			{
+				type: 'response.completed',
+				response: {
+					id: 'resp_deepseek', model: 'deepseek-v4-flash', created_at: 123, output: [],
+					usage: { input_tokens: 4, output_tokens: 3, total_tokens: 7, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 3 } },
+				},
+			},
+		];
+		const stream = await processResponseFromChatEndpoint(
+			accessor.get(IInstantiationService),
+			new SpyingTelemetryService(),
+			accessor.get(ILogService),
+			createFakeStreamResponse(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')),
+			1,
+			async (_text, _index, delta) => { deltas.push(delta); return undefined; },
+			TelemetryData.createAndMarkAsIssued({ modelCallId: 'deepseek-responses-test' }, {}),
+		);
+		for await (const _ of stream) { /* consume */ }
+		expect(deltas.some(delta => delta.thinking?.id === 'deepseek-thought' && delta.thinking.text === 'checking the tools')).toBe(true);
+		accessor.dispose();
+		services.dispose();
+	});
+});
+
 describe('processResponseFromChatEndpoint terminal events', () => {
 	async function runStream(sseBody: string) {
 		const services = createPlatformServices();

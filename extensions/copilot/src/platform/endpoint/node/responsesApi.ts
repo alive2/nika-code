@@ -1161,6 +1161,20 @@ export class OpenAIResponsesProcessor {
 				this.captureCompactionItem(item, outputIndex, onProgress);
 			}
 		}
+		// DeepSeek's experimental Responses stream uses reasoning_text rather
+		// than OpenAI's reasoning_summary_text. Keep this compatibility branch
+		// outside the SDK-discriminated switch until the event is standardized.
+		const compatibilityChunk = chunk as unknown as { type: string; delta?: string; item_id?: string };
+		if (compatibilityChunk.type === 'response.reasoning_text.delta' && compatibilityChunk.delta) {
+			this.hasReceivedReasoningSummary = true;
+			return onProgress({
+				text: '',
+				thinking: {
+					id: compatibilityChunk.item_id ?? 'deepseek-reasoning',
+					text: compatibilityChunk.delta,
+				},
+			});
+		}
 
 		switch (chunk.type) {
 			case 'error':

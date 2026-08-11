@@ -7,6 +7,7 @@ import * as l10n from '@vscode/l10n';
 import { BasePromptElementProps, ChatResponseReferencePartStatusKind, Document, Image, PromptElement, PromptReference, PromptSizing } from '@vscode/prompt-tsx';
 import { UserMessage } from '@vscode/prompt-tsx/dist/base/promptElements';
 import { AbstractDocumentWithLanguageId } from '../../../../platform/editing/common/abstractText';
+import { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { NotebookDocumentSnapshot } from '../../../../platform/editing/common/notebookDocumentSnapshot';
 import { TextDocumentSnapshot } from '../../../../platform/editing/common/textDocumentSnapshot';
 import { modelSupportsPDFDocuments } from '../../../../platform/endpoint/common/chatModelCapabilities';
@@ -56,6 +57,7 @@ export class FileVariable extends PromptElement<FileVariableProps, unknown> {
 		@IAlternativeNotebookContentService private readonly alternativeNotebookContent: IAlternativeNotebookContentService,
 		@IPromptEndpoint private readonly promptEndpoint: IPromptEndpoint,
 		@IPromptPathRepresentationService private readonly promptPathRepresentationService: IPromptPathRepresentationService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super(props);
 	}
@@ -72,8 +74,10 @@ export class FileVariable extends PromptElement<FileVariableProps, unknown> {
 			return;
 		}
 
-		// When omitContents is true, just render the file path without reading the file contents
-		if (this.props.omitContents) {
+		const isPdf = /\.pdf$/i.test(uri.path);
+		// PDFs stay attached in agent mode so Nika can extract their contents before
+		// sending them to text-only DeepSeek endpoints.
+		if (this.props.omitContents && !isPdf) {
 			const filePath = this.promptPathRepresentationService.getFilePath(uri);
 			const attrs: Record<string, string> = {};
 			if (this.props.variableName) {
@@ -118,8 +122,8 @@ export class FileVariable extends PromptElement<FileVariableProps, unknown> {
 
 		}
 
-		if (/\.pdf$/i.test(uri.path)) {
-			if (!this.promptEndpoint.supportsVision || !modelSupportsPDFDocuments(this.promptEndpoint)) {
+		if (isPdf) {
+			if (!modelSupportsPDFDocuments(this.promptEndpoint)) {
 				if (this.props.omitReferences) {
 					return;
 				}
@@ -131,7 +135,13 @@ export class FileVariable extends PromptElement<FileVariableProps, unknown> {
 			}
 
 			try {
-				const buffer = await this.fileService.readFile(uri);
+				const maxSizeMB = this.configurationService.getNonExtensionConfig<number>('nika.pdfMaxFileSizeMB') ?? 100;
+				const stat = await this.fileService.stat(uri);
+				if (stat.size > maxSizeMB * 1024 * 1024) {
+					throw new Error(l10n.t('PDF exceeds the configured {0} MB limit.', maxSizeMB));
+				}
+				// This limit bypass is deliberately scoped to validated PDF reads only.
+				const buffer = await this.fileService.readFile(uri, true);
 
 				// Validate PDF magic bytes (%PDF = 0x25 0x50 0x44 0x46)
 				if (buffer.length < 4 || buffer[0] !== 0x25 || buffer[1] !== 0x50 || buffer[2] !== 0x44 || buffer[3] !== 0x46) {
@@ -156,7 +166,8 @@ export class FileVariable extends PromptElement<FileVariableProps, unknown> {
 				if (this.props.omitReferences) {
 					return;
 				}
-				const options = { status: { description: l10n.t("Failed to read PDF file."), kind: ChatResponseReferencePartStatusKind.Omitted } };
+				const description = err instanceof Error ? err.message : l10n.t("Failed to read PDF file.");
+				const options = { status: { description, kind: ChatResponseReferencePartStatusKind.Omitted } };
 				return (
 					<>
 						<references value={[new PromptReference(this.props.variableName ? { variableName: this.props.variableName, value: uri } : uri, undefined, options)]} />

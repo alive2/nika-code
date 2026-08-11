@@ -323,7 +323,8 @@ export function modelCanUseImageURL(model: LanguageModelChat | IChatEndpoint): b
  * The model supports native PDF document processing via document content parts.
  */
 export function modelSupportsPDFDocuments(model: LanguageModelChat | IChatEndpoint): boolean {
-	return isAnthropicFamily(model) || isGpt5PlusFamily(model) || isGpt56(model);
+	const family = model.family.toLowerCase();
+	return isAnthropicFamily(model) || isGpt5PlusFamily(model) || isGpt56(model) || family.includes('deepseek') || family.includes('gemini');
 }
 
 /**

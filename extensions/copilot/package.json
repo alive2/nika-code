@@ -1735,6 +1735,11 @@
         "displayName": "Copilot"
       },
       {
+        "vendor": "nika",
+        "displayName": "%nika.provider.displayName%",
+        "managementCommand": "nika.openSettings"
+      },
+      {
         "vendor": "copilotcli",
         "displayName": "Copilot CLI",
         "when": "false"
@@ -2421,6 +2426,30 @@
       }
     ],
     "commands": [
+      {
+        "command": "nika.openSettings",
+        "title": "%nika.command.openSettings%",
+        "category": "%nika.category%",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "nika.checkForUpdates",
+        "title": "%nika.command.checkForUpdates%",
+        "category": "%nika.category%",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "nika.openLogs",
+        "title": "%nika.command.openLogs%",
+        "category": "%nika.category%",
+        "icon": "$(output)"
+      },
+      {
+        "command": "nika.exportDiagnostics",
+        "title": "%nika.command.exportDiagnostics%",
+        "category": "%nika.category%",
+        "icon": "$(file-export)"
+      },
       {
         "command": "github.copilot.chat.triggerPermissiveSignIn",
         "title": "%github.copilot.command.triggerPermissiveSignIn%"
@@ -3172,6 +3201,157 @@
       }
     ],
     "configuration": [
+      {
+        "title": "%nika.settings.title%",
+        "id": "nika",
+        "properties": {
+          "nika.defaultModel": {
+            "type": "string",
+            "default": "nika/deepseek-v4-flash",
+            "markdownDescription": "%nika.config.defaultModel%"
+          },
+          "nika.outputTokens": {
+            "type": "string",
+            "enum": [
+              "4K",
+              "8K",
+              "16K",
+              "32K",
+              "64K",
+              "128K",
+              "384K"
+            ],
+            "default": "8K",
+            "markdownDescription": "%nika.config.outputTokens%"
+          },
+          "nika.contextWindow": {
+            "type": "string",
+            "enum": [
+              "32K",
+              "64K",
+              "128K",
+              "256K",
+              "512K",
+              "1M"
+            ],
+            "default": "128K",
+            "markdownDescription": "%nika.config.contextWindow%"
+          },
+          "nika.temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2,
+            "default": 0.7,
+            "markdownDescription": "%nika.config.temperature%"
+          },
+          "nika.thinkingEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "high",
+              "max"
+            ],
+            "default": "high",
+            "markdownDescription": "%nika.config.thinkingEffort%"
+          },
+          "nika.visionModel": {
+            "type": "string",
+            "enum": [
+              "gemini-2.5-flash",
+              "gemini-2.5-flash-lite",
+              "gemma4:31b",
+              "vscode"
+            ],
+            "default": "gemini-2.5-flash",
+            "markdownDescription": "%nika.config.visionModel%"
+          },
+          "nika.visionVSCodeModel": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "%nika.config.visionVSCodeModel%"
+          },
+          "nika.ollamaBaseUrl": {
+            "type": "string",
+            "default": "http://localhost:11434",
+            "markdownDescription": "%nika.config.ollamaBaseUrl%"
+          },
+          "nika.pdfMaxFileSizeMB": {
+            "type": "number",
+            "minimum": 1,
+            "default": 100,
+            "markdownDescription": "%nika.config.pdfMaxFileSizeMB%"
+          },
+          "nika.pdfMaxPages": {
+            "type": "number",
+            "minimum": 1,
+            "default": 60,
+            "markdownDescription": "%nika.config.pdfMaxPages%"
+          },
+          "nika.pdfPageNotice": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%nika.config.pdfPageNotice%"
+          },
+          "nika.pdfSparseFallback": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%nika.config.pdfSparseFallback%"
+          },
+          "nika.pdfSparseThreshold": {
+            "type": "number",
+            "minimum": 1,
+            "default": 3000,
+            "markdownDescription": "%nika.config.pdfSparseThreshold%"
+          },
+          "nika.agent.plan": {
+            "type": "string",
+            "default": "nika/deepseek-v4-pro",
+            "markdownDescription": "%nika.config.agent.plan%"
+          },
+          "nika.agent.explore": {
+            "type": "string",
+            "default": "nika/deepseek-v4-flash",
+            "markdownDescription": "%nika.config.agent.explore%"
+          },
+          "nika.agent.utility": {
+            "type": "string",
+            "default": "nika/deepseek-v4-flash",
+            "markdownDescription": "%nika.config.agent.utility%"
+          },
+          "nika.agent.utilitySmall": {
+            "type": "string",
+            "default": "nika/gemini-2.5-flash-lite",
+            "markdownDescription": "%nika.config.agent.utilitySmall%"
+          },
+          "nika.agent.inlineChat": {
+            "type": "string",
+            "default": "nika/deepseek-v4-flash",
+            "markdownDescription": "%nika.config.agent.inlineChat%"
+          },
+          "nika.logLevel": {
+            "type": "string",
+            "enum": [
+              "DEBUG",
+              "INFO",
+              "WARN",
+              "ERROR"
+            ],
+            "default": "INFO",
+            "markdownDescription": "%nika.config.logLevel%"
+          },
+          "nika.releaseCheckEnabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%nika.config.releaseCheckEnabled%"
+          },
+          "nika.selectedModel": {
+            "type": "string",
+            "markdownDescription": "%nika.config.selectedModel%",
+            "deprecationMessage": "%nika.config.selectedModel.deprecated%"
+          }
+        }
+      },
       {
         "title": "GitHub Copilot Chat",
         "id": "stable",
@@ -7094,6 +7274,7 @@
     "lru-cache": "^11.1.0",
     "markdown-it": "^14.2.0",
     "minimatch": "^10.2.1",
+    "pdfjs-dist": "3.11.174",
     "undici": "^7.24.1",
     "vscode-tas-client": "^0.1.84",
     "web-tree-sitter": "^0.23.0"

@@ -42,6 +42,10 @@ const baseNodeBuildOptions = {
 		'sqlite3',
 		'node-pty', // Required by @github/copilot
 		'@github/copilot',
+		// pdfjs-dist optionally uses these only for rendering. Nika performs
+		// text extraction, and PDF.js already guards both requires at runtime.
+		'canvas',
+		'path2d-polyfill',
 		...(isDev ? [] : ['dotenv', 'source-map-support'])
 	],
 	platform: 'node',
