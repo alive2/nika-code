@@ -11,6 +11,7 @@ import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_SECRET, NIKA_RESPONSES_MODEL } from './nikaModels';
 
 type NikaConnection = 'deepseek' | 'gemini' | 'ollama';
+type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf' | 'agents' | 'diagnostics';
 type ConnectionResult = { readonly ok: boolean; readonly message: string; readonly checkedAt: string };
 
 const SETTINGS = new Set([
@@ -90,13 +91,15 @@ export class NikaSettingsEditor extends Disposable {
 
 		if (!this._context.globalState.get<boolean>('nika.firstRunPromptShown')) {
 			await this._context.globalState.update('nika.firstRunPromptShown', true);
-			const open = vscode.l10n.t('Open Nika Settings');
-			const selected = await vscode.window.showInformationMessage(
-				vscode.l10n.t('Set up Nika models with your DeepSeek or Gemini key, or connect to Ollama.'),
-				open,
-			);
-			if (selected === open) {
-				this.open();
+			const [deepseekKey, geminiKey] = await Promise.all([
+				this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
+				this._context.secrets.get(NIKA_GEMINI_SECRET),
+			]);
+			if (!deepseekKey && !geminiKey) {
+				this.open('providers');
+				void vscode.window.showInformationMessage(vscode.l10n.t('Welcome to NikaCode. Nika Settings is open: add and test a DeepSeek key to start chatting. A Gemini key is optional for Gemini and vision features.'));
+			} else {
+				void vscode.window.showInformationMessage(vscode.l10n.t('Nika is ready to use. Open Nika Settings at any time to manage providers, models, vision, and PDF features.'));
 			}
 		}
 
@@ -177,9 +180,12 @@ export class NikaSettingsEditor extends Disposable {
 		}
 	}
 
-	open(): void {
+	open(initialSection?: NikaSettingsSection): void {
 		if (this._panel) {
 			this._panel.reveal(vscode.ViewColumn.Active);
+			if (initialSection) {
+				void this._render(initialSection);
+			}
 			return;
 		}
 		this._panel = vscode.window.createWebviewPanel(
@@ -190,14 +196,14 @@ export class NikaSettingsEditor extends Disposable {
 		);
 		this._register(this._panel.webview.onDidReceiveMessage(message => this._onMessage(message)));
 		this._panel.onDidDispose(() => { this._panel = undefined; });
-		void this._render();
+		void this._render(initialSection ?? 'overview');
 	}
 
-	private async _render(): Promise<void> {
+	private async _render(initialSection: NikaSettingsSection = 'overview'): Promise<void> {
 		if (!this._panel) {
 			return;
 		}
-		const state = await this._state();
+		const state = { ...await this._state(), initialSection };
 		this._panel.webview.html = this._html(this._panel.webview, state);
 	}
 
@@ -510,10 +516,11 @@ input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input
 ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
 </nav></aside><main>
 <section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, vision, and PDF support for NikaCode.')}</p>
+<div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
 <div class="card"><div class="row"><label><strong>${vscode.l10n.t('DeepSeek')}</strong><span class="hint">${vscode.l10n.t('Flash, Pro, and experimental Responses')}</span></label><span data-provider-status="deepseek"></span></div><div class="row"><label><strong>${vscode.l10n.t('Gemini')}</strong><span class="hint">${vscode.l10n.t('Flash and Flash Lite')}</span></label><span data-provider-status="gemini"></span></div><div class="row"><label><strong>${vscode.l10n.t('Ollama')}</strong><span class="hint">${vscode.l10n.t('Gemma 4 31B at the configured host')}</span></label><span data-provider-status="ollama"></span></div></div>
 <div class="card"><div class="row"><label><strong>${vscode.l10n.t('NikaCode version')}</strong></label><span id="app-version"></span></div><div class="row"><label><strong>${vscode.l10n.t('Bundled Copilot version')}</strong></label><span id="extension-version"></span></div></div></section>
-<section id="providers"><h1>${vscode.l10n.t('Providers')}</h1><p class="lead">${vscode.l10n.t('Manage credentials and local provider connections. Saved API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
-${this._secretRow('deepseek', vscode.l10n.t('DeepSeek API key'))}${this._secretRow('gemini', vscode.l10n.t('Gemini API key'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
+<section id="providers"><h1>${vscode.l10n.t('Set up Nika')}</h1><p class="lead">${vscode.l10n.t('Start with DeepSeek: paste the key, select Save, then select Test. Gemini is optional and enables native Gemini chat plus vision features. API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
+${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
 </div></section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
 ${this._selectRow('defaultModel', vscode.l10n.t('Default model for new chats'), [['nika/deepseek-v4-flash','DeepSeek V4 Flash'],['nika/deepseek-v4-pro','DeepSeek V4 Pro'],['nika/deepseek-v4-flash-responses','DeepSeek V4 Flash (Responses)'],['nika/gemini-2.5-flash','Gemini 2.5 Flash'],['nika/gemini-2.5-flash-lite','Gemini 2.5 Flash Lite'],['nika/gemma4:31b','Gemma 4 31B']])}
@@ -529,7 +536,7 @@ const settings=state.settings;document.getElementById('app-version').textContent
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('ollama',true);
 document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);vscode.postMessage({type:'saveSetting',key,value});});});
 function activateSection(id){const button=document.querySelector('nav button[data-section="'+id+'"]');const section=document.getElementById(id);if(!button||!section)return;document.querySelectorAll('nav button,section').forEach(el=>el.classList.remove('active'));button.classList.add('active');section.classList.add('active');const saved=vscode.getState()||{};vscode.setState({...saved,activeSection:id});}
-const restoredSection=(vscode.getState()||{}).activeSection;if(restoredSection)activateSection(restoredSection);document.querySelectorAll('nav button').forEach(button=>button.addEventListener('click',()=>activateSection(button.dataset.section)));
+const restoredSection=(vscode.getState()||{}).activeSection;activateSection(restoredSection||state.initialSection||'overview');document.querySelectorAll('[data-section]').forEach(button=>button.addEventListener('click',()=>activateSection(button.dataset.section)));
 document.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click',()=>vscode.postMessage({type:button.dataset.action})));
 document.querySelectorAll('[data-secret-save]').forEach(button=>button.addEventListener('click',()=>{const provider=button.dataset.secretSave;const input=document.querySelector('[data-secret="'+provider+'"]');vscode.postMessage({type:'saveSecret',provider,value:input.value});input.value='';}));
 document.querySelectorAll('[data-secret-test]').forEach(button=>button.addEventListener('click',()=>vscode.postMessage({type:'testConnection',provider:button.dataset.secretTest})));
@@ -553,8 +560,8 @@ document.querySelectorAll('[data-secret-remove]').forEach(button=>button.addEven
 		return `<div class="row"><label for="${key}"><strong>${label}</strong></label><input id="${key}" data-setting="${key}" type="checkbox"></div>`;
 	}
 
-	private _secretRow(provider: 'deepseek' | 'gemini', label: string): string {
-		return `<div class="row"><label><strong>${label}</strong><span class="hint">${vscode.l10n.t('Stored securely; the saved value is never read back into this page.')}</span><span data-provider-status="${provider}"></span></label><div class="controls"><input type="password" autocomplete="off" data-secret="${provider}" placeholder="${vscode.l10n.t('Enter a new key')}"><button data-secret-save="${provider}">${vscode.l10n.t('Save')}</button><button class="secondary" data-secret-test="${provider}">${vscode.l10n.t('Test')}</button><button class="danger" data-secret-remove="${provider}">${vscode.l10n.t('Remove')}</button></div></div>`;
+	private _secretRow(provider: 'deepseek' | 'gemini', label: string, hint: string): string {
+		return `<div class="row"><label><strong>${label}</strong><span class="hint">${hint} ${vscode.l10n.t('Stored securely; the saved value is never read back into this page.')}</span><span data-provider-status="${provider}"></span></label><div class="controls"><input type="password" autocomplete="off" data-secret="${provider}" placeholder="${vscode.l10n.t('Paste your API key')}"><button data-secret-save="${provider}">${vscode.l10n.t('Save')}</button><button class="secondary" data-secret-test="${provider}">${vscode.l10n.t('Test')}</button><button class="danger" data-secret-remove="${provider}">${vscode.l10n.t('Remove')}</button></div></div>`;
 	}
 
 	private _connectionRow(provider: NikaConnection, label: string): string {
