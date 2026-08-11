@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+	<defs>
+		<linearGradient id="nikaPurple" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0" stop-color="#5e22df"/>
+			<stop offset="1" stop-color="#2b08a5"/>
+		</linearGradient>
+		<linearGradient id="nikaBlue" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0" stop-color="#08c4f7"/>
+			<stop offset="1" stop-color="#0878f4"/>
+		</linearGradient>
+	</defs>
+	<path fill="url(#nikaBlue)" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/>
+	<path fill="url(#nikaPurple)" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/>
+	<path fill="url(#nikaPurple)" d="m710 530 151 91v209L710 932V530Z"/>
+	<path fill="url(#nikaBlue)" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/>
+	<path fill="url(#nikaBlue)" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/>
+	<path fill="url(#nikaPurple)" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/>
+</svg>
