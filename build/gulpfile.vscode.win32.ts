@@ -81,14 +81,18 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
 		const productJson = JSON.parse(fs.readFileSync(originalProductJsonPath, 'utf8'));
 		productJson['target'] = target;
 
+		// NikaCode: use the fork's own version (productVersion) for the installer,
+		// falling back to the upstream VS Code version when not defined.
+		const nikaVersion = product.productVersion ?? pkg.version;
+
 		const definitions: Record<string, unknown> = {
 			NameLong: product.nameLong,
 			NameShort: product.nameShort,
 			DirName: product.win32DirName,
-			Version: pkg.version,
-			RawVersion: pkg.version.replace(/-\w+$/, ''),
+			Version: nikaVersion,
+			RawVersion: nikaVersion.replace(/-\w+$/, ''),
 			Commit: commit,
-			NameVersion: product.win32NameVersion + (target === 'user' ? ' (User)' : ''),
+			NameVersion: product.win32NameVersion + ' ' + nikaVersion + (target === 'user' ? ' (User)' : ''),
 			ExeBasename: product.nameShort,
 			RegValueName: product.win32RegValueName,
 			ShellNameShort: product.win32ShellNameShort,

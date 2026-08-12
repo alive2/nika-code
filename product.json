@@ -1,6 +1,7 @@
 {
 	"nameShort": "NikaCode",
 	"nameLong": "NikaCode",
+	"productVersion": "1.0.0",
 	"defaultColorTheme": "Default High Contrast",
 	"applicationName": "nika-code",
 	"dataFolderName": ".nika-code",
