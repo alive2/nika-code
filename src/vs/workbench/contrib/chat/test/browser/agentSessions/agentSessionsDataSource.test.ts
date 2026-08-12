@@ -95,10 +95,11 @@ suite('AgentSessionsDataSource', () => {
 		endTime: number;
 		metadata: { [key: string]: unknown };
 		badge: string;
+		providerType: string;
 	}> = {}): IAgentSession {
 		const now = Date.now();
 		return {
-			providerType: 'test',
+			providerType: overrides.providerType ?? 'test',
 			providerLabel: 'Test',
 			resource: URI.parse(`test://session/${overrides.id ?? 'default'}`),
 			status: overrides.status ?? ChatSessionStatus.Completed,
@@ -1222,6 +1223,59 @@ suite('AgentSessionsDataSource', () => {
 				badge: '$(repo) vscode',
 			});
 			assert.strictEqual(getRepositoryName(session), 'vscode');
+		});
+	});
+
+	suite('extraExclude', () => {
+
+		test('hides sessions matched by the extra predicate', () => {
+			const sessions = [
+				createMockSession({ id: 'copilot', providerType: 'local' }),
+				createMockSession({ id: 'codex', providerType: 'openai-codex' }),
+			];
+
+			const filter = createMockFilter({ groupBy: undefined });
+			const sorter = createMockSorter();
+			const dataSource = disposables.add(new AgentSessionsDataSource(filter, sorter, undefined, session => session.providerType === 'openai-codex'));
+
+			const result = Array.from(dataSource.getChildren(createMockModel(sessions)));
+
+			assert.deepStrictEqual(result.map(s => isAgentSession(s) ? s.label : undefined), ['Session copilot']);
+		});
+
+		test('keeps all sessions when no extra predicate is provided', () => {
+			const sessions = [
+				createMockSession({ id: 'copilot', providerType: 'local' }),
+				createMockSession({ id: 'codex', providerType: 'openai-codex' }),
+			];
+
+			const filter = createMockFilter({ groupBy: undefined });
+			const sorter = createMockSorter();
+			const dataSource = disposables.add(new AgentSessionsDataSource(filter, sorter));
+
+			const result = Array.from(dataSource.getChildren(createMockModel(sessions)));
+
+			assert.deepStrictEqual(result.map(s => isAgentSession(s) ? s.label : undefined), ['Session copilot', 'Session codex']);
+		});
+
+		test('extra predicate composes with the regular filter', () => {
+			const sessions = [
+				createMockSession({ id: 'copilot', providerType: 'local' }),
+				createMockSession({ id: 'codex', providerType: 'openai-codex' }),
+				createMockSession({ id: 'archived-copilot', providerType: 'local', isArchived: true }),
+			];
+
+			const filter = createMockFilter({
+				groupBy: undefined,
+				exclude: session => session.isArchived(),
+			});
+			const sorter = createMockSorter();
+			const dataSource = disposables.add(new AgentSessionsDataSource(filter, sorter, undefined, session => session.providerType === 'openai-codex'));
+
+			const result = Array.from(dataSource.getChildren(createMockModel(sessions)));
+
+			// Archived copilot session is hidden by the filter; codex by the extra predicate
+			assert.deepStrictEqual(result.map(s => isAgentSession(s) ? s.label : undefined), ['Session copilot']);
 		});
 	});
 });

@@ -364,6 +364,15 @@ export namespace SessionType {
 }
 
 /**
+ * Controls whether the sessions lists (both the Agents window and the GitHub
+ * Copilot Chat sessions view) only show sessions created with the Copilot
+ * Chat provider (which hosts the Nika BYOK models) scoped to the current
+ * workspace folder — hiding sessions from other apps (e.g. Codex) and from
+ * other workspaces.
+ */
+export const SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING = 'sessions.list.showOnlyNikaAndCurrentWorkspace';
+
+/**
  * Returns whether the given session type is a local agent host target.
  */
 export function isLocalAgentHostTarget(target: string): boolean {

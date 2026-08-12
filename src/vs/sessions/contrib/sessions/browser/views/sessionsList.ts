@@ -47,6 +47,7 @@ import { ChatSessionArchiveActionWording, ChatSessionArchiveActionWordingSetting
 import { getSessionStatusMessage, getSessionWorkspaceKind, GITHUB_REMOTE_FILE_SCHEME, ISession, ISessionWorkspace, SessionStatus, SessionWorkspaceKind } from '../../../../services/sessions/common/session.js';
 import { AgentSessionApprovalModel, agentSessionApprovalId, IAgentSessionApprovalInfo } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentSessionApprovalModel.js';
 import { IVoicePlaybackService } from '../../../../../workbench/contrib/chat/common/voicePlaybackService.js';
+import { SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING } from '../../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { Button } from '../../../../../base/browser/ui/button/button.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { Action, ActionRunner, IAction, Separator, SubmenuAction } from '../../../../../base/common/actions.js';
@@ -102,14 +103,6 @@ export const SessionGroupToolbarMenuId = new MenuId('SessionGroupToolbar');
 
 /** Controls whether the empty default Chats group is shown in the sessions list. */
 export const SESSIONS_LIST_SHOW_EMPTY_DEFAULT_GROUPS_SETTING = 'sessions.list.showEmptyDefaultGroups';
-
-/**
- * Controls whether the sessions list only shows sessions created with the
- * Copilot Chat provider (which hosts the Nika BYOK models) scoped to the
- * current window's workspace folder — hiding sessions from other apps (e.g.
- * Codex) and from other workspaces.
- */
-export const SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING = 'sessions.list.showOnlyNikaAndCurrentWorkspace';
 
 /**
  * ID of the Copilot Chat sessions provider. Defined locally (rather than

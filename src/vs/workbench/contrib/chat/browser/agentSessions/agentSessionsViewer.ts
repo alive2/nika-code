@@ -1121,6 +1121,12 @@ export class AgentSessionsDataSource extends Disposable implements IAsyncDataSou
 		private readonly filter: IAgentSessionsFilter | undefined,
 		private readonly sorter: ITreeSorter<IAgentSession>,
 		private readonly repositoryGroupLimit?: number,
+		/**
+		 * Additional predicate that hides sessions from the list regardless of
+		 * the user-configurable filter. Used by the Nika fork to scope the
+		 * sessions list to Copilot Chat sessions in the current workspace.
+		 */
+		private readonly extraExclude?: (session: IAgentSession) => boolean,
 	) {
 		super();
 
@@ -1171,7 +1177,7 @@ export class AgentSessionsDataSource extends Disposable implements IAsyncDataSou
 		if (isAgentSessionsModel(element)) {
 
 			// Apply filter if configured
-			let filteredSessions = element.sessions.filter(session => !this.filter?.exclude(session));
+			let filteredSessions = element.sessions.filter(session => !this.filter?.exclude(session) && !this.extraExclude?.(session));
 
 			// Apply sorter unless we group into sections or we are to limit results
 			const limitResultsCount = this.filter?.limitResults?.();

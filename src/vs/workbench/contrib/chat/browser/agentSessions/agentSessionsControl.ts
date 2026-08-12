@@ -18,7 +18,7 @@ import { AgentSessionsGrouping, AgentSessionsSorting } from './agentSessionsFilt
 import { AgentSessionApprovalModel } from './agentSessionApprovalModel.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { IMenuService, MenuId } from '../../../../../platform/actions/common/actions.js';
-import { IChatSessionsService } from '../../common/chatSessionsService.js';
+import { IChatSessionsService, SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING } from '../../common/chatSessionsService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ACTION_ID_NEW_CHAT } from '../actions/chatActions.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
@@ -33,8 +33,9 @@ import { IAgentSessionsService } from './agentSessionsService.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IListStyles } from '../../../../../base/browser/ui/list/listWidget.js';
 import { IStyleOverride } from '../../../../../platform/theme/browser/defaultStyles.js';
-import { IAgentSessionsControl } from './agentSessions.js';
+import { IAgentSessionsControl, isFirstPartyAgentSessionProvider } from './agentSessions.js';
 import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
+import { isWindows } from '../../../../../base/common/platform.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ISessionOpenOptions, openSession } from './agentSessionsOpener.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
@@ -44,6 +45,7 @@ import { IChatWidget } from '../chat.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { LayoutSettings } from '../../../../services/layout/browser/layoutService.js';
 
 export interface IAgentSessionsControlOptions {
@@ -124,6 +126,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		@IStorageService private readonly storageService: IStorageService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 
@@ -140,6 +143,37 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 	private registerListeners(): void {
 		this._register(this.editorService.onDidActiveEditorChange(() => this.revealAndFocusActiveEditorSession()));
+
+		this._register(this.configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING) && this.visible) {
+				this.update();
+			}
+		}));
+	}
+
+	/**
+	 * Returns whether the session should be hidden from the sessions list by
+	 * the Nika fork's `sessions.list.showOnlyNikaAndCurrentWorkspace` setting:
+	 * only Copilot Chat sessions (which host the Nika BYOK models) scoped to
+	 * the current workspace are kept — sessions from other apps (e.g. Codex)
+	 * and from other workspaces are hidden. When the setting is off, or no
+	 * workspace folder is available, only the provider dimension applies.
+	 */
+	private isSessionExcludedByNikaFilter(session: IAgentSession): boolean {
+		if (!this.configurationService.getValue<boolean>(SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING)) {
+			return false;
+		}
+
+		if (!isFirstPartyAgentSessionProvider(session.providerType)) {
+			return true;
+		}
+
+		const workspaceFolders = this.workspaceContextService.getWorkspace().folders.map(folder => folder.uri);
+		if (workspaceFolders.length === 0) {
+			return false;
+		}
+
+		return !agentSessionMatchesWorkspaceFolder(session, workspaceFolders);
 	}
 
 	private revealAndFocusActiveEditorSession(): void {
@@ -275,7 +309,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			pauseSessionUpdates: () => this.pauseUpdates(),
 		}, approvalModel, activeSessionResource));
 		const compact = this.options.compactShowMore;
-		const sessionDataSource = this.sessionsDataSource = this._register(new AgentSessionsDataSource(this.options.filter, sorter, this.options.repositoryGroupLimit));
+		const sessionDataSource = this.sessionsDataSource = this._register(new AgentSessionsDataSource(this.options.filter, sorter, this.options.repositoryGroupLimit, session => this.isSessionExcludedByNikaFilter(session)));
 		const listDelegate = new AgentSessionsListDelegate(
 			approvalModel,
 			this.options.compactShowMore,
@@ -914,4 +948,37 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 		return true;
 	}
+}
+
+/**
+ * Whether a session's working directory / repository matches any of the given
+ * workspace folders (compared by filesystem path, case-insensitively on
+ * Windows). Used by the Nika fork to scope the sessions list to the current
+ * workspace.
+ */
+function agentSessionMatchesWorkspaceFolder(session: IAgentSession, workspaceFolders: readonly URI[]): boolean {
+	const metadata = session.metadata;
+	if (!metadata) {
+		return false;
+	}
+
+	const candidatePaths: (string | undefined)[] = [
+		metadata.workingDirectoryPath,
+		metadata.repositoryPath,
+		metadata.worktreePath,
+	];
+
+	for (const folder of workspaceFolders) {
+		const folderPath = isWindows ? folder.fsPath.toLowerCase() : folder.fsPath;
+		for (const candidate of candidatePaths) {
+			if (typeof candidate === 'string') {
+				const candidatePath = isWindows ? candidate.toLowerCase() : candidate;
+				if (candidatePath === folderPath) {
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
 }
