@@ -9,12 +9,40 @@ import { IChatMLFetcher } from '../../../../platform/chat/common/chatMLFetcher';
 import { StaticChatMLFetcher } from '../../../../platform/chat/test/common/staticChatMLFetcher';
 import { MockEndpoint } from '../../../../platform/endpoint/test/node/mockEndpoint';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
-import { LanguageModelChatMessageRole, LanguageModelTextPart, LanguageModelThinkingPart } from '../../../../vscodeTypes';
+import { LanguageModelChatMessageRole, LanguageModelDataPart, LanguageModelTextPart, LanguageModelThinkingPart } from '../../../../vscodeTypes';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { renderPromptElement } from '../../../prompts/node/base/promptRenderer';
 import { LanguageModelAccessPrompt } from '../languageModelAccessPrompt';
 
 describe('LanguageModelAccessPrompt', () => {
+	test('preserves attached PDFs as document parts for BYOK providers', async () => {
+		const services = createExtensionUnitTestingServices();
+		services.define(IChatMLFetcher, new StaticChatMLFetcher([]));
+		const accessor = services.createTestingAccessor();
+		const endpoint = accessor.get(IInstantiationService).createInstance(MockEndpoint, 'deepseek-v4-flash');
+		const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37]);
+		const message = {
+			role: LanguageModelChatMessageRole.User,
+			content: [new LanguageModelDataPart(pdf, 'application/pdf')],
+			name: undefined,
+		};
+
+		const { messages } = await renderPromptElement(
+			accessor.get(IInstantiationService),
+			endpoint,
+			LanguageModelAccessPrompt,
+			{ noSafety: true, messages: [message] },
+		);
+
+		expect(messages).toContainEqual({
+			role: Raw.ChatRole.User,
+			content: [{
+				type: Raw.ChatCompletionContentPartKind.Document,
+				documentData: { data: Buffer.from(pdf).toString('base64'), mediaType: 'application/pdf' },
+			}],
+		});
+	});
+
 	test('preserves all assistant text and groups thinking by id', async () => {
 		const services = createExtensionUnitTestingServices();
 		services.define(IChatMLFetcher, new StaticChatMLFetcher([]));

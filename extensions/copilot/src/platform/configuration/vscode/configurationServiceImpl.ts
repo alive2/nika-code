@@ -324,6 +324,9 @@ export class ConfigurationServiceImpl extends AbstractConfigurationService {
 			const propertyGroups = config.map((c) => c.properties);
 			const extensionConfigProps = Object.assign({}, ...propertyGroups);
 			for (const key in extensionConfigProps) {
+				if (!key.startsWith(`${CopilotConfigPrefix}.`)) {
+					continue;
+				}
 				const localKey = key.replace(`${CopilotConfigPrefix}.`, '');
 				const value = localKey.split('.').reduce((o, i) => o[i], this.config);
 

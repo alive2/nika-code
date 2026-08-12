@@ -5,6 +5,7 @@
 
 import type { Attachment } from '@github/copilot/sdk';
 import { afterEach, beforeEach, expect, suite, test, vi } from 'vitest';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configurationService';
 import { IFileSystemService } from '../../../../../platform/filesystem/common/fileSystemService';
 import { FileType } from '../../../../../platform/filesystem/common/fileTypes';
 import { MockFileSystemService } from '../../../../../platform/filesystem/node/test/mockFileSystemService';
@@ -55,7 +56,7 @@ suite('CopilotCLI Generate & parse prompts', () => {
 				if (workspaceType === 'workspace' || workspaceType === 'worktree') {
 					workspaceService.getWorkspaceFolders().push(URI.file('/workspace'));
 				}
-				resolver = new CopilotCLIPromptResolver(imageSupport, logService, fileSystem, workspaceService, services.seal(), accessor.get(IIgnoreService), new MockSkillLocations(), new MockExtensionContext() as unknown as IVSCodeExtensionContext);
+				resolver = new CopilotCLIPromptResolver(imageSupport, logService, fileSystem, workspaceService, services.seal(), accessor.get(IIgnoreService), new MockSkillLocations(), new MockExtensionContext() as unknown as IVSCodeExtensionContext, accessor.get(IConfigurationService));
 			});
 			afterEach(() => {
 				disposables.clear();
@@ -548,7 +549,7 @@ suite('multi-workspace with additionalWorkspaces', () => {
 		};
 		workspaceService.getWorkspaceFolders().push(URI.file('/workspace'));
 		workspaceService.getWorkspaceFolders().push(URI.file('/workspace2'));
-		resolver = new CopilotCLIPromptResolver(imageSupport, logService, fileSystem, workspaceService, services.seal(), accessor.get(IIgnoreService), new MockSkillLocations(), new MockExtensionContext() as unknown as IVSCodeExtensionContext);
+		resolver = new CopilotCLIPromptResolver(imageSupport, logService, fileSystem, workspaceService, services.seal(), accessor.get(IIgnoreService), new MockSkillLocations(), new MockExtensionContext() as unknown as IVSCodeExtensionContext, accessor.get(IConfigurationService));
 	});
 
 	afterEach(() => {

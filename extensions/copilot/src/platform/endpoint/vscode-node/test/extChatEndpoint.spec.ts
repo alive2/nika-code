@@ -180,6 +180,25 @@ describe('ExtensionContributedChatEndpoint', () => {
 		});
 	});
 
+	it('preserves document content parts as binary data for the provider', () => {
+		const base64Pdf = Buffer.from('%PDF-1.4 fake bytes').toString('base64');
+		const converted = convertToApiChatMessage([{
+			role: Raw.ChatRole.User,
+			content: [
+				{ type: Raw.ChatCompletionContentPartKind.Text, text: 'what is in this?' },
+				{
+					type: Raw.ChatCompletionContentPartKind.Document,
+					documentData: { data: base64Pdf, mediaType: 'application/pdf' },
+				},
+			],
+		}]);
+
+		const dataPart = converted[0].content.find(part => part instanceof vscode.LanguageModelDataPart) as vscode.LanguageModelDataPart;
+		expect(dataPart).toBeDefined();
+		expect(dataPart.mimeType).toBe('application/pdf');
+		expect(Buffer.from(dataPart.data).toString('utf8')).toBe('%PDF-1.4 fake bytes');
+	});
+
 	it('gates the cache_control sentinel on the model vendor end-to-end', async () => {
 		const capture = async (vendor: string) => {
 			let capturedMessages: readonly vscode.LanguageModelChatMessage[] | undefined;

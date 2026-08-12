@@ -118,7 +118,10 @@ export function getNikaModelCapabilities(id: NikaModelId, limits: NikaTokenLimit
 			maxInputTokens: limits.maxInputTokens,
 			maxOutputTokens: limits.maxOutputTokens,
 			toolCalling: true,
-			vision: false,
+			// Nika preprocesses images and PDFs before forwarding DeepSeek's
+			// text-only request. Advertise media input here so Copilot preserves
+			// those attachments long enough for Nika to perform that conversion.
+			vision: true,
 			thinking: true,
 			supportsReasoningEffort: ['none', 'low', 'high', 'max'],
 			defaultReasoningEffort: 'high',

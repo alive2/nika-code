@@ -3,11 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { BasePromptElementProps, PromptElement, PromptElementProps, PromptPiece, PromptReference, PromptSizing, TextChunk, UserMessage } from '@vscode/prompt-tsx';
+import * as l10n from '@vscode/l10n';
+import { BasePromptElementProps, ChatResponseReferencePartStatusKind, Document, PromptElement, PromptElementProps, PromptPiece, PromptReference, PromptSizing, TextChunk, UserMessage } from '@vscode/prompt-tsx';
 import type { Diagnostic, LanguageModelToolInformation } from 'vscode';
 import { ChatFetchResponseType, ChatLocation } from '../../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { IEndpointProvider } from '../../../../platform/endpoint/common/endpointProvider';
+import { modelSupportsPDFDocuments } from '../../../../platform/endpoint/common/chatModelCapabilities';
 import { IFileSystemService } from '../../../../platform/filesystem/common/fileSystemService';
 import { FileType } from '../../../../platform/filesystem/common/fileTypes';
 import { ILogService } from '../../../../platform/log/common/logService';
@@ -257,12 +259,73 @@ export async function renderChatVariables(chatVariables: ChatVariablesCollection
 				</Tag>
 			);
 		} else if (variableValue instanceof ChatReferenceBinaryData) {
-			elements.push(<Image variableName={variableName} variableValue={await variableValue.data()} reference={variableValue.reference} omitReferences={omitReferences}></Image>);
+			if (variableValue.mimeType === 'application/pdf') {
+				elements.push(<BinaryPdf variableName={variableName} variableValue={await variableValue.data()} reference={variableValue.reference} omitReferences={omitReferences} />);
+			} else {
+				elements.push(<Image variableName={variableName} variableValue={await variableValue.data()} reference={variableValue.reference} omitReferences={omitReferences}></Image>);
+			}
 		} else if (typeof ChatReferenceDiagnostic !== 'undefined' && variableValue instanceof ChatReferenceDiagnostic) { // check undefined to avoid breaking old Insiders versions
 			elements.push(<DiagnosticVariable diagnostics={variableValue.diagnostics} useCookbook={useFixCookbook ?? false} />);
 		}
 	}
 	return elements;
+}
+
+interface BinaryPdfProps extends BasePromptElementProps {
+	readonly variableName: string;
+	readonly variableValue: Uint8Array;
+	readonly reference?: Uri;
+	readonly omitReferences?: boolean;
+}
+
+/**
+ * Preserves an uploaded PDF as a document content part. Chat attachments that
+ * originate outside the workspace arrive as ChatReferenceBinaryData, rather
+ * than a URI, so they cannot be handled by FileVariable.
+ */
+class BinaryPdf extends PromptElement<BinaryPdfProps, void> {
+	constructor(
+		props: BinaryPdfProps,
+		@IPromptEndpoint private readonly promptEndpoint: IPromptEndpoint,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+	) {
+		super(props);
+	}
+
+	override render(_state: void, _sizing: PromptSizing): PromptPiece<any, any> | undefined {
+		const fillerUri = this.props.reference ?? Uri.parse('Attached PDF');
+		if (!modelSupportsPDFDocuments(this.promptEndpoint)) {
+			if (this.props.omitReferences) {
+				return undefined;
+			}
+			const options = { status: { description: l10n.t("{0} does not support PDF documents.", this.promptEndpoint.model), kind: ChatResponseReferencePartStatusKind.Omitted } };
+			return <references value={[new PromptReference(this.props.variableName ? { variableName: this.props.variableName, value: fillerUri } : fillerUri, undefined, options)]} />;
+		}
+
+		const maxSizeMB = this.configurationService.getNonExtensionConfig<number>('nika.pdfMaxFileSizeMB') ?? 100;
+		if (this.props.variableValue.byteLength > maxSizeMB * 1024 * 1024) {
+			if (this.props.omitReferences) {
+				return undefined;
+			}
+			const options = { status: { description: l10n.t("PDF exceeds the configured {0} MB limit.", maxSizeMB), kind: ChatResponseReferencePartStatusKind.Omitted } };
+			return <references value={[new PromptReference(this.props.variableName ? { variableName: this.props.variableName, value: fillerUri } : fillerUri, undefined, options)]} />;
+		}
+
+		if (this.props.variableValue.length < 4 || this.props.variableValue[0] !== 0x25 || this.props.variableValue[1] !== 0x50 || this.props.variableValue[2] !== 0x44 || this.props.variableValue[3] !== 0x46) {
+			if (this.props.omitReferences) {
+				return undefined;
+			}
+			const options = { status: { description: l10n.t("File is not a valid PDF."), kind: ChatResponseReferencePartStatusKind.Omitted } };
+			return <references value={[new PromptReference(this.props.variableName ? { variableName: this.props.variableName, value: fillerUri } : fillerUri, undefined, options)]} />;
+		}
+
+		return (
+			<UserMessage priority={0}>
+				<Document data={Buffer.from(this.props.variableValue).toString('base64')} mediaType='application/pdf' />
+				{!this.props.omitReferences && <references value={[new PromptReference(this.props.variableName ? { variableName: this.props.variableName, value: fillerUri } : fillerUri, undefined)]} />}
+			</UserMessage>
+		);
+	}
 }
 
 interface IDiagnosticVariableProps extends BasePromptElementProps {

@@ -366,6 +366,11 @@ export function convertToApiChatMessage(messages: Raw.ChatMessage[], options: Co
 					// Not a base64 image
 					continue;
 				}
+			} else if (contentPart.type === Raw.ChatCompletionContentPartKind.Document) {
+				// Preserve document content parts (e.g. attached PDFs) as binary
+				// data so the provider (e.g. Nika) can extract or forward them
+				// instead of receiving an attachment-free turn.
+				apiContent.push(new vscode.LanguageModelDataPart(Buffer.from(contentPart.documentData.data, 'base64'), contentPart.documentData.mediaType));
 			} else if (contentPart.type === Raw.ChatCompletionContentPartKind.CacheBreakpoint) {
 				if (options.emitCacheBreakpoints) {
 					apiContent.push(new vscode.LanguageModelDataPart(new TextEncoder().encode('ephemeral'), CustomDataPartMimeTypes.CacheControl));

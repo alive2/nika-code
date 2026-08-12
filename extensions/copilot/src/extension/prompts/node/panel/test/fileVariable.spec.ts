@@ -198,7 +198,7 @@ describe('FileVariable PDF support', () => {
 		expect(hasDocumentContentPart(messages)).toBe(false);
 	});
 
-	test('shows omitted reference for model without vision', async () => {
+	test('renders PDF document for PDF-supporting family even without vision', async () => {
 		const { testingServiceCollection, mockEndpoint } = createPdfTestServices({ family: 'claude-3.5-sonnet', supportsVision: false });
 		const mockFs = new MockFileSystemService();
 		const pdfUri = Uri.parse('file:///workspace/doc.pdf');
@@ -216,8 +216,10 @@ describe('FileVariable PDF support', () => {
 			});
 		const { messages } = await renderer.render();
 
-		// Model without vision should not produce a Document content part
-		expect(hasDocumentContentPart(messages)).toBe(false);
+		// PDF support is family-based (Nika preprocesses attachments before
+		// text-only endpoints), so a vision-less model in a PDF-supporting
+		// family still receives the document content part.
+		expect(hasDocumentContentPart(messages)).toBe(true);
 	});
 
 	test('shows omitted reference for invalid PDF (bad magic bytes)', async () => {

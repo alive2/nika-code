@@ -35,8 +35,8 @@ describe('modelSupportsPDFDocuments', () => {
 		expect(modelSupportsPDFDocuments(fakeModel('gpt-5.1'))).toBe(true);
 	});
 
-	test('returns false for other families', () => {
-		expect(modelSupportsPDFDocuments(fakeModel('gemini-2.0-flash'))).toBe(false);
+	test('returns true for Nika-preprocessed gemini, false for unsupported families', () => {
+		expect(modelSupportsPDFDocuments(fakeModel('gemini-2.0-flash'))).toBe(true);
 		expect(modelSupportsPDFDocuments(fakeModel('o4-mini'))).toBe(false);
 	});
 });

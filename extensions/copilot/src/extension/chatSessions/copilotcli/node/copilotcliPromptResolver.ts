@@ -5,6 +5,7 @@
 
 import type { Attachment } from '@github/copilot/sdk';
 import type * as vscode from 'vscode';
+import { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { IFileSystemService } from '../../../../platform/filesystem/common/fileSystemService';
 import { IIgnoreService } from '../../../../platform/ignore/common/ignoreService';
 import { ILogService } from '../../../../platform/log/common/logService';
@@ -19,6 +20,7 @@ import { URI } from '../../../../util/vs/base/common/uri';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { ChatReferenceBinaryData, ChatReferenceDiagnostic, FileType, Location } from '../../../../vscodeTypes';
 import { ChatVariablesCollection, isCustomizationsIndex, isInstructionFile, isPromptFile } from '../../../prompt/common/chatVariablesCollection';
+import { detectPdfPageRange, extractPdfText } from '../../../byok/node/nikaPdf';
 import { generateUserPrompt } from '../../../prompts/node/agent/copilotCLIPrompt';
 import { getWorkingDirectory, isIsolationEnabled, IWorkspaceInfo } from '../../common/workspaceInfo';
 import { ICopilotCLIImageSupport, isImageMimeType } from './copilotCLIImageSupport';
@@ -36,6 +38,7 @@ export class CopilotCLIPromptResolver {
 		@IIgnoreService private readonly ignoreService: IIgnoreService,
 		@ICopilotCLISkills private readonly skillsService: ICopilotCLISkills,
 		@IVSCodeExtensionContext private readonly extensionContext: IVSCodeExtensionContext,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) { }
 
 	/**
@@ -45,11 +48,14 @@ export class CopilotCLIPromptResolver {
 	public async resolvePrompt(request: vscode.ChatRequest, prompt: string | undefined, additionalReferences: vscode.ChatPromptReference[], workspaceInfo: IWorkspaceInfo, additionalWorkspaces: IWorkspaceInfo[], token: vscode.CancellationToken): Promise<{ prompt: string; attachments: Attachment[]; references: vscode.ChatPromptReference[] }> {
 		const allReferences = new ChatVariablesCollection(request.references.concat(additionalReferences.filter(ref => !request.references.includes(ref))));
 		prompt = prompt ?? request.prompt;
-		const [variables, attachments] = await this.constructChatVariablesAndAttachments(allReferences, workspaceInfo, additionalWorkspaces, token);
+		const [variables, attachments, pdfPromptParts] = await this.constructChatVariablesAndAttachments(allReferences, workspaceInfo, additionalWorkspaces, prompt, token);
 		if (token.isCancellationRequested) {
 			return { prompt, attachments: [], references: [] };
 		}
 		prompt = await raceCancellation(generateUserPrompt(request, prompt, variables, this.instantiationService), token);
+		if (pdfPromptParts.length > 0) {
+			prompt = `${prompt ?? ''}\n\n${pdfPromptParts.join('\n\n')}`;
+		}
 		const references = Array.from(variables).map(v => v.reference);
 		return { prompt: prompt ?? '', attachments, references };
 	}
@@ -71,7 +77,7 @@ export class CopilotCLIPromptResolver {
 		return map;
 	}
 
-	private async constructChatVariablesAndAttachments(variables: ChatVariablesCollection, workspaceInfo: IWorkspaceInfo, additionalWorkspaces: IWorkspaceInfo[], token: vscode.CancellationToken): Promise<[variables: ChatVariablesCollection, Attachment[]]> {
+	private async constructChatVariablesAndAttachments(variables: ChatVariablesCollection, workspaceInfo: IWorkspaceInfo, additionalWorkspaces: IWorkspaceInfo[], pdfPageRequest: string, token: vscode.CancellationToken): Promise<[variables: ChatVariablesCollection, Attachment[], string[]]> {
 		const validReferences: vscode.ChatPromptReference[] = [];
 		const fileFolderReferences: vscode.ChatPromptReference[] = [];
 		const builtinSlashCommandReferences: vscode.ChatPromptReference[] = [];
@@ -146,7 +152,7 @@ export class CopilotCLIPromptResolver {
 			validReferences.push(variableRef);
 		}));
 
-		const [attachments, imageAttachments] = await this.constructFileOrFolderAttachments(fileFolderReferences, token);
+		const [attachments, imageAttachments, pdfPromptParts] = await this.constructFileOrFolderAttachments(fileFolderReferences, pdfPageRequest, token);
 		// Re-add the images after we've copied them to the image store.
 		imageAttachments.forEach(img => {
 			if (img.type === 'file') {
@@ -180,15 +186,38 @@ export class CopilotCLIPromptResolver {
 		}
 
 		variables = new ChatVariablesCollection(validReferences);
-		return [variables, attachments];
+		return [variables, attachments, pdfPromptParts];
 	}
 
 
-	private async constructFileOrFolderAttachments(fileOrFolderReferences: vscode.ChatPromptReference[], token: vscode.CancellationToken): Promise<[Attachment[], image: Attachment[]]> {
+	private async constructFileOrFolderAttachments(fileOrFolderReferences: vscode.ChatPromptReference[], pdfPageRequest: string, token: vscode.CancellationToken): Promise<[Attachment[], image: Attachment[], pdfPromptParts: string[]]> {
 		const attachments: Attachment[] = [];
 		const images: Attachment[] = [];
+		const pdfPromptParts: string[] = [];
 		await Promise.all(fileOrFolderReferences.map(async ref => {
 			if (ref.value instanceof ChatReferenceBinaryData) {
+				if (ref.value.mimeType === 'application/pdf') {
+					try {
+						const data = await raceCancellation(ref.value.data(), token);
+						if (!isPdfData(data)) {
+							this.logService.error('[CopilotCLISession] Ignoring PDF attachment without PDF magic bytes');
+							return;
+						}
+						if (!this.isAllowedPdfSize(data.byteLength)) {
+							return;
+						}
+						pdfPromptParts.push(await this.pdfToPromptText(data, ref.name ?? 'attachment.pdf', pdfPageRequest));
+						attachments.push({
+							type: 'blob',
+							displayName: ref.name,
+							mimeType: 'application/pdf',
+							data: Buffer.from(data).toString('base64'),
+						});
+					} catch (error) {
+						this.logService.error(`[CopilotCLISession] Failed to attach PDF data: ${error}`);
+					}
+					return;
+				}
 				if (!isImageMimeType(ref.value.mimeType)) {
 					return;
 				}
@@ -263,6 +292,24 @@ export class CopilotCLIPromptResolver {
 					this.logService.error(`[CopilotCLISession] Ignoring attachment as it's not a file/directory (${uri.fsPath})`);
 					return;
 				}
+				if (type === 'file' && isPdfUri(uri)) {
+					const data = await raceCancellation(this.fileSystemService.readFile(uri, true), token);
+					if (!isPdfData(data)) {
+						this.logService.error(`[CopilotCLISession] Ignoring PDF attachment without PDF magic bytes (${uri.fsPath})`);
+						return;
+					}
+					if (!this.isAllowedPdfSize(data.byteLength)) {
+						return;
+					}
+					pdfPromptParts.push(await this.pdfToPromptText(data, ref.name || path.basename(uri.fsPath), pdfPageRequest));
+					attachments.push({
+						type: 'blob',
+						displayName: ref.name || path.basename(uri.fsPath),
+						mimeType: 'application/pdf',
+						data: Buffer.from(data).toString('base64'),
+					});
+					return;
+				}
 				attachments.push({
 					type,
 					displayName: ref.name || path.basename(uri.fsPath),
@@ -273,7 +320,28 @@ export class CopilotCLIPromptResolver {
 			}
 		}));
 
-		return [attachments, images];
+		return [attachments, images, pdfPromptParts];
+	}
+
+	private isAllowedPdfSize(byteLength: number): boolean {
+		const maxSizeMB = this.configurationService.getNonExtensionConfig<number>('nika.pdfMaxFileSizeMB') ?? 100;
+		if (byteLength <= maxSizeMB * 1024 * 1024) {
+			return true;
+		}
+		this.logService.error(`[CopilotCLISession] PDF attachment exceeds the configured ${maxSizeMB} MB limit`);
+		return false;
+	}
+
+	private async pdfToPromptText(data: Uint8Array, displayName: string, pageRequest: string): Promise<string> {
+		const configuredMaxPages = this.configurationService.getNonExtensionConfig<number>('nika.pdfMaxPages') ?? 60;
+		const pageRange = detectPdfPageRange(pageRequest);
+		const result = await extractPdfText(data, { pageRange, maxPages: pageRange ? undefined : configuredMaxPages });
+		const range = pageRange ? ` pages ${pageRange.start}-${pageRange.end}` : '';
+		const truncation = result.truncated
+			? `\n[Only the first ${result.pagesIncluded} of ${result.totalPages} pages were included. Ask for a page range to inspect more.]`
+			: '';
+		const content = result.text || '[No extractable text was found in this PDF.]';
+		return `[Attached PDF content: ${displayName}${range}\n${content}${truncation}\n]`;
 	}
 
 	private async translateWorkspaceRefToWorkingDirectoryRef(ref: vscode.ChatPromptReference, workspaceInfo: IWorkspaceInfo, additionalWorkspaces: IWorkspaceInfo[], folderToWorktreeMap: ResourceMap<vscode.Uri>, token: vscode.CancellationToken): Promise<vscode.ChatPromptReference> {
@@ -345,6 +413,14 @@ export class CopilotCLIPromptResolver {
 			}
 		}
 	}
+}
+
+function isPdfUri(uri: URI): boolean {
+	return uri.path.toLowerCase().endsWith('.pdf');
+}
+
+function isPdfData(data: Uint8Array): boolean {
+	return data.byteLength >= 4 && data[0] === 0x25 && data[1] === 0x50 && data[2] === 0x44 && data[3] === 0x46;
 }
 
 /**

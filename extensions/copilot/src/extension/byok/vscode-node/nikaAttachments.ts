@@ -34,6 +34,10 @@ export class NikaAttachmentProcessor {
 	) { }
 
 	async process(messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, token: vscode.CancellationToken): Promise<NikaAttachmentResult> {
+		const pdfCount = messages.reduce((count, message) => count + message.content.filter(part => part instanceof vscode.LanguageModelDataPart && isPdfMime(part.mimeType)).length, 0);
+		if (pdfCount > 0) {
+			this._settingsEditor.log('INFO', vscode.l10n.t('Received {0} PDF attachment(s) for Nika preprocessing.', pdfCount));
+		}
 		const replay = this._readReplayMarkers(messages);
 		const lastUserIndex = messages.reduce((last, message, index) => message.role === vscode.LanguageModelChatMessageRole.User ? index : last, -1);
 		const pageRequest = this._messageText(messages[lastUserIndex]);
@@ -113,6 +117,19 @@ export class NikaAttachmentProcessor {
 	}
 
 	private async _pdfToText(part: vscode.LanguageModelDataPart, pageRequest: string, token: vscode.CancellationToken): Promise<string> {
+		try {
+			return await this._extractPdfToText(part, pageRequest, token);
+		} catch (error) {
+			if (token.isCancellationRequested) {
+				throw error;
+			}
+			const reason = error instanceof Error ? error.message : String(error);
+			this._settingsEditor.log('ERROR', vscode.l10n.t('PDF extraction failed: {0}', reason));
+			return vscode.l10n.t('[Attached PDF could not be processed: {0}\n]', reason);
+		}
+	}
+
+	private async _extractPdfToText(part: vscode.LanguageModelDataPart, pageRequest: string, token: vscode.CancellationToken): Promise<string> {
 		const config = vscode.workspace.getConfiguration('nika');
 		const maxBytes = config.get<number>('pdfMaxFileSizeMB', 100) * 1024 * 1024;
 		if (part.data.byteLength > maxBytes) {

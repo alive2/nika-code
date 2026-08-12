@@ -282,6 +282,10 @@ export class AgentHostByokLmHandler extends Disposable implements IAgentHostByok
 
 	private _toChatMessageParts(parts: IByokLmContentPart[]): IChatMessagePart[] {
 		const result: IChatMessagePart[] = [];
+		const pdfCount = parts.filter(part => part.type === 'document').length;
+		if (pdfCount > 0) {
+			this._logService.info(`[AgentHostByokLmHandler] Forwarding ${pdfCount} PDF document part(s) to the renderer BYOK model.`);
+		}
 		for (const part of parts) {
 			if (part.type === 'text') {
 				const previous = result.at(-1);

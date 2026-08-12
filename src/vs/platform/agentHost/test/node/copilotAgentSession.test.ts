@@ -993,6 +993,33 @@ suite('CopilotAgentSession', () => {
 		}]);
 	});
 
+	test('forwards attached PDFs as blobs so BYOK providers receive their bytes', async () => {
+		const pdfUri = URI.file('/workspace/attached.pdf');
+		const pdf = '%PDF-1.7\n1 0 obj\n<<>>\nendobj';
+		const { session, mockSession } = await createAgentSession(disposables, {
+			fileContents: {
+				[pdfUri.toString()]: pdf,
+			},
+		});
+
+		await session.send('summarize this', [{
+			type: MessageAttachmentKind.Resource,
+			uri: pdfUri.toString(),
+			label: 'attached.pdf',
+			displayKind: 'document',
+		}]);
+
+		assert.deepStrictEqual(mockSession.sendRequests, [{
+			prompt: 'summarize this',
+			attachments: [{
+				type: 'blob',
+				data: encodeBase64(VSBuffer.fromString(pdf)),
+				mimeType: 'application/pdf',
+				displayName: 'attached.pdf',
+			}],
+		}]);
+	});
+
 	test('maps symbol Resource attachments to SDK selection so the range survives (#315193)', async () => {
 		// Symbols arrive as a Resource with displayKind 'symbol' AND a populated selection.range. Keying the selection
 		// branch off the `selection` field (not displayKind === 'selection') keeps the range instead of degrading the

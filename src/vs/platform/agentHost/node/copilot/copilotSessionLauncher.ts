@@ -372,14 +372,60 @@ export async function resolveByokSessionConfig(
 		baseUrl: handle.providerBaseUrl(vendor),
 		bearerToken: `${handle.nonce}.${sessionId}`,
 	}));
-	const models: ProviderModelConfig[] = byokModels.map(m => ({
-		id: getByokLmSelectionModelId(m),
-		provider: m.vendor,
-		...(m.name !== undefined ? { name: m.name } : {}),
-		...(m.maxContextWindowTokens !== undefined ? { maxContextWindowTokens: m.maxContextWindowTokens } : {}),
-	}));
+	const models: ProviderModelConfig[] = byokModels.map(m => {
+		const capabilities = nikaModelCapabilities(m);
+		const selectionId = getByokLmSelectionModelId(m);
+		return {
+			id: selectionId,
+			provider: m.vendor,
+			// The Copilot runtime's native attachment admission check consults the
+			// behaviour model before the loopback provider receives a request. Nika
+			// preprocesses PDFs itself, so use a PDF-capable behaviour profile solely
+			// for that admission check while retaining the Nika model as the wire id.
+			...(m.vendor.toLowerCase() === 'nika' ? { modelId: 'gemini-2.5-flash', wireModel: selectionId } : {}),
+			...(m.name !== undefined ? { name: m.name } : {}),
+			...(m.maxContextWindowTokens !== undefined ? { maxContextWindowTokens: m.maxContextWindowTokens } : {}),
+			...(capabilities ? { capabilities } : {}),
+		};
+	});
 	logService.info(`[Copilot:${sessionId}] Wired ${models.length} BYOK model(s) across ${providers.length} provider(s) via loopback proxy ${handle.baseUrl}`);
 	return { providers, models };
+}
+
+/**
+ * The Copilot runtime decides whether a blob attachment becomes a native
+ * document from the selected model's advertised media types. Nika preprocesses
+ * images and PDFs before sending them to its text-only DeepSeek endpoints, so
+ * its models must explicitly advertise those media types to keep attachments on
+ * the local-agent path. Other BYOK providers retain their renderer-declared
+ * behaviour unchanged.
+ */
+function nikaModelCapabilities(model: IByokLmModelInfo): ProviderModelConfig['capabilities'] | undefined {
+	if (model.vendor.toLowerCase() !== 'nika') {
+		return undefined;
+	}
+
+	return {
+		supports: {
+			vision: true,
+			reasoningEffort: Boolean(model.supportedReasoningEfforts?.length),
+		},
+		limits: {
+			max_context_window_tokens: model.maxContextWindowTokens ?? 128_000,
+			vision: {
+				supported_media_types: [
+					'image/png',
+					'image/jpeg',
+					'image/gif',
+					'image/webp',
+					'image/bmp',
+					'application/pdf',
+				],
+				max_prompt_images: 20,
+				max_prompt_image_size: 20 * 1024 * 1024,
+			},
+		},
+	};
 }
 
 export class CopilotSessionLauncher implements ICopilotSessionLauncher {

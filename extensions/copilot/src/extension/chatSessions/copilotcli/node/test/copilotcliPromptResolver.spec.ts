@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockFileSystemService } from '../../../../../platform/filesystem/node/test/mockFileSystemService';
 import { IIgnoreService, NullIgnoreService } from '../../../../../platform/ignore/common/ignoreService';
 import { ILogService } from '../../../../../platform/log/common/logService';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configurationService';
 import { NullWorkspaceService } from '../../../../../platform/workspace/common/workspaceService';
 import { CancellationToken } from '../../../../../util/vs/base/common/cancellation';
 import { DisposableStore } from '../../../../../util/vs/base/common/lifecycle';
 import { URI } from '../../../../../util/vs/base/common/uri';
+import { ChatReferenceBinaryData } from '../../../../../util/common/test/shims/chatTypes';
 import { IInstantiationService } from '../../../../../util/vs/platform/instantiation/common/instantiation';
 import { IVSCodeExtensionContext } from '../../../../../platform/extContext/common/extensionContext';
 import { MockExtensionContext } from '../../../../../platform/test/node/extensionContext';
@@ -47,6 +49,7 @@ describe('CopilotCLIPromptResolver', () => {
 	let skillLocations: MockSkillLocations;
 	let logService: ILogService;
 	let instantiationService: IInstantiationService;
+	let configurationService: IConfigurationService;
 
 	beforeEach(() => {
 		disposables = new DisposableStore();
@@ -54,6 +57,7 @@ describe('CopilotCLIPromptResolver', () => {
 		const accessor = disposables.add(services.createTestingAccessor());
 		logService = accessor.get(ILogService);
 		instantiationService = accessor.get(IInstantiationService);
+		configurationService = accessor.get(IConfigurationService);
 		skillLocations = new MockSkillLocations();
 	});
 
@@ -76,6 +80,7 @@ describe('CopilotCLIPromptResolver', () => {
 			ignoreService as unknown as IIgnoreService,
 			overrideSkillLocations ?? skillLocations,
 			extensionContext,
+			configurationService,
 		);
 	}
 
@@ -103,6 +108,26 @@ describe('CopilotCLIPromptResolver', () => {
 			const result = await resolver.resolvePrompt(request, undefined, [], noopWorkspaceInfo, [], cancelledToken);
 			expect(result.attachments).toHaveLength(0);
 			expect(result.references).toHaveLength(0);
+		});
+
+		it('converts a binary PDF reference to a base64 PDF blob attachment', async () => {
+			resolver = createResolver();
+			const pdfData = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
+			const request = new TestChatRequest('read this PDF', [{
+				id: 'pdf',
+				name: 'example.pdf',
+				value: new ChatReferenceBinaryData('application/pdf', async () => pdfData),
+			}]);
+
+			const result = await resolver.resolvePrompt(request, undefined, [], noopWorkspaceInfo, [], CancellationToken.None);
+
+			expect(result.attachments).toEqual([{
+				type: 'blob',
+				displayName: 'example.pdf',
+				mimeType: 'application/pdf',
+				data: Buffer.from(pdfData).toString('base64'),
+			}]);
+			expect(result.prompt).toContain('[Attached PDF content: example.pdf');
 		});
 	});
 

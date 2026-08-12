@@ -32,6 +32,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isNikaSettingsSection(value: unknown): value is NikaSettingsSection {
+	return value === 'overview' || value === 'providers' || value === 'models' || value === 'vision' || value === 'pdf' || value === 'agents' || value === 'diagnostics';
+}
+
 function nonce(): string {
 	const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 	let result = '';
@@ -58,6 +62,7 @@ export function compareVersions(a: string, b: string): number {
 
 export class NikaSettingsEditor extends Disposable {
 	private _panel: vscode.WebviewPanel | undefined;
+	private _activeSection: NikaSettingsSection = 'overview';
 	private readonly _output = this._register(vscode.window.createOutputChannel(vscode.l10n.t('Nika')));
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
 
@@ -73,12 +78,12 @@ export class NikaSettingsEditor extends Disposable {
 		this._register(vscode.commands.registerCommand('nika.exportDiagnostics', () => this.exportDiagnostics()));
 		this._register(vscode.workspace.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('nika')) {
-				void this._render();
+				void this._render(this._activeSection);
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
 			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET) {
-				void this._render();
+				void this._render(this._activeSection);
 			}
 		}));
 		void this._initialize();
@@ -188,6 +193,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 			return;
 		}
+		this._activeSection = initialSection ?? this._activeSection;
 		this._panel = vscode.window.createWebviewPanel(
 			'nika.settings',
 			vscode.l10n.t('Nika Settings'),
@@ -196,13 +202,14 @@ export class NikaSettingsEditor extends Disposable {
 		);
 		this._register(this._panel.webview.onDidReceiveMessage(message => this._onMessage(message)));
 		this._panel.onDidDispose(() => { this._panel = undefined; });
-		void this._render(initialSection ?? 'overview');
+		void this._render(this._activeSection);
 	}
 
-	private async _render(initialSection: NikaSettingsSection = 'overview'): Promise<void> {
+	private async _render(initialSection: NikaSettingsSection = this._activeSection): Promise<void> {
 		if (!this._panel) {
 			return;
 		}
+		this._activeSection = initialSection;
 		const state = { ...await this._state(), initialSection };
 		this._panel.webview.html = this._html(this._panel.webview, state);
 	}
@@ -254,6 +261,9 @@ export class NikaSettingsEditor extends Disposable {
 		if (!isRecord(message) || typeof message.type !== 'string') {
 			return;
 		}
+		if (isNikaSettingsSection(message.activeSection)) {
+			this._activeSection = message.activeSection;
+		}
 		try {
 			switch (message.type) {
 				case 'saveSetting':
@@ -296,7 +306,7 @@ export class NikaSettingsEditor extends Disposable {
 			this.log('ERROR', detail);
 			void vscode.window.showErrorMessage(vscode.l10n.t('Nika Settings could not apply the change: {0}', detail));
 		} finally {
-			await this._render();
+			await this._render(this._activeSection);
 		}
 	}
 
@@ -532,15 +542,16 @@ ${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['
 <section id="agents"><h1>${vscode.l10n.t('Agents')}</h1><p class="lead">${vscode.l10n.t('Assign a model and thinking effort to each built-in role. The recommended profile uses DeepSeek V4 Flash Responses for every role.')}</p><div class="card">${(['plan','explore','utility','utilitySmall','inlineChat'] as const).map(id=>this._agentRow(id, ({plan:vscode.l10n.t('Plan'),explore:vscode.l10n.t('Explore'),utility:vscode.l10n.t('Utility'),utilitySmall:vscode.l10n.t('Utility Small'),inlineChat:vscode.l10n.t('Inline Chat')} as Record<string,string>)[id])).join('')}</div><div class="actions"><button class="action" data-action="recommendedAgents">${vscode.l10n.t('Apply recommended mappings')}</button></div></section>
 <section id="diagnostics"><h1>${vscode.l10n.t('Diagnostics')}</h1><p class="lead">${vscode.l10n.t('Nika writes to a native output channel and never creates an automatic log file.')}</p><div class="card">${this._selectRow('logLevel', vscode.l10n.t('Log level'), ['DEBUG','INFO','WARN','ERROR'].map(v=>[v,v]))}${this._checkboxRow('releaseCheckEnabled', vscode.l10n.t('Check for releases on startup'))}</div><div class="actions"><button class="action" data-action="openLogs">${vscode.l10n.t('Open Nika Output')}</button><button class="action secondary" data-action="exportDiagnostics">${vscode.l10n.t('Export Diagnostics')}</button><button class="action secondary" data-action="checkUpdates">${vscode.l10n.t('Check for Updates')}</button></div></section>
 </main></div><script nonce="${token}">const vscode=acquireVsCodeApi();const state=${encoded};
-const settings=state.settings;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
+const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('ollama',true);
-document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);vscode.postMessage({type:'saveSetting',key,value});});});
-function activateSection(id){const button=document.querySelector('nav button[data-section="'+id+'"]');const section=document.getElementById(id);if(!button||!section)return;document.querySelectorAll('nav button,section').forEach(el=>el.classList.remove('active'));button.classList.add('active');section.classList.add('active');const saved=vscode.getState()||{};vscode.setState({...saved,activeSection:id});}
+document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);post({type:'saveSetting',key,value});});});
+function activateSection(id){const button=document.querySelector('nav button[data-section="'+id+'"]');const section=document.getElementById(id);if(!button||!section)return;document.querySelectorAll('nav button,section').forEach(el=>el.classList.remove('active'));button.classList.add('active');section.classList.add('active');activeSection=id;const saved=vscode.getState()||{};vscode.setState({...saved,activeSection:id});}
 const restoredSection=(vscode.getState()||{}).activeSection;activateSection(restoredSection||state.initialSection||'overview');document.querySelectorAll('[data-section]').forEach(button=>button.addEventListener('click',()=>activateSection(button.dataset.section)));
-document.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click',()=>vscode.postMessage({type:button.dataset.action})));
-document.querySelectorAll('[data-secret-save]').forEach(button=>button.addEventListener('click',()=>{const provider=button.dataset.secretSave;const input=document.querySelector('[data-secret="'+provider+'"]');vscode.postMessage({type:'saveSecret',provider,value:input.value});input.value='';}));
-document.querySelectorAll('[data-secret-test]').forEach(button=>button.addEventListener('click',()=>vscode.postMessage({type:'testConnection',provider:button.dataset.secretTest})));
-document.querySelectorAll('[data-secret-remove]').forEach(button=>button.addEventListener('click',()=>vscode.postMessage({type:'removeSecret',provider:button.dataset.secretRemove})));
+function post(message){vscode.postMessage({...message,activeSection});}
+document.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click',()=>post({type:button.dataset.action})));
+document.querySelectorAll('[data-secret-save]').forEach(button=>button.addEventListener('click',()=>{const provider=button.dataset.secretSave;const input=document.querySelector('[data-secret="'+provider+'"]');post({type:'saveSecret',provider,value:input.value});input.value='';}));
+document.querySelectorAll('[data-secret-test]').forEach(button=>button.addEventListener('click',()=>post({type:'testConnection',provider:button.dataset.secretTest})));
+document.querySelectorAll('[data-secret-remove]').forEach(button=>button.addEventListener('click',()=>post({type:'removeSecret',provider:button.dataset.secretRemove})));
 </script></body></html>`;
 	}
 

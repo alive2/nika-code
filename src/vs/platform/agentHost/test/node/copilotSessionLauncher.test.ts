@@ -166,6 +166,40 @@ suite('resolveByokSessionConfig', () => {
 		});
 	});
 
+	test('advertises Nika PDF support to the Copilot runtime', async () => {
+		const registry = new ByokLmBridgeRegistry();
+		const registration = registry.register('client-1', connectionOf([{
+			vendor: 'Nika',
+			id: 'deepseek-v4-flash-responses',
+			maxContextWindowTokens: 136000,
+			supportsVision: false,
+			supportedReasoningEfforts: ['none', 'high', 'max'],
+		}]));
+		const proxy = countingProxy();
+
+		const config = await resolveByokSessionConfig(sessionId, registry, proxy.startProxy, log);
+		registration.dispose();
+
+		assert.deepStrictEqual(config.models, [{
+			id: 'deepseek-v4-flash-responses',
+			provider: 'Nika',
+			modelId: 'gemini-2.5-flash',
+			wireModel: 'deepseek-v4-flash-responses',
+			maxContextWindowTokens: 136000,
+			capabilities: {
+				supports: { vision: true, reasoningEffort: true },
+				limits: {
+					max_context_window_tokens: 136000,
+					vision: {
+						supported_media_types: ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'application/pdf'],
+						max_prompt_images: 20,
+						max_prompt_image_size: 20 * 1024 * 1024,
+					},
+				},
+			},
+		}]);
+	});
+
 	test('preserves provider groups when models share a vendor and id', async () => {
 		const registry = new ByokLmBridgeRegistry();
 		const registration = registry.register('client-1', connectionOf([

@@ -34,6 +34,20 @@ export function hasPdfMagicBytes(data: Uint8Array): boolean {
 	return data.length >= 4 && data[0] === 0x25 && data[1] === 0x50 && data[2] === 0x44 && data[3] === 0x46;
 }
 
+/**
+ * pdfjs-dist 3.x rejects Node.js `Buffer` inputs in its `getDocument` data
+ * property check (`val instanceof Buffer` throws). The LM API hands PDF bytes
+ * to Nika as Buffer-backed `Uint8Array`s in the extension host, so normalize to
+ * a plain `Uint8Array` before handing the bytes to pdfjs. The copy is scoped to
+ * exactly the buffer's bytes so pooled-Buffer offsets cannot truncate it.
+ */
+export function toPlainUint8Array(data: Uint8Array): Uint8Array {
+	if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data)) {
+		return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+	}
+	return data;
+}
+
 /** Detects `pages 10-20`, `pages 10 to 20`, `עמודים 10 עד 20`, and single pages. */
 export function detectPdfPageRange(text: string): PdfPageRange | undefined {
 	if (!text) {
@@ -79,7 +93,7 @@ export async function extractPdfTextWithPdfjs(data: Uint8Array, options: PdfExtr
 	}
 	let document: PdfJsDocument | undefined;
 	try {
-		document = await api.getDocument({ data, isEvalSupported: false, disableFontFace: true, useSystemFonts: true, verbosity: 0 }).promise;
+		document = await api.getDocument({ data: toPlainUint8Array(data), isEvalSupported: false, disableFontFace: true, useSystemFonts: true, verbosity: 0 }).promise;
 		const totalPages = document.numPages;
 		let start = 1;
 		let end = totalPages;

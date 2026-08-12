@@ -125,6 +125,22 @@ interface ICopilotStreamingToolCall {
 const SESSION_STATE_DIRECTORY = 'session-state';
 const EMPTY_TOOL_RESULT_TEXT = '<empty />';
 const USER_DENIED_PERMISSION_RESULT = { kind: 'reject', feedback: 'The user denied permission.' } satisfies PermissionRequestResult;
+const NIKA_PDF_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
+
+function isPdfResourceAttachment(attachment: MessageAttachment, uri: URI): boolean {
+	return attachment.type === MessageAttachmentKind.Resource
+		&& (attachment.label?.toLowerCase().endsWith('.pdf') === true || uri.path.toLowerCase().endsWith('.pdf'));
+}
+
+function hasPdfMagicBytes(content: VSBuffer): boolean {
+	const bytes = content.buffer;
+	return bytes.byteLength >= 5
+		&& bytes[0] === 0x25 // %
+		&& bytes[1] === 0x50 // P
+		&& bytes[2] === 0x44 // D
+		&& bytes[3] === 0x46 // F
+		&& bytes[4] === 0x2D; // -
+}
 
 function isPermissionDeniedKind(kind: PermissionResult['kind'] | undefined): boolean {
 	switch (kind) {
@@ -2239,6 +2255,21 @@ export class CopilotAgentSession extends Disposable {
 		const uri = URI.parse(attachment.uri);
 		const path = uri.scheme === 'file' ? uri.fsPath : uri.toString();
 		const displayName = attachment.label ?? path;
+		if (!attachment.selection && isPdfResourceAttachment(attachment, uri)) {
+			try {
+				const content = await this._fileService.readFile(uri, { limits: { size: NIKA_PDF_ATTACHMENT_MAX_BYTES } });
+				if (hasPdfMagicBytes(content.value)) {
+					// A Resource normally becomes a path-only SDK attachment. A BYOK provider cannot read
+					// the local path, so preserve explicitly attached PDFs as bytes for the BYOK bridge.
+					this._logService.info(`[Copilot:${this.sessionId}] Forwarding PDF attachment bytes to the BYOK bridge: ${displayName} (${content.value.byteLength} bytes)`);
+					return { type: 'blob' as const, data: encodeBase64(content.value), mimeType: 'application/pdf', displayName };
+				}
+				this._logService.warn(`[Copilot:${this.sessionId}] PDF attachment did not contain a valid PDF signature: ${displayName}`);
+			} catch (err) {
+				// Keep the established file-reference behavior if the file is unavailable to the host.
+				this._logService.warn(`[Copilot:${this.sessionId}] Failed to read PDF attachment ${displayName}: ${getErrorMessage(err)}`);
+			}
+		}
 		if (attachment.selection) {
 			try {
 				const text = await this._readSelectedText(uri, attachment.selection.range);
