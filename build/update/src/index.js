@@ -15,7 +15,7 @@
  *          "url":            "<download URL of the setup exe>",
  *          "version":        "<commit the new build is based on>",
  *          "productVersion": "<product version like 1.0.1>",
- *          "timestamp":      <unix seconds>,
+ *          "timestamp":      <epoch milliseconds>,
  *          "sha256hash":     "<hex sha256 of the setup exe>"
  *        }
  *
@@ -134,7 +134,10 @@ export default {
 				url: asset.browser_download_url,
 				version: latestCommit || 'unknown',
 				productVersion,
-				timestamp: Math.floor(Date.parse(release.published_at) / 1000),
+				// Milliseconds since epoch. The client (abstractUpdateService /
+				// updateService.darwin.ts) expects Date.getTime()-style ms — sending
+				// seconds made the UI render "Release date: Jan 21, 1970".
+				timestamp: Date.parse(release.published_at),
 				sha256hash,
 			};
 

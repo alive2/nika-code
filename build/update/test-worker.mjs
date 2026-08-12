@@ -60,7 +60,10 @@ async function check(label, path, expect) {
 
 await check('up-to-date commit -> 204', `/api/update/win32-x64-user/stable/${latestCommit}`, (s) => s === 204);
 await check('stale commit -> manifest', '/api/update/win32-x64-user/stable/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', (s, b) => {
-	return s === 200 && b.url && b.productVersion === latest.tag_name.replace(/^v/, '') && b.sha256hash && b.version;
+	// timestamp must be epoch MILLISECONDS (> 1e12 = after 2001-09-09); a
+	// seconds value (~1.7e9) renders as "Jan 1970" in the update UI.
+	return s === 200 && b.url && b.productVersion === latest.tag_name.replace(/^v/, '') && b.sha256hash && b.version
+		&& typeof b.timestamp === 'number' && b.timestamp > 1e12;
 });
 await check('bad path -> 404', '/nope', (s) => s === 404);
 await check('old v1.0.0 commit -> update available', '/api/update/win32-x64-user/stable/3c1a6045cd13096bdbdc17e870315ddf20d10034', (s) => s === 200 || s === 204);
