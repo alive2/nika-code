@@ -737,6 +737,7 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 		deltaLanguageModelChatProviderDescriptors: () => { },
 		registerLanguageModelProvider: () => toDisposable(() => { }),
 		lookupLanguageModel: (modelId: string) => languageModels?.get(modelId),
+		getLanguageModelIds: () => languageModels ? [...languageModels.keys()] : [],
 		getVendors: () => [],
 		getLanguageModelGroups: () => [],
 		...languageModelsServiceOverride,
@@ -3782,6 +3783,28 @@ suite('AgentHostChatContribution', () => {
 
 			assert.strictEqual(agentHostService.createSessionCalls.length, 1);
 			assert.strictEqual(agentHostService.createSessionCalls[0].model, undefined);
+		}));
+
+		test('passes through a foreign BYOK model id that the bridge has mirrored', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			// A general-pool BYOK model (e.g. Nika's `nika/...`) is registered against
+			// the renderer LM service without a session type, so its `${vendor}/${id}`
+			// identifier looks foreign to the agent host. When the BYOK bridge has
+			// mirrored it into this host's pool (a bridged copy carrying the matching
+			// `byokModelIdentifier`), the host can route it — the handler must forward
+			// the id unchanged rather than drop it and fall back to the default model
+			// (which silently reroutes e.g. a DeepSeek pick to gpt-5-mini).
+			const byok = createByokLanguageModelTestData();
+			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables, byok);
+
+			const { turnPromise, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables, {
+				message: 'Hi',
+				userSelectedModelId: 'openrouter/amazon/nova-micro-v1',
+			});
+			fire({ type: 'chat/turnComplete', endedAt: '2025-01-01T00:00:00.000Z', session, turnId } as ChatAction);
+			await turnPromise;
+
+			assert.strictEqual(agentHostService.createSessionCalls.length, 1);
+			assert.deepStrictEqual(agentHostService.createSessionCalls[0].model, { id: 'openrouter/amazon/nova-micro-v1' });
 		}));
 
 		test('does not create backend session eagerly for untitled sessions', async () => {

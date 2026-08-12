@@ -1609,6 +1609,31 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	});
 
+	test('getModelsSnapshot resolves a general Nika selection even when bridge-copy dedup hides it', () => {
+		const matchingModel = { ...createTestLanguageModel('matching'), targetChatSessionType: 'agent-host-copilotcli' };
+		const nikaModel = { ...createTestLanguageModel('deepseek-v4-flash-responses'), vendor: 'nika' };
+		const bridgedModel = {
+			...createTestLanguageModel('deepseek-v4-flash-responses'),
+			byokModelIdentifier: 'nika/deepseek-v4-flash-responses',
+			targetChatSessionType: 'agent-host-copilotcli',
+		};
+		const provider = createProvider(disposables, agentHost, undefined, {
+			languageModelIds: ['matching', 'agent-host-copilotcli:nika/deepseek-v4-flash-responses', 'nika/deepseek-v4-flash-responses'],
+			lookupLanguageModel: id => id === 'matching' ? matchingModel : id === 'agent-host-copilotcli:nika/deepseek-v4-flash-responses' ? bridgedModel : id === 'nika/deepseek-v4-flash-responses' ? nikaModel : undefined,
+		});
+		fireSessionAdded(agentHost, 'nika-bridge-resolve', { title: 'Nika Bridge Resolve Session' });
+		const session = provider.getSessions().find(session => session.title.get() === 'Nika Bridge Resolve Session');
+		assert.ok(session);
+
+		const snapshot = provider.getModelsSnapshot(session.sessionId, 'nika/deepseek-v4-flash-responses');
+		// The picker still shows the deduped bridged copy (no duplicates)...
+		assert.deepStrictEqual(snapshot.models.map(model => model.identifier), ['matching', 'agent-host-copilotcli:nika/deepseek-v4-flash-responses']);
+		// ...but a remembered/configured general-pool `nika/...` selection stays
+		// resolvable so send maps it onto the bridged copy instead of Auto-falling
+		// back to the default model.
+		assert.strictEqual(snapshot.desiredModelResolution.kind, 'available');
+	});
+
 	test('getModelsSnapshot excludes hidden models and announces visibility changes', () => {
 		const matchingModel = { ...createTestLanguageModel('matching'), targetChatSessionType: 'agent-host-copilotcli' };
 		const hiddenLanguageModelIds = new Set(['matching']);

@@ -5183,10 +5183,36 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			return languageModelIdentifier.substring(prefix.length);
 		}
 		if (languageModelIdentifier.includes('/')) {
+			// A `${vendor}/${id}` identifier (e.g. a Nika `nika/deepseek-v4-flash-responses`
+			// general-pool model) is normally foreign to this agent host. But the BYOK
+			// bridge mirrors renderer BYOK models into the host's pool under the exact
+			// same provider-qualified selection id (`vendor/[group/]id`, see
+			// `resolveByokSessionConfig`), so when a bridged copy exists the host can
+			// route it directly — pass the id through instead of dropping it (which
+			// would silently fall back to the default model, e.g. routing a DeepSeek
+			// selection to gpt-5-mini). Drop only ids that no bridged copy backs.
+			if (this._hasBridgedByokModel(languageModelIdentifier)) {
+				return languageModelIdentifier;
+			}
 			this._logService.warn(`[AgentHost] Dropping foreign model identifier '${languageModelIdentifier}' for session type '${this._config.sessionType}'; falling back to default model.`);
 			return undefined;
 		}
 		return languageModelIdentifier;
+	}
+
+	/**
+	 * Whether the renderer's language-model registry holds a bridged copy of the
+	 * given `vendor/id` BYOK model for this session type (identified by its
+	 * `byokModelIdentifier`). Such a copy implies the agent host's BYOK bridge
+	 * has mirrored the model into its pool, so the raw `vendor/id` is routable.
+	 */
+	private _hasBridgedByokModel(languageModelIdentifier: string): boolean {
+		for (const modelId of this._languageModelsService.getLanguageModelIds()) {
+			if (this._languageModelsService.lookupLanguageModel(modelId)?.byokModelIdentifier === languageModelIdentifier) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private _toLanguageModelId(sessionResource: URI, rawModelId: string | undefined): string | undefined {

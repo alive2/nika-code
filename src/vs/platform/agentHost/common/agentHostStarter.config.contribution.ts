@@ -152,7 +152,9 @@ configurationRegistry.registerConfiguration({
 		[AgentHostByokModelsEnabledSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.agentHost.byokModels.enabled', "When enabled, the agent host wires up the BYOK ('bring your own key') language-model bridge so extension-provided BYOK models can run in agent-host sessions. The agent host process must be restarted for changes to take effect."),
-			default: false,
+			// NikaCode: default ON so Nika (DeepSeek/Gemini/Gemma) BYOK models work
+			// out of the box in agent-host sessions, including the Agents window.
+			default: true,
 			tags: ['experimental', 'advanced'],
 			experiment: { mode: 'startup' },
 		},

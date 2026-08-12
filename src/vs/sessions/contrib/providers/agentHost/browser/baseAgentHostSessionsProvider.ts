@@ -3355,7 +3355,11 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		// The agent host may already mirror Nika models into its pool through the
 		// BYOK bridge (as `agent-host-<provider>` copies carrying a
 		// `byokModelIdentifier`). Those are included via the `targetChatSessionType`
-		// match above; drop the general-pool duplicate so Nika appears only once.
+		// match above; drop the general-pool duplicate so Nika appears only once in
+		// the picker. The deduped general copy is still resolvable for a remembered/
+		// configured `nika/...` selection: `AgentHostSessionHandler` maps those ids
+		// onto the bridged copy at send time, so they must not resolve 'unavailable'
+		// (which would fall back to Auto and silently reroute to the default model).
 		const bridgedIdentifiers = new Set(filtered.filter(model => model.metadata.byokModelIdentifier !== undefined).map(model => model.metadata.byokModelIdentifier));
 		const models = filtered.filter(model => !(isNikaGeneralModel(model.metadata) && bridgedIdentifiers.has(model.identifier)));
 		const desiredModel = desiredModelId ? this._languageModelsService.lookupLanguageModel(desiredModelId) : undefined;
@@ -3364,7 +3368,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			: desiredModelId;
 		return {
 			models,
-			desiredModelResolution: resolveModelIdentifierFromLanguageModels(models, resolvedDesiredModelId, this._languageModelsService, allModels),
+			desiredModelResolution: resolveModelIdentifierFromLanguageModels(filtered, resolvedDesiredModelId, this._languageModelsService, allModels),
 			modelTarget: resourceScheme,
 		};
 	}
