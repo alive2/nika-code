@@ -1,0 +1,15 @@
+# NikaCode update manifest worker config.
+# Deploy with: npx wrangler deploy (from this directory)
+#
+# Deployed URL (account subdomain: 173david173):
+#   https://nika-code-update.173david173.workers.dev
+# This URL (without trailing slash) is wired into product.json -> "updateUrl".
+
+name = "nika-code-update"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Optional: override the GitHub repo the manifest is derived from.
+# [vars]
+# GITHUB_OWNER = "alive2"
+# GITHUB_REPO = "nika-code"

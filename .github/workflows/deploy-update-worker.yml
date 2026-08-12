@@ -1,0 +1,35 @@
+name: Deploy Update Worker
+
+# Deploys the Cloudflare Worker that serves NikaCode update manifests.
+# Runs automatically when build/update/** changes, and can be triggered
+# manually from the Actions tab.
+#
+# Setup (one time):
+#   1. Create a Cloudflare API token with "Workers Scripts: Edit" permission:
+#      https://dash.cloudflare.com/profile/api-tokens
+#   2. Add it as a GitHub Actions secret named CLOUDFLARE_API_TOKEN
+#      (repo Settings -> Secrets and variables -> Actions).
+#   3. Push this workflow; it deploys to the account bound to the token.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build/update/**'
+      - 'product.json'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: build/update
+          command: deploy
