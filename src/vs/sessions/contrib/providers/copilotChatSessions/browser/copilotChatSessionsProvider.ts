@@ -32,7 +32,7 @@ import { ILanguageModelToolsService } from '../../../../../workbench/contrib/cha
 import { ChatMode, IChatMode, IChatModeService, isBuiltinChatMode } from '../../../../../workbench/contrib/chat/common/chatModes.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
-import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
+import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
 import { getRegisteredLanguageModels, resolveModelIdentifier, resolveModelIdentifierFromLanguageModels } from '../../../../../workbench/contrib/chat/common/modelSelection.js';
 import { IGitService, IGitRepository } from '../../../../../workbench/contrib/git/common/gitService.js';
 import { IContextKeyService, ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -49,7 +49,7 @@ import { computePullRequestIcon, GitHubPullRequestState } from '../../../github/
 import { computeSessionPullRequestIcon } from '../../../github/browser/pullRequestIconStatus.js';
 import { IPullRequestIconCache } from '../../../github/browser/pullRequestIconCache.js';
 import { structuralEquals } from '../../../../../base/common/equals.js';
-import { CopilotCLISessionType } from '../../agentHost/browser/baseAgentHostSessionsProvider.js';
+import { CopilotCLISessionType, isNikaGeneralModel } from '../../agentHost/browser/baseAgentHostSessionsProvider.js';
 import { createChangesets } from './copilotChatSessionsChangesets.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
 import { IAgentHostEnablementService } from '../../../../../platform/agentHost/common/agentHostEnablementService.js';
@@ -64,19 +64,6 @@ export const CopilotCloudSessionType: ISessionType = {
 
 const SESSION_WORKSPACE_GROUP_GITHUB = localize('sessionWorkspaceGroup.github', "GitHub");
 const STORAGE_KEY_ISOLATION_MODE = 'sessions.isolationPicker.selectedMode';
-
-/** Vendor ID of the Nika BYOK language-model provider. */
-const NIKA_VENDOR_ID = 'nika';
-
-/**
- * Matches Nika language models that are not scoped to a specific session
- * type (the "general pool"). Nika models are provided by the built-in
- * extension and carry no `targetChatSessionType`, so they must be surfaced
- * explicitly in CLI session model snapshots alongside per-session-type models.
- */
-function isNikaGeneralModel(metadata: ILanguageModelChatMetadata): boolean {
-	return metadata.vendor === NIKA_VENDOR_ID && metadata.targetChatSessionType === undefined;
-}
 
 export type IsolationMode = 'worktree' | 'workspace';
 

@@ -1561,6 +1561,54 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	});
 
+	test('getModelsSnapshot includes Nika general-pool models alongside per-scheme models', () => {
+		const matchingModel = { ...createTestLanguageModel('matching'), targetChatSessionType: 'agent-host-copilotcli' };
+		const nikaModel = { ...createTestLanguageModel('deepseek-v4-flash-responses'), vendor: 'nika' };
+		const otherModel = { ...createTestLanguageModel('other'), targetChatSessionType: 'agent-host-other' };
+		const provider = createProvider(disposables, agentHost, undefined, {
+			languageModelIds: ['matching', 'nika/deepseek-v4-flash-responses', 'other'],
+			lookupLanguageModel: id => id === 'matching' ? matchingModel : id === 'nika/deepseek-v4-flash-responses' ? nikaModel : id === 'other' ? otherModel : undefined,
+		});
+		fireSessionAdded(agentHost, 'nika-catalog', { title: 'Nika Model Catalog Session' });
+		const session = provider.getSessions().find(session => session.title.get() === 'Nika Model Catalog Session');
+		assert.ok(session);
+
+		const snapshot = provider.getModelsSnapshot(session.sessionId);
+		assert.deepStrictEqual({
+			models: snapshot.models.map(model => model.identifier),
+			modelTarget: snapshot.modelTarget,
+		}, {
+			models: ['matching', 'nika/deepseek-v4-flash-responses'],
+			modelTarget: 'agent-host-copilotcli',
+		});
+	});
+
+	test('getModelsSnapshot deduplicates a Nika model already mirrored through the BYOK bridge', () => {
+		const matchingModel = { ...createTestLanguageModel('matching'), targetChatSessionType: 'agent-host-copilotcli' };
+		const nikaModel = { ...createTestLanguageModel('deepseek-v4-flash-responses'), vendor: 'nika' };
+		const bridgedModel = {
+			...createTestLanguageModel('deepseek-v4-flash-responses'),
+			byokModelIdentifier: 'nika/deepseek-v4-flash-responses',
+			targetChatSessionType: 'agent-host-copilotcli',
+		};
+		const provider = createProvider(disposables, agentHost, undefined, {
+			languageModelIds: ['matching', 'agent-host-copilotcli:nika/deepseek-v4-flash-responses', 'nika/deepseek-v4-flash-responses'],
+			lookupLanguageModel: id => id === 'matching' ? matchingModel : id === 'agent-host-copilotcli:nika/deepseek-v4-flash-responses' ? bridgedModel : id === 'nika/deepseek-v4-flash-responses' ? nikaModel : undefined,
+		});
+		fireSessionAdded(agentHost, 'nika-bridge-catalog', { title: 'Nika Bridge Catalog Session' });
+		const session = provider.getSessions().find(session => session.title.get() === 'Nika Bridge Catalog Session');
+		assert.ok(session);
+
+		const snapshot = provider.getModelsSnapshot(session.sessionId);
+		assert.deepStrictEqual({
+			models: snapshot.models.map(model => model.identifier),
+			modelTarget: snapshot.modelTarget,
+		}, {
+			models: ['matching', 'agent-host-copilotcli:nika/deepseek-v4-flash-responses'],
+			modelTarget: 'agent-host-copilotcli',
+		});
+	});
+
 	test('getModelsSnapshot excludes hidden models and announces visibility changes', () => {
 		const matchingModel = { ...createTestLanguageModel('matching'), targetChatSessionType: 'agent-host-copilotcli' };
 		const hiddenLanguageModelIds = new Set(['matching']);

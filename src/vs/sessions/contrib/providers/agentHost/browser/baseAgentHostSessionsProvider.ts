@@ -60,6 +60,19 @@ import { createSessionOutputObs, ISessionOutputObs } from './agentHostSessionFil
 const STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES = 'sessions.agentHost.sessionConfigPicker.selectedValues';
 const UNSAFE_SESSION_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+/** Vendor ID of the Nika BYOK language-model provider. */
+export const NIKA_VENDOR_ID = 'nika';
+
+/**
+ * Matches Nika language models that are not scoped to a specific session
+ * type (the "general pool"). Nika models are provided by the built-in
+ * extension and carry no `targetChatSessionType`, so sessions providers must
+ * surface them explicitly alongside per-session-type models.
+ */
+export function isNikaGeneralModel(metadata: ILanguageModelChatMetadata): boolean {
+	return metadata.vendor === NIKA_VENDOR_ID && metadata.targetChatSessionType === undefined;
+}
+
 // Well-known config chips whose last-resolved schemas are cached and seeded into
 // new drafts, so they stay visible (disabled) while a draft re-resolves rather
 // than blanking then reappearing.
@@ -3329,8 +3342,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			};
 		}
 		const allModels = getRegisteredLanguageModels(this._languageModelsService);
-		const models = allModels.filter(model => {
-			if (model.metadata.targetChatSessionType !== resourceScheme) {
+		const filtered = allModels.filter(model => {
+			if (model.metadata.targetChatSessionType !== resourceScheme && !isNikaGeneralModel(model.metadata)) {
 				return false;
 			}
 			if (this._languageModelsService.isModelHidden(model.identifier)) {
@@ -3339,6 +3352,12 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			const manageModelsIdentifier = ILanguageModelChatMetadata.getAgentHostByokManageModelsIdentifier(model.metadata);
 			return manageModelsIdentifier === undefined || !this._languageModelsService.isModelHidden(manageModelsIdentifier);
 		});
+		// The agent host may already mirror Nika models into its pool through the
+		// BYOK bridge (as `agent-host-<provider>` copies carrying a
+		// `byokModelIdentifier`). Those are included via the `targetChatSessionType`
+		// match above; drop the general-pool duplicate so Nika appears only once.
+		const bridgedIdentifiers = new Set(filtered.filter(model => model.metadata.byokModelIdentifier !== undefined).map(model => model.metadata.byokModelIdentifier));
+		const models = filtered.filter(model => !(isNikaGeneralModel(model.metadata) && bridgedIdentifiers.has(model.identifier)));
 		const desiredModel = desiredModelId ? this._languageModelsService.lookupLanguageModel(desiredModelId) : undefined;
 		const resolvedDesiredModelId = desiredModel?.targetChatSessionType && this.resourceSchemeForProvider(desiredModel.targetChatSessionType) === resourceScheme
 			? `${resourceScheme}:${desiredModel.id}`
