@@ -28,6 +28,9 @@ product.overrides.json
 *.tsbuildinfo
 .eslintcache
 .vscode-test
+# Nikas runtime logs
+nika.log
+nikas.log
 .chat-simulation-data
 vscode-telemetry-docs/
 test-output.json

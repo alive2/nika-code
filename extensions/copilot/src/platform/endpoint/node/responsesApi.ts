@@ -340,6 +340,11 @@ function rawMessagesToResponseAPI(modelId: string, messages: readonly Raw.ChatMe
 
 	const toolSearchCallIds = new Set<string>();
 	const toolSearchLoadedTools = new Set<string>();
+	// Call IDs of `function_call` items emitted into this request's input. Stateless
+	// Responses servers (e.g. DeepSeek) validate every `function_call_output` against a
+	// `function_call` present in the same request, so outputs without a matching call
+	// here must be dropped instead of 400ing the whole request.
+	const emittedFunctionCallIds = new Set<string>();
 	// Only pre-scan when history will be sliced (matches the slicing block below);
 	// otherwise the serialization loop visits each tool_search_call before its
 	// result and populates these sets in order on its own.
@@ -417,6 +422,7 @@ function rawMessagesToResponseAPI(modelId: string, messages: readonly Raw.ChatMe
 						} else {
 							// Tools loaded via tool_search need a namespace field to round-trip correctly
 							const namespace = toolSearchLoadedTools.has(toolCall.function.name) ? toolCall.function.name : undefined;
+							emittedFunctionCallIds.add(toolCall.id);
 							input.push({ type: 'function_call', name: toolCall.function.name, arguments: toolCall.function.arguments, call_id: toolCall.id, ...(namespace ? { namespace } : {}) });
 						}
 					}
@@ -442,6 +448,12 @@ function rawMessagesToResponseAPI(modelId: string, messages: readonly Raw.ChatMe
 							tools: loadedTools,
 						} satisfies ResponsesToolSearchOutputInput as unknown as OpenAI.Responses.ResponseInputItem);
 					} else {
+						// With `previous_response_id` the server resolves the tool call from its own
+						// state. Without it (stateless requests), an output whose `function_call` was
+						// not emitted into this input can never be matched and would 400 the request.
+						if (!previousResponseId && !emittedFunctionCallIds.has(message.toolCallId)) {
+							break;
+						}
 						if (supportsCacheBreakpoints) {
 							input.push({
 								type: 'function_call_output',

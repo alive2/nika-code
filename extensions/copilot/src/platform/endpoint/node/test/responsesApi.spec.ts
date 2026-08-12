@@ -1851,6 +1851,68 @@ describe('phase commentary followed by phase final_answer', () => {
 });
 
 describe('DeepSeek Responses compatibility', () => {
+	it('drops function_call_output without a matching function_call in stateless requests', () => {
+		// DeepSeek's Responses API is stateless: no previous_response_id, and every
+		// function_call_output must pair with a function_call present in the same input.
+		// Reproduces "400 No tool call found for tool output with call_id ..." when a
+		// follow-up turn carries only the tool output (history was sliced by a stateful
+		// marker that the stateless endpoint cannot honor).
+		const services = createPlatformServices();
+		const accessor = services.createTestingAccessor();
+		const instantiationService = accessor.get(IInstantiationService);
+		const messages: Raw.ChatMessage[] = [
+			{
+				role: Raw.ChatRole.Assistant,
+				content: [],
+				toolCalls: [{ id: 'call_ok', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }],
+			},
+			{
+				role: Raw.ChatRole.Tool,
+				toolCallId: 'call_ok',
+				content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: 'ok' }],
+			},
+			{
+				role: Raw.ChatRole.Tool,
+				toolCallId: 'call_orphan',
+				content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: 'no matching call' }],
+			},
+		];
+
+		const body = instantiationService.invokeFunction(servicesAccessor => createResponsesRequestBody(servicesAccessor, { ...createRequestOptions(messages, false), ignoreStatefulMarker: true }, testEndpoint.model, testEndpoint));
+
+		const input = body.input as OpenAI.Responses.ResponseInputItem[];
+		expect(input.filter(item => item.type === 'function_call_output')).toEqual([{ type: 'function_call_output', call_id: 'call_ok', output: 'ok' }]);
+
+		accessor.dispose();
+		services.dispose();
+	});
+
+	it('keeps function_call_output with a matching function_call in stateless requests', () => {
+		const services = createPlatformServices();
+		const accessor = services.createTestingAccessor();
+		const instantiationService = accessor.get(IInstantiationService);
+		const messages: Raw.ChatMessage[] = [
+			{
+				role: Raw.ChatRole.Assistant,
+				content: [],
+				toolCalls: [{ id: 'call_ok', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }],
+			},
+			{
+				role: Raw.ChatRole.Tool,
+				toolCallId: 'call_ok',
+				content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: 'ok' }],
+			},
+		];
+
+		const body = instantiationService.invokeFunction(servicesAccessor => createResponsesRequestBody(servicesAccessor, { ...createRequestOptions(messages, false), ignoreStatefulMarker: true }, testEndpoint.model, testEndpoint));
+
+		const input = body.input as OpenAI.Responses.ResponseInputItem[];
+		expect(input.filter(item => item.type === 'function_call_output')).toEqual([{ type: 'function_call_output', call_id: 'call_ok', output: 'ok' }]);
+
+		accessor.dispose();
+		services.dispose();
+	});
+
 	it('streams response.reasoning_text.delta as thinking', async () => {
 		const services = createPlatformServices();
 		const accessor = services.createTestingAccessor();
