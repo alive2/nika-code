@@ -42,6 +42,7 @@ import { chartsOrange } from '../../../../../platform/theme/common/colors/charts
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { ChatSessionArchiveActionWording, ChatSessionArchiveActionWordingSettingId, getChatSessionArchivedSectionLabel, getChatSessionArchiveActionWording } from '../../../../../platform/chat/common/sessionArchiveActions.js';
 import { getSessionStatusMessage, getSessionWorkspaceKind, GITHUB_REMOTE_FILE_SCHEME, ISession, ISessionWorkspace, SessionStatus, SessionWorkspaceKind } from '../../../../services/sessions/common/session.js';
 import { AgentSessionApprovalModel, agentSessionApprovalId, IAgentSessionApprovalInfo } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentSessionApprovalModel.js';
@@ -101,6 +102,21 @@ export const SessionGroupToolbarMenuId = new MenuId('SessionGroupToolbar');
 
 /** Controls whether the empty default Chats group is shown in the sessions list. */
 export const SESSIONS_LIST_SHOW_EMPTY_DEFAULT_GROUPS_SETTING = 'sessions.list.showEmptyDefaultGroups';
+
+/**
+ * Controls whether the sessions list only shows sessions created with the
+ * Copilot Chat provider (which hosts the Nika BYOK models) scoped to the
+ * current window's workspace folder — hiding sessions from other apps (e.g.
+ * Codex) and from other workspaces.
+ */
+export const SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING = 'sessions.list.showOnlyNikaAndCurrentWorkspace';
+
+/**
+ * ID of the Copilot Chat sessions provider. Defined locally (rather than
+ * imported from `contrib/providers/*`) because `contrib/sessions` must not
+ * depend on provider implementations.
+ */
+const COPILOT_PROVIDER_ID = 'default-copilot';
 
 export const IsSessionPinnedContext = new RawContextKey<boolean>('sessionItem.isPinned', false);
 export const SessionItemHasBranchNameContext = new RawContextKey<boolean>('sessionItem.hasBranchName', false);
@@ -1859,6 +1875,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		@IWorkbenchAssignmentService private readonly assignmentService: IWorkbenchAssignmentService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 
@@ -1905,7 +1922,9 @@ export class SessionsList extends Disposable implements ISessionsList {
 			this.update();
 		}));
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration(SESSIONS_LIST_SHOW_EMPTY_DEFAULT_GROUPS_SETTING) || e.affectsConfiguration(ChatSessionArchiveActionWordingSettingId)) {
+			if (e.affectsConfiguration(SESSIONS_LIST_SHOW_EMPTY_DEFAULT_GROUPS_SETTING)
+				|| e.affectsConfiguration(SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING)
+				|| e.affectsConfiguration(ChatSessionArchiveActionWordingSettingId)) {
 				this.update();
 			}
 		}));
@@ -2281,6 +2300,14 @@ export class SessionsList extends Disposable implements ISessionsList {
 		}
 		if (this._excludeRead) {
 			filtered = filtered.filter(s => !s.isRead.get());
+		}
+		if (this.configurationService.getValue<boolean>(SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING)) {
+			// Only show sessions created with the Copilot Chat provider (which
+			// hosts the Nika BYOK models) and scoped to the current window's
+			// workspace folder — hiding sessions from other apps (e.g. Codex)
+			// and from other workspaces.
+			const currentWorkspaceFolder = this.openWindowSourceFolder ?? this.workspaceContextService.getWorkspace().folders[0]?.uri;
+			filtered = filterSessionsToNikaAndWorkspace(filtered, currentWorkspaceFolder);
 		}
 
 		// Always include the active session even if it was filtered out,
@@ -3303,6 +3330,20 @@ function sessionMatchesFolder(session: ISession, folder: URI): boolean {
 		}
 	}
 	return false;
+}
+
+/**
+ * Filters sessions to only those created with the Copilot Chat provider (which
+ * hosts the Nika BYOK models) and, when a workspace folder is known, scoped to
+ * that folder. Sessions from other apps (e.g. Codex) and from other workspaces
+ * are hidden. When no workspace folder is available, only the provider filter
+ * is applied.
+ */
+export function filterSessionsToNikaAndWorkspace(sessions: readonly ISession[], workspaceFolder: URI | undefined): ISession[] {
+	return sessions.filter(s =>
+		s.providerId === COPILOT_PROVIDER_ID
+		&& (!workspaceFolder || sessionMatchesFolder(s, workspaceFolder))
+	);
 }
 
 //#endregion

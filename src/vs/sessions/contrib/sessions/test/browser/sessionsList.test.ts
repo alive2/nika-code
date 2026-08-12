@@ -18,7 +18,8 @@ import { IAutomationService } from '../../../../../workbench/contrib/chat/common
 import { ICustomViewService } from '../../../../services/customView/browser/customViewService.js';
 import { IChat, ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
-import { computeReorderSortChanges, groupByDate, groupByWorkspace, groupSessionsForList, limitSessionsForList, SessionSectionRenderer, sortSessions, SessionsGrouping, SessionsSorting } from '../../browser/views/sessionsList.js';
+import { computeReorderSortChanges, filterSessionsToNikaAndWorkspace, groupByDate, groupByWorkspace, groupSessionsForList, limitSessionsForList, SessionSectionRenderer, sortSessions, SessionsGrouping, SessionsSorting } from '../../browser/views/sessionsList.js';
+import { ISessionFolder } from '../../../../services/sessions/common/session.js';
 
 function createSession(id: string, opts: {
 	workspaceLabel?: string;
@@ -27,13 +28,15 @@ function createSession(id: string, opts: {
 	isArchived?: boolean;
 	isRead?: boolean;
 	resource?: URI;
+	providerId?: string;
+	workspaceFolders?: ISessionFolder[];
 }): ISession {
 	const createdAt = opts.createdAt ?? new Date();
 	const updatedAt = opts.updatedAt ?? createdAt;
 	return {
 		sessionId: id,
 		resource: opts.resource ?? URI.parse(`session://${id}`),
-		providerId: 'test',
+		providerId: opts.providerId ?? 'test',
 		sessionType: 'test',
 		icon: Codicon.account,
 		createdAt,
@@ -41,7 +44,7 @@ function createSession(id: string, opts: {
 			uri: URI.parse(`session://workspace/${id}`),
 			label: opts.workspaceLabel,
 			icon: Codicon.folder,
-			folders: [],
+			folders: opts.workspaceFolders ?? [],
 			requiresWorkspaceTrust: false,
 			isVirtualWorkspace: false,
 		} : undefined),
@@ -557,6 +560,70 @@ suite('Sessions - SessionsList', () => {
 			assert.deepStrictEqual(clear, []);
 			assert.strictEqual(set.size, 2);
 			assert.ok(set.get('a')! > set.get('b')!);
+		});
+	});
+
+	suite('filterSessionsToNikaAndWorkspace', () => {
+
+		const folderA = URI.parse('file:///workspace/a');
+		const folderB = URI.parse('file:///workspace/b');
+
+		function folder(folderUri: URI): ISessionFolder {
+			return { root: folderUri, workingDirectory: folderUri, name: 'folder', description: undefined };
+		}
+
+		function nikaSession(id: string, folders: ISessionFolder[] = [folder(folderA)]): ISession {
+			return createSession(id, { providerId: 'default-copilot', workspaceLabel: id, workspaceFolders: folders });
+		}
+
+		function otherSession(id: string, folders: ISessionFolder[] = [folder(folderA)]): ISession {
+			return createSession(id, { providerId: 'openai-codex', workspaceLabel: id, workspaceFolders: folders });
+		}
+
+		test('keeps only Copilot Chat sessions', () => {
+			const sessions = [nikaSession('n1'), otherSession('c1')];
+
+			const filtered = filterSessionsToNikaAndWorkspace(sessions, undefined);
+
+			assert.deepStrictEqual(filtered.map(s => s.sessionId), ['n1']);
+		});
+
+		test('keeps only sessions scoped to the given workspace folder', () => {
+			const inA = nikaSession('in-a', [folder(folderA)]);
+			const inB = nikaSession('in-b', [folder(folderB)]);
+			const sessions = [inA, inB];
+
+			const filtered = filterSessionsToNikaAndWorkspace(sessions, folderA);
+
+			assert.deepStrictEqual(filtered.map(s => s.sessionId), ['in-a']);
+		});
+
+		test('matches via the folder working directory as well as the root', () => {
+			const session = createSession('wd', {
+				providerId: 'default-copilot',
+				workspaceLabel: 'wd',
+				workspaceFolders: [{ root: folderA, workingDirectory: URI.parse('file:///workspace/a/wd'), name: 'wd', description: undefined }],
+			});
+
+			const filtered = filterSessionsToNikaAndWorkspace([session], URI.parse('file:///workspace/a/wd'));
+
+			assert.deepStrictEqual(filtered.map(s => s.sessionId), ['wd']);
+		});
+
+		test('applies only the provider filter when no workspace folder is given', () => {
+			const sessions = [nikaSession('n1'), otherSession('c1')];
+
+			const filtered = filterSessionsToNikaAndWorkspace(sessions, undefined);
+
+			assert.deepStrictEqual(filtered.map(s => s.sessionId), ['n1']);
+		});
+
+		test('drops Copilot Chat sessions without a matching workspace folder', () => {
+			const sessions = [nikaSession('in-a', [folder(folderA)])];
+
+			const filtered = filterSessionsToNikaAndWorkspace(sessions, folderB);
+
+			assert.deepStrictEqual(filtered, []);
 		});
 	});
 });

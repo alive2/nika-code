@@ -97,6 +97,7 @@ Multiple filter dimensions combine:
 | Archived | Hidden | Shows/hides the Done section |
 | Read | All shown | Optionally shows only unread sessions |
 | Agent host | All | Scopes to a specific agent host provider |
+| Nika + current workspace | On | `sessions.list.showOnlyNikaAndCurrentWorkspace` (Nika fork): keeps only Copilot Chat provider sessions (which host the Nika BYOK models) scoped to the current window's workspace folder, hiding sessions from other apps (e.g. Codex) and from other workspaces. The workspace is the window's opened folder (`openWindowSourceFolder`, set when opening via the folder picker) falling back to the first folder of the workspace context service. When no workspace folder is available, only the provider (Nika) filter is applied. |
 
 The **active session is always visible** even if it would be excluded by filters.
 

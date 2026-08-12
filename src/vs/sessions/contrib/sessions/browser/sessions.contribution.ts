@@ -20,7 +20,7 @@ import { SessionsView, SessionsViewId } from './views/sessionsView.js';
 import './views/sessionsViewActions.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
-import { SESSIONS_LIST_SHOW_EMPTY_DEFAULT_GROUPS_SETTING } from './views/sessionsList.js';
+import { SESSIONS_LIST_SHOW_EMPTY_DEFAULT_GROUPS_SETTING, SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING } from './views/sessionsList.js';
 import { SessionsMouseNavigationContribution } from './sessionsMouseNavigation.js';
 import { ChatContextKeys } from '../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { CHAT_INPUT_WINDOW_TOGGLE_COMMAND_ID } from '../../../../workbench/contrib/chat/common/chatInputWindow.js';
@@ -83,6 +83,13 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			type: 'boolean',
 			tags: ['preview'],
 			description: localize('sessions.list.showEmptyDefaultGroups', "Controls whether the Chats group is shown in the sessions list even when it is empty."),
+			default: true,
+			experiment: { mode: 'auto' }
+		},
+		[SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING]: {
+			type: 'boolean',
+			tags: ['preview'],
+			description: localize('sessions.list.showOnlyNikaAndCurrentWorkspace', "Controls whether the sessions list only shows sessions created with Nika (Copilot Chat) and scoped to the current workspace folder, hiding sessions from other apps (e.g. Codex) and from other workspaces."),
 			default: true,
 			experiment: { mode: 'auto' }
 		},
