@@ -13,3 +13,7 @@ compatibility_date = "2024-11-01"
 # [vars]
 # GITHUB_OWNER = "alive2"
 # GITHUB_REPO = "nika-code"
+
+# Optional: GitHub token to avoid unauthenticated rate limits from shared
+# Cloudflare egress IPs. Set as a runtime secret (never commit it):
+#   npx wrangler secret put GITHUB_TOKEN

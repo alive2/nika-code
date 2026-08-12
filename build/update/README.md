@@ -37,9 +37,24 @@ no worker changes needed.
 npx wrangler login        # one-time browser auth
 cd build/update
 npx wrangler deploy
+npx wrangler secret put GITHUB_TOKEN   # optional, see below
 ```
 
 The worker URL is already wired into `product.json` -> `"updateUrl"`.
+
+### Optional: GitHub token
+
+The worker runs on shared Cloudflare egress IPs, which GitHub throttles heavily
+when requests are unauthenticated. If update checks start hitting GitHub's rate
+limit (HTTP 403), add a token with `repo:read` scope:
+
+```sh
+npx wrangler secret put GITHUB_TOKEN
+```
+
+The token is read from the `GITHUB_TOKEN` worker secret at runtime; it is never
+committed to the repo. GitHub's own rate limits apply regardless, so the worker
+also caches GitHub responses for 5 minutes via the Cloudflare Cache API.
 
 ## Shipping an update
 
@@ -71,7 +86,10 @@ curl "https://nika-code-update.173david173.workers.dev/api/update/win32-x64-user
 ## Notes
 
 - The GitHub lookup is cached for 5 minutes via the Cloudflare Cache API to
-  stay within GitHub API rate limits.
+  stay within GitHub API rate limits. Cache keys are https URLs wrapped in a
+  `Request` — the Cache API rejects bare-string keys in production.
+- Setting the `GITHUB_TOKEN` secret (see above) avoids GitHub's unauthenticated
+  rate limit for shared Cloudflare egress IPs.
 - On any upstream error the worker returns `204`, so background update checks
   stay silent; manual checks surface the error in the UI.
 - Environment variables `GITHUB_OWNER` / `GITHUB_REPO` (see `wrangler.toml`)

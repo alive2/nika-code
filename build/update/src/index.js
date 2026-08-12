@@ -60,13 +60,18 @@ async function githubFetch(path, env) {
  * Cache a JSON payload keyed by an https URL. Cloudflare's Cache API requires
  * http(s) cache keys — a bare string like "github:release:..." throws in the
  * real runtime (which previously made every request fall into the catch and
- * return 204). Cache failures are swallowed so the request still falls back to
- * GitHub directly.
+ * return 204). The key is wrapped in a Request so match() and put() parse it
+ * identically (put() has historically been stricter about key formats), and
+ * cache failures are logged (not hidden) so a silently-degraded cache that
+ * exposes the worker to GitHub rate limits stays visible.
  */
 async function cachedJson(cacheKey, loader) {
 	const cache = caches.default;
+	// Canonical Cache API key: a Request whose URL is the http(s) string.
+	const request = new Request(cacheKey);
+
 	try {
-		const cached = await cache.match(cacheKey);
+		const cached = await cache.match(request);
 		if (cached) {
 			return cached.json();
 		}
@@ -77,7 +82,7 @@ async function cachedJson(cacheKey, loader) {
 	const data = await loader();
 
 	try {
-		await cache.put(cacheKey, new Response(JSON.stringify(data), {
+		await cache.put(request, new Response(JSON.stringify(data), {
 			headers: { 'Cache-Control': `s-maxage=${CACHE_TTL_SECONDS}` },
 		}));
 	} catch (err) {
