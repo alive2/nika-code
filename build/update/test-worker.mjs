@@ -5,14 +5,24 @@ import { Worker } from 'node:worker_threads';
 
 // Minimal caches.default mock: in-memory map that returns a FRESH clone on each
 // match (the real Cloudflare Cache API serves a fresh response per hit).
+// IMPORTANT: mirror the real runtime's constraint that cache keys must be
+// http(s) URLs — a bare string key (like "github:release:...") throws, which is
+// exactly the bug that made the deployed worker return 204 for every request.
 const cacheStore = new Map();
+function assertCacheKey(key) {
+	if (typeof key !== 'string' || !/^https?:\/\//.test(key)) {
+		throw new TypeError(`Invalid cache key: ${key} (Cache API requires an http(s) URL)`);
+	}
+}
 globalThis.caches = {
 	default: {
 		async match(key) {
+			assertCacheKey(key);
 			const entry = cacheStore.get(key);
 			return entry ? entry.clone() : undefined;
 		},
 		async put(key, response) {
+			assertCacheKey(key);
 			cacheStore.set(key, new Response(await response.clone().text(), { headers: response.headers }));
 		},
 	},
