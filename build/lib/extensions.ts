@@ -483,11 +483,36 @@ export function packageCopilotExtensionStream(disableMangle: boolean): Stream {
 	const productionDependencies = getProductionDependencies('extensions/copilot');
 	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
 
-	return es.merge(
-		localExtensionsStream,
+	// NikaCode: the copilot esbuild step runs the extension postinstall, which
+	// mutates `node_modules/@github/copilot` (removes and recreates `sdk/` and
+	// deletes the transient `shims.txt` marker). Glob the production dependency
+	// tree only AFTER the local extension stream starts emitting, because
+	// `fromLocalEsbuild` only emits once the esbuild/postinstall step finishes.
+	// Globbing concurrently previously captured `sdk/` mid-rm (empty directory)
+	// or listed `shims.txt` right as it was deleted (`lstat` ENOENT).
+	const dependenciesGate = es.through();
+
+	let dependenciesStarted = false;
+	const startDependencies = () => {
+		if (dependenciesStarted) {
+			return;
+		}
+		dependenciesStarted = true;
 		gulp.src(dependenciesSrc, { base: '.' })
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`)))
+			.pipe(dependenciesGate);
+	};
+
+	// Start the dependencies glob once the local stream produces its first file
+	// (i.e. after esbuild + postinstall complete). Also cover the edge case of an
+	// empty local stream via the end event.
+	localExtensionsStream.once('data', startDependencies);
+	localExtensionsStream.once('end', startDependencies);
+
+	return es.merge(
+		localExtensionsStream,
+		dependenciesGate
 	).pipe(util2.setExecutableBit(['**/*.sh']));
 }
 

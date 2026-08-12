@@ -606,7 +606,17 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
 	return new Promise((resolve, reject) => {
 		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
-		proc.on('error', reject);
+		// NikaCode: local OSS builds may not have the Windows SDK (and thus
+		// `signtool.exe`) on PATH. The Electron binaries shipped by the npm
+		// package are unsigned anyway, so treat a missing signtool as "no
+		// Authenticode signature" and let `rcedit` patch version info directly.
+		proc.on('error', err => {
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+				resolve(false);
+			} else {
+				reject(err);
+			}
+		});
 		proc.on('exit', code => resolve(code === 0));
 	});
 }
