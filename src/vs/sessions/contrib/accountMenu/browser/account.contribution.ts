@@ -156,6 +156,18 @@ MenuRegistry.appendMenuItem(AccountMenu, {
 	order: 1,
 });
 
+// Nika Settings (hidden on phone — no settings UI on mobile)
+MenuRegistry.appendMenuItem(AccountMenu, {
+	command: {
+		id: 'nika.openSettings',
+		title: localize('nikaSettings', "Nika Settings"),
+		icon: Codicon.settingsGear,
+	},
+	when: IsPhoneLayoutContext.negate(),
+	group: '2_settings',
+	order: 2,
+});
+
 // Update actions
 registerUpdateMenuItems(AccountMenu, '3_updates');
 

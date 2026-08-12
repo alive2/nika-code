@@ -32,7 +32,7 @@ import { ILanguageModelToolsService } from '../../../../../workbench/contrib/cha
 import { ChatMode, IChatMode, IChatModeService, isBuiltinChatMode } from '../../../../../workbench/contrib/chat/common/chatModes.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
-import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
+import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
 import { getRegisteredLanguageModels, resolveModelIdentifier, resolveModelIdentifierFromLanguageModels } from '../../../../../workbench/contrib/chat/common/modelSelection.js';
 import { IGitService, IGitRepository } from '../../../../../workbench/contrib/git/common/gitService.js';
 import { IContextKeyService, ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -64,6 +64,19 @@ export const CopilotCloudSessionType: ISessionType = {
 
 const SESSION_WORKSPACE_GROUP_GITHUB = localize('sessionWorkspaceGroup.github', "GitHub");
 const STORAGE_KEY_ISOLATION_MODE = 'sessions.isolationPicker.selectedMode';
+
+/** Vendor ID of the Nika BYOK language-model provider. */
+const NIKA_VENDOR_ID = 'nika';
+
+/**
+ * Matches Nika language models that are not scoped to a specific session
+ * type (the "general pool"). Nika models are provided by the built-in
+ * extension and carry no `targetChatSessionType`, so they must be surfaced
+ * explicitly in CLI session model snapshots alongside per-session-type models.
+ */
+function isNikaGeneralModel(metadata: ILanguageModelChatMetadata): boolean {
+	return metadata.vendor === NIKA_VENDOR_ID && metadata.targetChatSessionType === undefined;
+}
 
 export type IsolationMode = 'worktree' | 'workspace';
 
@@ -1589,7 +1602,7 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 			return { models: [], desiredModelResolution: resolveModelIdentifier([], desiredModelId, false), modelTarget: undefined };
 		}
 		const allModels = getRegisteredLanguageModels(this.languageModelsService);
-		const models = allModels.filter(model => model.metadata.targetChatSessionType === sessionType);
+		const models = allModels.filter(model => model.metadata.targetChatSessionType === sessionType || isNikaGeneralModel(model.metadata));
 		return {
 			models,
 			desiredModelResolution: resolveModelIdentifierFromLanguageModels(models, desiredModelId, this.languageModelsService, allModels),
@@ -1608,7 +1621,7 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 			useGroupedModelPicker: true,
 			showFeatured: true,
 			showUnavailableFeatured: false,
-			showManageModelsAction: false,
+			showManageModelsAction: true,
 			showAutoModel,
 		};
 	}

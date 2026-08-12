@@ -116,10 +116,10 @@ Model picker widgets that back the new-chat `/models` slash command also inject 
 The model picker is no longer contributed per provider. Each `NewChatInputWidget` owns a scoped `SessionModelSelectionModel`, while the sessions-core `ModelPicker` (`contrib/chat/browser/modelPicker.ts`) is a presentation and telemetry adapter over that model. The coordinator reads models, the desired identifier's resolution, and the concrete model target from `ISessionsProvider.getModelsSnapshot(sessionId, desiredModelId)`, remembers explicit choices through the shared profile/user chat-model storage, reads presentation from `getModelPickerOptions(sessionId)`, and applies transitions through `ISessionsProvider.setModel(sessionId, modelId)`. Omitted `showAutoModel` defaults to `true`.
 
 This provider returns a model snapshot from `getModelsSnapshot` based on the active session:
-- **CLI / Claude** sessions return registered language models whose `targetChatSessionType` matches the session type.
+- **CLI / Claude** sessions return registered language models whose `targetChatSessionType` matches the session type, plus **Nika general-pool** models (`vendor === 'nika'` with no `targetChatSessionType`). Nika models are provided by the built-in extension and are not scoped to a session type, so they are surfaced explicitly so they can be picked and sent from Copilot Chat sessions.
 - **Cloud** sessions synthesize `ILanguageModelChatMetadataAndIdentifier` entries from the extension-host `models` option group and resolve the snapshot once option groups have loaded, regardless of model-id syntax; `setModel` additionally persists the choice as the option-group value so the extension host honours it.
 
-`getModelPickerOptions` returns grouped models with featured models shown and no "Manage Models" action (that action is offered only by the local provider).
+`getModelPickerOptions` returns grouped models with featured models shown and the "Manage Models" action enabled (matching the agent host provider).
 
 ### Context Key Gating
 

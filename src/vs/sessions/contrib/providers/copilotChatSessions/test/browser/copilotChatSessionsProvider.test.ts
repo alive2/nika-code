@@ -673,6 +673,70 @@ suite('CopilotChatSessionsProvider', () => {
 		});
 	});
 
+	test('Copilot CLI session includes Nika general-pool models alongside session-targeted models', () => {
+		const models = new Map<string, ILanguageModelChatMetadata>();
+		const provider = createProvider(disposables, model, {
+			languageModelsService: {
+				getLanguageModelIds: () => [...models.keys()],
+				lookupLanguageModel: identifier => models.get(identifier),
+				hasResolvedVendor: () => true,
+			},
+		});
+		const session = provider.createNewSession(URI.file('/test/project'), CopilotCLISessionType.id);
+
+		models.set('copilot/session-model', {
+			extension: new ExtensionIdentifier('test.extension'),
+			id: 'session-model',
+			name: 'Session Model',
+			vendor: 'copilot',
+			version: '1.0',
+			family: 'session-model',
+			maxInputTokens: 1,
+			maxOutputTokens: 1,
+			isUserSelectable: true,
+			isDefaultForLocation: {},
+			targetChatSessionType: CopilotCLISessionType.id,
+		});
+		models.set('nika/deepseek-v4-flash-responses', {
+			extension: new ExtensionIdentifier('test.extension'),
+			id: 'deepseek-v4-flash-responses',
+			name: 'DeepSeek V4 Flash',
+			vendor: 'nika',
+			version: '1.0',
+			family: 'deepseek-v4-flash',
+			maxInputTokens: 1,
+			maxOutputTokens: 1,
+			isUserSelectable: true,
+			isDefaultForLocation: {},
+		});
+		// A Nika model bridged into another session type must not leak into this session.
+		models.set('agent-host-copilot/nika/deepseek-v4-pro', {
+			extension: new ExtensionIdentifier('test.extension'),
+			id: 'deepseek-v4-pro',
+			name: 'DeepSeek V4 Pro',
+			vendor: 'agent-host-copilot',
+			version: '1.0',
+			family: 'deepseek-v4-pro',
+			maxInputTokens: 1,
+			maxOutputTokens: 1,
+			isUserSelectable: true,
+			isDefaultForLocation: {},
+			targetChatSessionType: 'agent-host-copilot',
+		});
+
+		const snapshot = provider.getModelsSnapshot(session.sessionId, 'nika/deepseek-v4-flash-responses');
+
+		assert.deepStrictEqual({
+			models: snapshot.models.map(model => model.identifier),
+			desiredModelResolution: snapshot.desiredModelResolution,
+			modelTarget: snapshot.modelTarget,
+		}, {
+			models: ['copilot/session-model', 'nika/deepseek-v4-flash-responses'],
+			desiredModelResolution: { kind: 'available', model: snapshot.models[1] },
+			modelTarget: CopilotCLISessionType.id,
+		});
+	});
+
 	test('Copilot CLI session maps workspace selection to Agent Host folder config', async () => {
 		const provider = createProviderForSendTests(disposables, model, async () => ({ kind: 'sent' as const, data: {} as IChatSendRequestData }));
 		const session = provider.createNewSession(URI.file('/test/project'), CopilotCLISessionType.id);
