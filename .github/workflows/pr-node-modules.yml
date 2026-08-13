@@ -1,9 +1,17 @@
 name: Code OSS (node_modules)
 
-on:
-  push:
-    branches:
-      - main
+# DISABLED: this workflow targets microsoft/vscode's private self-hosted
+# runner pool (1ES.Pool=1es-vscode-oss-*) and GitHub paid "larger runners"
+# (macos-26-xlarge), which do not exist on this fork. On a personal repo the
+# Compile/Linux/Windows/Copilot jobs queue forever and the macOS job fails
+# immediately, so the workflow can never pass. Keep it on disk for reference
+# only; re-enable by restoring the `on:` block below if this is ever run in
+# the microsoft/vscode infrastructure.
+#
+# on:
+#   push:
+#     branches:
+#       - main
 
 permissions: {}
 
