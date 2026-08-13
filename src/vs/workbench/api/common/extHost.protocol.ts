@@ -825,7 +825,7 @@ export interface MainThreadQuickOpenShape extends IDisposable {
 }
 
 export interface MainThreadStatusBarShape extends IDisposable {
-	$setEntry(id: string, statusId: string, extensionId: string | undefined, statusName: string, text: string, tooltip: IMarkdownString | string | undefined, hasTooltipProvider: boolean, command: ICommandDto | undefined, color: string | ThemeColor | undefined, backgroundColor: string | ThemeColor | undefined, alignLeft: boolean, priority: number | undefined, accessibilityInformation: IAccessibilityInformation | undefined): void;
+	$setEntry(id: string, statusId: string, extensionId: string | undefined, statusName: string, text: string, tooltip: IMarkdownString | string | undefined, hasTooltipProvider: boolean, command: ICommandDto | undefined, color: string | ThemeColor | undefined, backgroundColor: string | ThemeColor | undefined, alignLeft: boolean, priority: number | undefined, showProgress: boolean | 'loading' | 'syncing' | undefined, accessibilityInformation: IAccessibilityInformation | undefined): void;
 	$disposeEntry(id: string): void;
 }
 
@@ -837,6 +837,7 @@ export type StatusBarItemDto = {
 	text: string;
 	tooltip?: string;
 	command?: string;
+	showProgress?: boolean | 'loading' | 'syncing';
 	accessibilityInformation?: IAccessibilityInformation;
 };
 

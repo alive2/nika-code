@@ -68,6 +68,11 @@ The `docs/` folder is the reference for everything from building to shipping:
 | [**DEPLOYMENT.md**](docs/DEPLOYMENT.md) | Building the app and the Windows installer from source |
 | [**RELEASING.md**](docs/RELEASING.md) | Cutting and publishing a release |
 | [**AUTO-UPDATE.md**](docs/AUTO-UPDATE.md) | How auto-updates work, the Cloudflare Worker, and how to verify updates |
+| [**SEMANTIC-INDEXING.md**](docs/SEMANTIC-INDEXING.md) | How `#codebase` indexing works vs. Cursor's indexing |
+| [**CURSOR-INDEXING-REVERSE-ENGINEERING.md**](docs/CURSOR-INDEXING-REVERSE-ENGINEERING.md) | Raw reverse-engineering evidence for Cursor's indexing (protocol, encryption, crepe, endpoints) |
+| [**VSCODE-CORE-VS-CURSOR-INDEXING.md**](docs/VSCODE-CORE-VS-CURSOR-INDEXING.md) | Deep comparison: how stock VS Code search/indexing works vs. Cursor's |
+| [**INDEXING-DESIGN.md**](docs/INDEXING-DESIGN.md) | Design + implementation plan for scheme-selectable Nika semantic indexing (setting + progress in Nika's dashboard) |
+| [**INDEXING-PLAN.md**](docs/INDEXING-PLAN.md) | Executable task breakdown (milestones, files, acceptance criteria, tests) for the indexing work |
 | [**TROUBLESHOOTING.md**](docs/TROUBLESHOOTING.md) | Known build/release/update gotchas and their fixes |
 
 ---

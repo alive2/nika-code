@@ -50,7 +50,7 @@ export interface IExtensionStatusBarItemService {
 
 	readonly onDidChange: Event<IExtensionStatusBarItemChangeEvent>;
 
-	setOrUpdateEntry(id: string, statusId: string, extensionId: string | undefined, name: string, text: string, tooltip: IMarkdownString | string | undefined | IManagedHoverTooltipMarkdownString, command: Command | undefined, color: string | ThemeColor | undefined, backgroundColor: ThemeColor | undefined, alignLeft: boolean, priority: number | undefined, accessibilityInformation: IAccessibilityInformation | undefined): StatusBarUpdateKind;
+	setOrUpdateEntry(id: string, statusId: string, extensionId: string | undefined, name: string, text: string, tooltip: IMarkdownString | string | undefined | IManagedHoverTooltipMarkdownString, command: Command | undefined, color: string | ThemeColor | undefined, backgroundColor: ThemeColor | undefined, alignLeft: boolean, priority: number | undefined, showProgress: boolean | 'loading' | 'syncing' | undefined, accessibilityInformation: IAccessibilityInformation | undefined): StatusBarUpdateKind;
 
 	unsetEntry(id: string): void;
 
@@ -79,7 +79,7 @@ class ExtensionStatusBarItemService implements IExtensionStatusBarItemService {
 		id: string, extensionId: string | undefined, name: string, text: string,
 		tooltip: IMarkdownString | string | undefined | IManagedHoverTooltipMarkdownString,
 		command: Command | undefined, color: string | ThemeColor | undefined, backgroundColor: ThemeColor | undefined,
-		alignLeft: boolean, priority: number | undefined, accessibilityInformation: IAccessibilityInformation | undefined
+		alignLeft: boolean, priority: number | undefined, showProgress: boolean | 'loading' | 'syncing' | undefined, accessibilityInformation: IAccessibilityInformation | undefined
 	): StatusBarUpdateKind {
 		// if there are icons in the text use the tooltip for the aria label
 		let ariaLabel: string;
@@ -103,7 +103,7 @@ class ExtensionStatusBarItemService implements IExtensionStatusBarItemService {
 				color = undefined;
 				backgroundColor = undefined;
 		}
-		const entry: IStatusbarEntry = { name, text, tooltip, command, color, backgroundColor, ariaLabel, role, kind, extensionId };
+		const entry: IStatusbarEntry = { name, text, tooltip, command, color, backgroundColor, ariaLabel, role, kind, extensionId, showProgress };
 
 		if (typeof priority === 'undefined') {
 			priority = 0;
@@ -290,6 +290,7 @@ export class StatusBarItemsExtensionPoint {
 						undefined, undefined,
 						candidate.alignment === 'left',
 						candidate.priority,
+						undefined,
 						candidate.accessibilityInformation
 					);
 

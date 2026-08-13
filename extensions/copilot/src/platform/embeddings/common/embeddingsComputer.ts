@@ -15,6 +15,7 @@ import { TelemetryCorrelationId } from '../../../util/common/telemetryCorrelatio
 export class EmbeddingType {
 	public static readonly text3small_512 = new EmbeddingType('text-embedding-3-small-512');
 	public static readonly metis_1024_I16_Binary = new EmbeddingType('metis-1024-I16-Binary');
+	public static readonly nikaLocalBgeSmallEnV15 = new EmbeddingType('nika-local-bge-small-en-v1.5');
 
 	constructor(
 		public readonly id: string
@@ -33,7 +34,8 @@ export class EmbeddingType {
 // These values are used in the request and are case sensitive. Do not change them unless advised by CAPI.
 export const enum LEGACY_EMBEDDING_MODEL_ID {
 	TEXT3SMALL = 'text-embedding-3-small',
-	Metis_I16_Binary = 'metis-I16-Binary'
+	Metis_I16_Binary = 'metis-I16-Binary',
+	NikaLocalBgeSmallEnV15 = 'nika-local-bge-small-en-v1.5'
 }
 
 type EmbeddingQuantization = 'float32' | 'float16' | 'binary';
@@ -62,6 +64,14 @@ const wellKnownEmbeddingMetadata = Object.freeze<Record<string, EmbeddingTypeInf
 		quantization: {
 			query: 'float16',
 			document: 'binary'
+		},
+	},
+	[EmbeddingType.nikaLocalBgeSmallEnV15.id]: {
+		model: LEGACY_EMBEDDING_MODEL_ID.NikaLocalBgeSmallEnV15,
+		dimensions: 384,
+		quantization: {
+			query: 'float32',
+			document: 'float32'
 		},
 	},
 });

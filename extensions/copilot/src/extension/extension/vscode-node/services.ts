@@ -88,6 +88,7 @@ import { ISetupTestsDetector, SetupTestsDetector } from '../../../platform/testi
 import { ITestDepsResolver, TestDepsResolver } from '../../../platform/testing/node/testDepsResolver';
 import { ITokenizerProvider, TokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { GithubAvailableEmbeddingTypesService, IGithubAvailableEmbeddingTypesService } from '../../../platform/workspaceChunkSearch/common/githubAvailableEmbeddingTypes';
+import { IIndexingSchemeManager, IndexingSchemeManager } from '../../../platform/workspaceChunkSearch/node/indexingSchemeManager';
 import { IRerankerService, RerankerService } from '../../../platform/workspaceChunkSearch/common/rerankerService';
 import { ScenarioAutomationWorkspaceChunkSearchService } from '../../../platform/workspaceChunkSearch/node/scenarioAutomationWorkspaceChunkSearchService';
 import { IWorkspaceChunkSearchService, WorkspaceChunkSearchService } from '../../../platform/workspaceChunkSearch/node/workspaceChunkSearchService';
@@ -209,6 +210,8 @@ export function registerServices(builder: IInstantiationServiceBuilder, extensio
 		builder.define(IIgnoreService, new SyncDescriptor(VsCodeIgnoreService));
 		builder.define(IWorkspaceChunkSearchService, new SyncDescriptor(WorkspaceChunkSearchService));
 	}
+
+	builder.define(IIndexingSchemeManager, new SyncDescriptor(IndexingSchemeManager));
 
 	builder.define(IGithubCodeSearchService, new SyncDescriptor(GithubCodeSearchService));
 	builder.define(IGithubAvailableEmbeddingTypesService, new SyncDescriptor(GithubAvailableEmbeddingTypesService));

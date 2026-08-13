@@ -37,6 +37,7 @@ import { StrategySearchResult, StrategySearchSizing, WorkspaceChunkQuery, Worksp
 import { CodeSearchChunkSearch, CodeSearchRemoteIndexState, ExternalIngestEnablement } from './codeSearch/codeSearchChunkSearch';
 import { BuildIndexTriggerReason, TriggerIndexingError } from './codeSearch/codeSearchRepo';
 import { IWorkspaceFileIndex } from './workspaceFileIndex';
+import { IIndexingSchemeManager } from '../common/indexingScheme';
 
 const maxEmbeddingSpread = 0.65;
 
@@ -111,6 +112,7 @@ export class WorkspaceChunkSearchService extends Disposable implements IWorkspac
 		@IGithubAvailableEmbeddingTypesService private readonly _availableEmbeddingTypes: IGithubAvailableEmbeddingTypesService,
 		@ILogService private readonly _logService: ILogService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
+		@IIndexingSchemeManager private readonly _indexingSchemeManager: IIndexingSchemeManager,
 	) {
 		super();
 
@@ -187,6 +189,9 @@ export class WorkspaceChunkSearchService extends Disposable implements IWorkspac
 	}
 
 	async isAvailable(): Promise<boolean> {
+		if (this._indexingSchemeManager.id === 'local') {
+			return true;
+		}
 		if (!this._impl) {
 			return false;
 		}
@@ -195,6 +200,14 @@ export class WorkspaceChunkSearchService extends Disposable implements IWorkspac
 	}
 
 	async searchFileChunks(sizing: WorkspaceChunkSearchSizing, query: WorkspaceChunkQuery, options: WorkspaceChunkSearchOptions, telemetryInfo: TelemetryCorrelationId, progress: vscode.Progress<vscode.ChatResponsePart> | undefined, token: CancellationToken): Promise<WorkspaceChunkSearchResult> {
+		if (this._indexingSchemeManager.id === 'local') {
+			const maxResults = this.getMaxChunks(sizing);
+			const result = await this._indexingSchemeManager.search(query.queryText, maxResults, token);
+			if (result) {
+				return { chunks: result.chunks, alerts: result.alerts };
+			}
+			return { chunks: [], alerts: [new ChatResponseWarningPart(l10n.t('Local semantic search is not available for this workspace.'))] };
+		}
 		const impl = await this.tryInit(false);
 		if (!impl) {
 			throw new Error('Workspace chunk search service not available');
@@ -202,7 +215,28 @@ export class WorkspaceChunkSearchService extends Disposable implements IWorkspac
 		return impl.searchFileChunks(sizing, query, options, telemetryInfo, progress, token);
 	}
 
+	private getMaxChunks(sizing: WorkspaceChunkSearchSizing): number {
+		let maxResults: number | undefined;
+		if (typeof sizing.tokenBudget === 'number') {
+			maxResults = Math.floor(sizing.tokenBudget / MAX_CHUNK_SIZE_TOKENS);
+		}
+
+		if (typeof sizing.maxResults === 'number') {
+			maxResults = typeof maxResults === 'number' ? Math.min(sizing.maxResults, maxResults) : sizing.maxResults;
+		}
+
+		if (typeof maxResults !== 'number') {
+			return 20;
+		}
+
+		return maxResults;
+	}
+
 	async triggerIndexing(trigger: BuildIndexTriggerReason, onProgress: (message: string) => void, telemetryInfo: TelemetryCorrelationId, token: CancellationToken): Promise<Result<true, TriggerIndexingError>> {
+		if (this._indexingSchemeManager.id === 'local') {
+			await this._indexingSchemeManager.rebuild();
+			return Result.ok<true>(true);
+		}
 		const impl = await raceCancellationError(this.tryInit(false), token);
 		if (!impl) {
 			throw new Error('Workspace chunk search service not available');

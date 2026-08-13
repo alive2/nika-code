@@ -12,8 +12,12 @@ describe('Configurations', () => {
 	it('package.json configuration contains stable, experimental, preview, and advanced sections', () => {
 		const configurationContributions = packageJson.contributes.configuration;
 
-		// Should have 4 sections
-		expect(configurationContributions, 'package.json should have exactly 4 sections').toHaveLength(4);
+		// Should have 5 sections: the Nika dashboard section plus the four
+		// GitHub Copilot sections.
+		expect(configurationContributions, 'package.json should have exactly 5 sections').toHaveLength(5);
+
+		// Should have a Nika section
+		const nikaSection = configurationContributions.find(section => section.id === 'nika');
 
 		// Should have a stable section
 		const stableSection = configurationContributions.find(section => section.id === 'stable');
@@ -21,6 +25,7 @@ describe('Configurations', () => {
 		const experimental = configurationContributions.find(section => section.id === 'experimental');
 		const advanced = configurationContributions.find(section => section.id === 'advanced');
 
+		expect(nikaSection, 'nika configuration section is missing').toBeDefined();
 		expect(stableSection, 'stable configuration section is missing').toBeDefined();
 		expect(preview, 'preview configuration section is missing').toBeDefined();
 		expect(experimental, 'experimental configuration section is missing').toBeDefined();
@@ -66,6 +71,7 @@ describe('Configurations', () => {
 	it('settings in code should match package.json', () => {
 
 		const configurationsInPackageJson = packageJson.contributes.configuration.flatMap(section => Object.keys(section.properties));
+		const nikaConfigurationsInPackageJson = packageJson.contributes.configuration.filter(section => section.id === 'nika').flatMap(section => Object.keys(section.properties));
 		const advancedConfigurationsInPackageJson = packageJson.contributes.configuration.filter(section => section.id === 'advanced').flatMap(section => Object.keys(section.properties));
 		const otherConfigurationsInPackageJson = packageJson.contributes.configuration.filter(section => section.id !== 'advanced').flatMap(section => Object.keys(section.properties));
 
@@ -109,8 +115,15 @@ describe('Configurations', () => {
 			expect(advancedConfigurationsInPackageJson, `Advanced setting ${key} should be defined in the advanced section of package.json`).toContain(key);
 		});
 
-		// Validate settings in package.json are in code
+		// Validate settings in package.json are in code. The `nika` section is a
+		// deliberate departure from the ConfigKey registry: Nika dashboard
+		// settings are read via `getNonExtensionConfig` string literals (they
+		// live outside the `github.copilot.*` namespace), so they are excluded
+		// from this check.
 		configurationsInPackageJson.forEach(key => {
+			if (nikaConfigurationsInPackageJson.includes(key)) {
+				return;
+			}
 			expect(registered, 'Setting in package.json is not defined in code').toContain(key);
 		});
 	});

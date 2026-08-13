@@ -33,6 +33,7 @@ import { IExperimentationService } from '../../../platform/telemetry/common/null
 import { ITelemetryService } from '../../../platform/telemetry/common/telemetry';
 import { ITestProvider } from '../../../platform/testing/common/testProvider';
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
+import { IWorkspaceChunkSearchService } from '../../../platform/workspaceChunkSearch/node/workspaceChunkSearchService';
 
 import { findLast } from '../../../util/vs/base/common/arraysFind';
 import { raceTimeout } from '../../../util/vs/base/common/async';
@@ -203,6 +204,7 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 	const editToolLearningService = accessor.get<IEditToolLearningService>(IEditToolLearningService);
 	const authenticationService = accessor.get<IAuthenticationService>(IAuthenticationService);
 	const logService = accessor.get<ILogService>(ILogService);
+	const workspaceChunkSearchService = accessor.get<IWorkspaceChunkSearchService>(IWorkspaceChunkSearchService);
 
 	model ??= await endpointProvider.getChatEndpoint(request);
 
@@ -237,15 +239,18 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 	allowTools[ToolName.CoreRunTask] = tasksService.getTasks().length > 0;
 
 	// The specialized subagents and semantic search only work when the main
-	// agent is on CAPI. semantic_search relies on embeddings that require a
-	// Copilot token source, so on BYOK / custom endpoints it can abort the chat
-	// turn (e.g. when the GitHub auth provider is unavailable). Keep it off
-	// there. See https://github.com/microsoft/vscode/issues/322525.
+	// agent is on CAPI. semantic_search historically relied on remote embeddings
+	// that require a Copilot token source, so on BYOK / custom endpoints it could
+	// abort the chat turn (e.g. when the GitHub auth provider is unavailable).
+	// Keep the subagents off there, but keep semantic_search available whenever
+	// the LOCAL indexing scheme is active: it embeds with a local ONNX model and
+	// searches a local SQLite vector store, fully offline, so it has no token
+	// dependency. See https://github.com/microsoft/vscode/issues/322525.
 	if (!isCAPIEndpoint(model)) {
 		allowTools[ToolName.SearchSubagent] = false;
 		allowTools[ToolName.ExploreSubagent] = false;
 		allowTools[ToolName.ExecutionSubagent] = false;
-		allowTools[ToolName.Codebase] = false;
+		allowTools[ToolName.Codebase] = await workspaceChunkSearchService.isAvailable();
 	} else {
 		const searchSubagentEnabled = configurationService.getExperimentBasedConfig(ConfigKey.Advanced.SearchSubagentToolEnabled, experimentationService);
 		const exploreAgentEnabled = configurationService.getExperimentBasedConfig(ConfigKey.ExploreAgentEnabled, experimentationService);

@@ -57,6 +57,7 @@ export class ExtHostStatusBarEntry implements vscode.StatusBarItem {
 
 	private _timeoutHandle: Timeout | undefined;
 	private _accessibilityInformation?: vscode.AccessibilityInformation;
+	private _showProgress: boolean | 'loading' | 'syncing' = false;
 
 	constructor(proxy: MainThreadStatusBarShape, commands: CommandsConverter, staticItems: ReadonlyMap<string, StatusBarItemDto>, extension: IExtensionDescription, id?: string, alignment?: ExtHostStatusBarAlignment, priority?: number, _onDispose?: () => void);
 	constructor(proxy: MainThreadStatusBarShape, commands: CommandsConverter, staticItems: ReadonlyMap<string, StatusBarItemDto>, extension: IExtensionDescription | undefined, id: string, alignment?: ExtHostStatusBarAlignment, priority?: number, _onDispose?: () => void);
@@ -230,6 +231,15 @@ export class ExtHostStatusBarEntry implements vscode.StatusBarItem {
 		this.update();
 	}
 
+	public set showProgress(showProgress: boolean | 'loading' | 'syncing') {
+		if (this._extension) {
+			checkProposedApiEnabled(this._extension, 'statusBarItemShowProgress');
+		}
+
+		this._showProgress = showProgress;
+		this.update();
+	}
+
 	public show(): void {
 		this._visible = true;
 		this.update();
@@ -293,7 +303,7 @@ export class ExtHostStatusBarEntry implements vscode.StatusBarItem {
 			// Set to status bar
 			this.#proxy.$setEntry(this._entryId, id, this._extension?.identifier.value, name, this._text, tooltip, hasTooltipProvider, this._command?.internal, color,
 				this._backgroundColor, this._alignment === ExtHostStatusBarAlignment.Left,
-				this._priority, this._accessibilityInformation);
+				this._priority, this._showProgress, this._accessibilityInformation);
 
 			// clean-up state commands _after_ updating the UI
 			this._staleCommandRegistrations.clear();

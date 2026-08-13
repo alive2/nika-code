@@ -42,6 +42,7 @@ const baseNodeBuildOptions = {
 		'sqlite3',
 		'node-pty', // Required by @github/copilot
 		'@github/copilot',
+		'onnxruntime-node', // Native module for the local (ONNX) indexing scheme
 		// pdfjs-dist optionally uses these only for rendering. Nika performs
 		// text extraction, and PDF.js already guards both requires at runtime.
 		'canvas',

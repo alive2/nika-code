@@ -15,6 +15,7 @@ import { TestWorkspaceService } from '../../../../platform/test/node/testWorkspa
 import { IWorkspaceService } from '../../../../platform/workspace/common/workspaceService';
 import { NullWorkspaceFileIndex } from '../../../../platform/workspaceChunkSearch/node/nullWorkspaceFileIndex';
 import { IWorkspaceFileIndex } from '../../../../platform/workspaceChunkSearch/node/workspaceFileIndex';
+import { NullWorkspaceChunkSearchService, IWorkspaceChunkSearchService } from '../../../../platform/workspaceChunkSearch/node/workspaceChunkSearchService';
 import { Event } from '../../../../util/vs/base/common/event';
 import { URI } from '../../../../util/vs/base/common/uri';
 import { SyncDescriptor } from '../../../../util/vs/platform/instantiation/common/descriptors';
@@ -42,7 +43,18 @@ class StubEndpointProvider implements IEndpointProvider {
 	async getAllCompletionModels(): Promise<never[]> { return []; }
 }
 
+/**
+ * Simulates the local indexing scheme being active: semantic search is
+ * available without any Copilot token source (local ONNX model + SQLite store).
+ */
+class AvailableWorkspaceChunkSearchService extends NullWorkspaceChunkSearchService {
+	override isAvailable(): Promise<boolean> {
+		return Promise.resolve(true);
+	}
+}
+
 describe('getAgentTools search subagent gating', () => {
+	let services: ReturnType<typeof createExtensionUnitTestingServices>;
 	let accessor: ITestingServicesAccessor;
 	let instantiationService: IInstantiationService;
 	let configService: IConfigurationService;
@@ -51,7 +63,7 @@ describe('getAgentTools search subagent gating', () => {
 	let searchAgentEndpoint: IChatEndpoint;
 
 	beforeAll(() => {
-		const services = createExtensionUnitTestingServices();
+		services = createExtensionUnitTestingServices();
 		services.define(IWorkspaceFileIndex, new SyncDescriptor(NullWorkspaceFileIndex));
 		services.define(IWorkspaceService, new SyncDescriptor(
 			TestWorkspaceService,
@@ -151,5 +163,23 @@ describe('getAgentTools search subagent gating', () => {
 		const request = new TestChatRequest('how does foo work');
 		const tools = await instantiationService.invokeFunction(getAgentTools, request, byokEndpoint);
 		expect(hasTool(tools, ToolName.Codebase)).toBe(false);
+	});
+
+	test('exposes semantic_search on a BYOK endpoint when the local index is available', async () => {
+		// The local indexing scheme is fully offline (ONNX model + SQLite vector
+		// store), so it must not be gated behind CAPI the way the subagents are.
+		const localServices = services.clone();
+		localServices.define(IWorkspaceChunkSearchService, new AvailableWorkspaceChunkSearchService());
+		const localAccessor = localServices.createTestingAccessor();
+		try {
+			const localInstantiationService = localAccessor.get(IInstantiationService);
+			const byokEndpoint = localInstantiationService.createInstance(MockEndpoint, 'gpt-5');
+			(byokEndpoint as { urlOrRequestMetadata: string }).urlOrRequestMetadata = 'https://localhost:8080/v1/chat/completions';
+			const request = new TestChatRequest('how does foo work');
+			const tools = await localInstantiationService.invokeFunction(getAgentTools, request, byokEndpoint);
+			expect(hasTool(tools, ToolName.Codebase)).toBe(true);
+		} finally {
+			localAccessor.dispose();
+		}
 	});
 });

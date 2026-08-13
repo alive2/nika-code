@@ -7,11 +7,12 @@ import * as vscode from 'vscode';
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
+import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_SECRET, NIKA_RESPONSES_MODEL } from './nikaModels';
 
 type NikaConnection = 'deepseek' | 'gemini' | 'ollama';
-type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf' | 'agents' | 'diagnostics';
+type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf' | 'agents' | 'indexing' | 'diagnostics';
 type ConnectionResult = { readonly ok: boolean; readonly message: string; readonly checkedAt: string };
 
 const SETTINGS = new Set([
@@ -20,7 +21,7 @@ const SETTINGS = new Set([
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
-	'logLevel', 'releaseCheckEnabled',
+	'logLevel', 'releaseCheckEnabled', 'indexing.scheme',
 ]);
 
 const SECRET_KEYS: Record<'deepseek' | 'gemini', string> = {
@@ -33,7 +34,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isNikaSettingsSection(value: unknown): value is NikaSettingsSection {
-	return value === 'overview' || value === 'providers' || value === 'models' || value === 'vision' || value === 'pdf' || value === 'agents' || value === 'diagnostics';
+	return value === 'overview' || value === 'providers' || value === 'models' || value === 'vision' || value === 'pdf' || value === 'agents' || value === 'indexing' || value === 'diagnostics';
 }
 
 function nonce(): string {
@@ -70,12 +71,16 @@ export class NikaSettingsEditor extends Disposable {
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 		@ILogService private readonly _logService: ILogService,
+		@IIndexingSchemeManager private readonly _indexingSchemeManager: IIndexingSchemeManager,
 	) {
 		super();
 		this._register(vscode.commands.registerCommand('nika.openSettings', () => this.open()));
 		this._register(vscode.commands.registerCommand('nika.checkForUpdates', () => this.checkForUpdates(true)));
 		this._register(vscode.commands.registerCommand('nika.openLogs', () => this._output.show(true)));
 		this._register(vscode.commands.registerCommand('nika.exportDiagnostics', () => this.exportDiagnostics()));
+		this._register(this._indexingSchemeManager.onDidChangeState(() => {
+			void this._render(this._activeSection);
+		}));
 		this._register(vscode.workspace.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('nika')) {
 				void this._render(this._activeSection);
@@ -253,8 +258,41 @@ export class NikaSettingsEditor extends Disposable {
 				'agent.inlineChatThinkingEffort': value('agent.inlineChatThinkingEffort', NIKA_AGENT_DEFAULTS.inlineChat.effort),
 				logLevel: value('logLevel', 'INFO'),
 				releaseCheckEnabled: value('releaseCheckEnabled', true),
+				'indexing.scheme': value('indexing.scheme', 'off'),
+			},
+			indexing: {
+				workspaceOverride: config.inspect<string>('indexing.scheme')?.workspaceValue !== undefined,
+				...(await this._indexingState()),
 			},
 		};
+	}
+
+	private async _indexingState(): Promise<Record<string, unknown>> {
+		try {
+			const [state, available] = await Promise.all([
+				this._indexingSchemeManager.getState(),
+				this._indexingSchemeManager.isAvailable(),
+			]);
+			return {
+				scheme: this._indexingSchemeManager.id,
+				available,
+				status: state.status,
+				indexedFileCount: state.indexedFileCount,
+				totalFileCount: state.totalFileCount,
+				lastError: state.lastError,
+				message: state.message,
+			};
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			return {
+				scheme: this._indexingSchemeManager.id,
+				available: false,
+				status: 'error',
+				indexedFileCount: 0,
+				totalFileCount: 0,
+				lastError: detail,
+			};
+		}
 	}
 
 	private async _onMessage(message: unknown): Promise<void> {
@@ -299,6 +337,21 @@ export class NikaSettingsEditor extends Disposable {
 					break;
 				case 'exportDiagnostics':
 					await this.exportDiagnostics();
+					break;
+				case 'setIndexingWorkspace':
+					await this._setIndexingWorkspace(true);
+					break;
+				case 'clearIndexingWorkspace':
+					await this._setIndexingWorkspace(false);
+					break;
+				case 'rebuildIndex':
+					await this._rebuildIndex();
+					break;
+				case 'clearIndex':
+					await this._clearIndex();
+					break;
+				case 'clearModelCache':
+					await this._indexingSchemeManager.clearModelCache();
 					break;
 			}
 		} catch (error) {
@@ -346,6 +399,28 @@ export class NikaSettingsEditor extends Disposable {
 			await vscode.workspace.getConfiguration('chat').update('utilitySmallModel', value, vscode.ConfigurationTarget.Global);
 		}
 		this.log('INFO', vscode.l10n.t('Updated {0}.', `nika.${key}`));
+	}
+
+	private async _setIndexingWorkspace(useWorkspace: boolean): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const scheme = config.get<string>('indexing.scheme', 'off');
+		if (useWorkspace) {
+			await config.update('indexing.scheme', scheme, vscode.ConfigurationTarget.Workspace);
+			void vscode.window.showInformationMessage(vscode.l10n.t('Indexing scheme set for this workspace.'));
+		} else {
+			await config.update('indexing.scheme', undefined, vscode.ConfigurationTarget.Workspace);
+			void vscode.window.showInformationMessage(vscode.l10n.t('Removed the workspace-specific indexing scheme.'));
+		}
+	}
+
+	private async _rebuildIndex(): Promise<void> {
+		await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: vscode.l10n.t('Nika: Building local index') }, async progress => {
+			await this._indexingSchemeManager.rebuild(message => progress.report({ message }));
+		});
+	}
+
+	private async _clearIndex(): Promise<void> {
+		await this._indexingSchemeManager.clear();
 	}
 
 	private async _saveSecret(provider: 'deepseek' | 'gemini', value: string): Promise<void> {
@@ -521,9 +596,9 @@ export class NikaSettingsEditor extends Disposable {
 nav button{display:block;width:100%;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);padding:9px 10px;text-align:left;cursor:pointer}nav button:hover,nav button.active{background:var(--vscode-list-hoverBackground)}
 main{padding:38px 46px 80px}section{display:none}section.active{display:block}h1{font-size:26px;margin:0 0 8px}h2{font-size:16px;margin:30px 0 8px}.lead{color:var(--vscode-descriptionForeground);margin:0 0 28px;line-height:1.55}
 .card{padding:18px;border:1px solid var(--vscode-panel-border);border-radius:10px;margin:12px 0;background:color-mix(in srgb,var(--vscode-editor-background) 94%,var(--vscode-sideBar-background))}.row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(210px,1fr);gap:22px;align-items:center;padding:11px 0}.row+.row{border-top:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent)}label strong{display:block;margin-bottom:4px}.hint,.status{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}.agent-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px}
-input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}.controls{display:flex;gap:7px;align-items:center}.controls input{flex:1}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
+input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>NikaCode</div><nav>
-${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
+${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['indexing', vscode.l10n.t('Indexing')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
 </nav></aside><main>
 <section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, vision, and PDF support for NikaCode.')}</p>
 <div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
@@ -540,10 +615,15 @@ ${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['
 </div></section>
 <section id="pdf"><h1>${vscode.l10n.t('PDF')}</h1><p class="lead">${vscode.l10n.t('PDF limits apply only to PDF reads. Page ranges can be requested in English or Hebrew.')}</p><div class="card">${this._numberRow('pdfMaxFileSizeMB', vscode.l10n.t('Maximum PDF size (MB)'), '1', '1024', '1')}${this._numberRow('pdfMaxPages', vscode.l10n.t('Pages without an explicit range'), '1', '1000', '1')}${this._checkboxRow('pdfPageNotice', vscode.l10n.t('Show truncation notice'))}${this._checkboxRow('pdfSparseFallback', vscode.l10n.t('Use Gemini for sparse or scanned PDFs'))}${this._numberRow('pdfSparseThreshold', vscode.l10n.t('Sparse-document character threshold'), '1', '100000', '100')}</div></section>
 <section id="agents"><h1>${vscode.l10n.t('Agents')}</h1><p class="lead">${vscode.l10n.t('Assign a model and thinking effort to each built-in role. The recommended profile uses DeepSeek V4 Flash Responses for every role.')}</p><div class="card">${(['plan','explore','utility','utilitySmall','inlineChat'] as const).map(id=>this._agentRow(id, ({plan:vscode.l10n.t('Plan'),explore:vscode.l10n.t('Explore'),utility:vscode.l10n.t('Utility'),utilitySmall:vscode.l10n.t('Utility Small'),inlineChat:vscode.l10n.t('Inline Chat')} as Record<string,string>)[id])).join('')}</div><div class="actions"><button class="action" data-action="recommendedAgents">${vscode.l10n.t('Apply recommended mappings')}</button></div></section>
+<section id="indexing"><h1>${vscode.l10n.t('Indexing')}</h1><p class="lead">${vscode.l10n.t('Choose how Nika indexes this workspace. The default applies everywhere; a workspace-specific scheme overrides it here.')}</p><div class="card">
+${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', vscode.l10n.t('Off (ripgrep only)')], ['github-remote', vscode.l10n.t('GitHub remote')], ['local', vscode.l10n.t('Local (ONNX)')], ['cloud', vscode.l10n.t('Cloud')]])}
+<div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong><span class="hint">${vscode.l10n.t('Apply the scheme to every workspace or only this one.')}</span></label><div class="controls wrap"><button class="action secondary" data-action="setIndexingWorkspace">${vscode.l10n.t('Use for this workspace')}</button><button class="action secondary" data-action="clearIndexingWorkspace">${vscode.l10n.t('Clear workspace override')}</button></div></div>
+</div><div class="card"><h2>${vscode.l10n.t('Status')}</h2><div class="row"><label><strong>${vscode.l10n.t('State')}</strong></label><span data-indexing-status></span></div><div class="row"><label><strong>${vscode.l10n.t('Progress')}</strong></label><span data-indexing-progress></span></div><div class="row"><label><strong>${vscode.l10n.t('Activity')}</strong></label><span data-indexing-message></span></div><div class="row"><label><strong>${vscode.l10n.t('Last error')}</strong></label><span data-indexing-error></span></div><div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong></label><span data-indexing-scope></span></div><div class="actions"><button class="action" data-action="rebuildIndex">${vscode.l10n.t('Build / Rebuild index')}</button><button class="action danger" data-action="clearIndex">${vscode.l10n.t('Clear index')}</button><button class="action secondary" data-action="clearModelCache">${vscode.l10n.t('Clear model cache')}</button></div></div></section>
 <section id="diagnostics"><h1>${vscode.l10n.t('Diagnostics')}</h1><p class="lead">${vscode.l10n.t('Nika writes to a native output channel and never creates an automatic log file.')}</p><div class="card">${this._selectRow('logLevel', vscode.l10n.t('Log level'), ['DEBUG','INFO','WARN','ERROR'].map(v=>[v,v]))}${this._checkboxRow('releaseCheckEnabled', vscode.l10n.t('Check for releases on startup'))}</div><div class="actions"><button class="action" data-action="openLogs">${vscode.l10n.t('Open Nika Output')}</button><button class="action secondary" data-action="exportDiagnostics">${vscode.l10n.t('Export Diagnostics')}</button><button class="action secondary" data-action="checkUpdates">${vscode.l10n.t('Check for Updates')}</button></div></section>
 </main></div><script nonce="${token}">const vscode=acquireVsCodeApi();const state=${encoded};
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('ollama',true);
+function renderIndexing(){const i=state.indexing||{};const labels={idle:'Idle',building:'Building',indexing:'Indexing',synced:'Synced',error:'Error'};const s=i.status||'idle';document.querySelectorAll('[data-indexing-status]').forEach(el=>el.textContent=labels[s]||s);document.querySelectorAll('[data-indexing-progress]').forEach(el=>{el.textContent=(typeof i.indexedFileCount==='number'&&typeof i.totalFileCount==='number')?i.indexedFileCount+' / '+i.totalFileCount:'';});document.querySelectorAll('[data-indexing-error]').forEach(el=>{el.textContent=i.lastError||'';});document.querySelectorAll('[data-indexing-message]').forEach(el=>{el.textContent=i.message||'';});document.querySelectorAll('[data-indexing-scope]').forEach(el=>{el.textContent=i.workspaceOverride?'Workspace':'Default';});}renderIndexing();
 document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);post({type:'saveSetting',key,value});});});
 function activateSection(id){const button=document.querySelector('nav button[data-section="'+id+'"]');const section=document.getElementById(id);if(!button||!section)return;document.querySelectorAll('nav button,section').forEach(el=>el.classList.remove('active'));button.classList.add('active');section.classList.add('active');activeSection=id;const saved=vscode.getState()||{};vscode.setState({...saved,activeSection:id});}
 const restoredSection=(vscode.getState()||{}).activeSection;activateSection(restoredSection||state.initialSection||'overview');document.querySelectorAll('[data-section]').forEach(button=>button.addEventListener('click',()=>activateSection(button.dataset.section)));

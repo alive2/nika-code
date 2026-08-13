@@ -133,6 +133,7 @@
     "chatStatusItem",
     "chatInputNotification",
     "taskProblemMatcherStatus",
+    "statusBarItemShowProgress",
     "contribLanguageModelToolSets",
     "textDocumentChangeReason",
     "resolvers",
@@ -3399,6 +3400,27 @@
             "type": "boolean",
             "default": true,
             "markdownDescription": "%nika.config.releaseCheckEnabled%"
+          },
+          "nika.indexing.scheme": {
+            "type": "string",
+            "enum": [
+              "off",
+              "github-remote",
+              "local",
+              "cloud"
+            ],
+            "enumDescriptions": [
+              "%nika.config.indexing.scheme.off%",
+              "%nika.config.indexing.scheme.githubRemote%",
+              "%nika.config.indexing.scheme.local%",
+              "%nika.config.indexing.scheme.cloud%"
+            ],
+            "default": "off",
+            "scope": "resource",
+            "tags": [
+              "preview"
+            ],
+            "markdownDescription": "%nika.config.indexing.scheme%"
           },
           "nika.selectedModel": {
             "type": "string",
@@ -7329,6 +7351,7 @@
     "lru-cache": "^11.1.0",
     "markdown-it": "^14.2.0",
     "minimatch": "^10.2.1",
+    "onnxruntime-node": "1.27.0",
     "pdfjs-dist": "3.11.174",
     "undici": "^7.24.1",
     "vscode-tas-client": "^0.1.84",

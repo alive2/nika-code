@@ -56,7 +56,7 @@ export class MainThreadStatusBar extends Disposable implements MainThreadStatusB
 		}
 	}
 
-	$setEntry(entryId: string, id: string, extensionId: string | undefined, name: string, text: string, tooltip: IMarkdownString | string | undefined, hasTooltipProvider: boolean, command: Command | undefined, color: string | ThemeColor | undefined, backgroundColor: ThemeColor | undefined, alignLeft: boolean, priority: number | undefined, accessibilityInformation: IAccessibilityInformation | undefined): void {
+	$setEntry(entryId: string, id: string, extensionId: string | undefined, name: string, text: string, tooltip: IMarkdownString | string | undefined, hasTooltipProvider: boolean, command: Command | undefined, color: string | ThemeColor | undefined, backgroundColor: ThemeColor | undefined, alignLeft: boolean, priority: number | undefined, showProgress: boolean | 'loading' | 'syncing' | undefined, accessibilityInformation: IAccessibilityInformation | undefined): void {
 		const tooltipOrTooltipProvider = hasTooltipProvider
 			? {
 				markdown: (cancellation: CancellationToken) => {
@@ -66,7 +66,7 @@ export class MainThreadStatusBar extends Disposable implements MainThreadStatusB
 			} satisfies IManagedHoverTooltipMarkdownString
 			: tooltip;
 
-		const kind = this.statusbarService.setOrUpdateEntry(entryId, id, extensionId, name, text, tooltipOrTooltipProvider, command, color, backgroundColor, alignLeft, priority, accessibilityInformation);
+		const kind = this.statusbarService.setOrUpdateEntry(entryId, id, extensionId, name, text, tooltipOrTooltipProvider, command, color, backgroundColor, alignLeft, priority, showProgress, accessibilityInformation);
 		if (kind === StatusBarUpdateKind.DidDefine) {
 			const disposable = toDisposable(() => this.statusbarService.unsetEntry(entryId));
 			this._entryDisposables.set(entryId, disposable);

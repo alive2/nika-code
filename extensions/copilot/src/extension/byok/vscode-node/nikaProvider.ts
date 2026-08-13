@@ -15,6 +15,7 @@ import { ExtendedLanguageModelChatInformation, LanguageModelChatConfiguration, O
 import { IBYOKStorageService } from './byokStorageService';
 import { byokKnownModelToAPIInfoWithEffort } from './byokModelInfo';
 import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
+import { NikaIndexingStatus } from './nikaIndexingStatus';
 import {
 	getNikaModelCapabilities,
 	getVisibleNikaModelIds,
@@ -66,6 +67,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._ollamaProvider.updateKnownModels(this._gemmaKnownModels());
 		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor));
 		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor);
+		this._register(this._instantiationService.createInstance(NikaIndexingStatus, this.settingsEditor));
 
 		this._register(this._context.secrets.onDidChange(event => {
 			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET) {

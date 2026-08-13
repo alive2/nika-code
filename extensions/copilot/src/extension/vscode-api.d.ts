@@ -59,6 +59,7 @@
 /// <reference path="../../../../src/vscode-dts/vscode.proposed.tabInputMultiDiff.d.ts" />
 /// <reference path="../../../../src/vscode-dts/vscode.proposed.taskExecutionTerminal.d.ts" />
 /// <reference path="../../../../src/vscode-dts/vscode.proposed.taskProblemMatcherStatus.d.ts" />
+/// <reference path="../../../../src/vscode-dts/vscode.proposed.statusBarItemShowProgress.d.ts" />
 /// <reference path="../../../../src/vscode-dts/vscode.proposed.terminalDataWriteEvent.d.ts" />
 /// <reference path="../../../../src/vscode-dts/vscode.proposed.terminalExecuteCommandEvent.d.ts" />
 /// <reference path="../../../../src/vscode-dts/vscode.proposed.terminalQuickFixProvider.d.ts" />

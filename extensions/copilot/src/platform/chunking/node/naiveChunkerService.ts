@@ -20,6 +20,7 @@ interface NaiveChunkingOptions {
 }
 
 export interface INaiveChunkingService {
+	readonly _serviceBrand: undefined;
 
 	/**
 	 * Splits `text` into smaller chunks of roughly equal length using a scrolling window approach.
