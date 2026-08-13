@@ -52,7 +52,7 @@ Manifest fields (client contract from `src/vs/platform/update/common/update.ts`)
 | `build/update/src/index.js` | The Cloudflare Worker (update manifest logic) |
 | `build/update/wrangler.toml` | Worker config (`name`, `main`, `compatibility_date`) |
 | `build/update/test-worker.mjs` | Local verification harness (mocks `caches.default`, hits the real GitHub API) |
-| `.github/workflows/deploy-update-worker.yml` | Optional CI deploy via `cloudflare/wrangler-action` |
+| `.github/workflows/deploy-update-worker.yml` | CI auto-deploy via `cloudflare/wrangler-action` — **currently disabled** (see §4) |
 | `product.json` | `updateUrl`, `quality: "stable"`, `target: "user"` |
 | `build/win32/code.iss` | Inno Setup update protocol (already implemented) |
 
@@ -112,10 +112,17 @@ Notes:
   was removed in modern wrangler — manage it in the dashboard.
 - Check deployment status:
   `npx wrangler deployments list`
-- CI alternative: the GitHub Actions workflow
-  (`.github/workflows/deploy-update-worker.yml`) deploys on any push touching
-  `build/update/**` or `product.json`. It needs a `CLOUDFLARE_API_TOKEN`
-  secret with Workers Scripts *Edit* permission.
+- **CI auto-deploy is disabled.** The GitHub Actions workflow
+  (`.github/workflows/deploy-update-worker.yml`) is kept on disk but has no
+  trigger, because the repo has no `CLOUDFLARE_API_TOKEN` secret configured
+  (without it, the job failed with "In a non-interactive environment, it's
+  necessary to set a CLOUDFLARE_API_TOKEN..."). Deployment is **manual**:
+  `cd build/update && npx wrangler deploy` after any change to
+  `build/update/**`.
+  To re-enable auto-deploy: add a `CLOUDFLARE_API_TOKEN` secret (Workers
+  Scripts *Edit* permission) via the repo's Actions secrets settings or
+  `gh secret set CLOUDFLARE_API_TOKEN`, then restore the `on:` block in
+  `.github/workflows/deploy-update-worker.yml`.
 
 ---
 
