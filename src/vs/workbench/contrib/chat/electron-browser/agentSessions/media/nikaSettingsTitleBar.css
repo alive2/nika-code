@@ -1,0 +1,84 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* "Nika Settings" titlebar widget — icon-only at rest, expands on hover/focus. */
+.monaco-workbench .nika-settings-titlebar-widget {
+	display: inline-flex;
+	align-items: center;
+	height: 22px;
+	padding: 0 4px;
+	border-radius: 5px;
+	cursor: pointer;
+	color: var(--vscode-titleBar-activeForeground);
+	-webkit-app-region: no-drag;
+	white-space: nowrap;
+}
+
+.monaco-workbench .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-icon {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
+	font-size: 16px;
+	line-height: 16px;
+	color: var(--vscode-titleBar-activeForeground);
+	opacity: 0.8;
+}
+
+.monaco-enable-motion .monaco-workbench .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-icon,
+.monaco-workbench.monaco-enable-motion .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-icon {
+	transition: opacity 160ms ease;
+}
+
+.monaco-reduce-motion .monaco-workbench .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-icon,
+.monaco-workbench.monaco-reduce-motion .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-icon {
+	transition-duration: 0ms !important;
+}
+
+.monaco-workbench .nika-settings-titlebar-widget:hover > .nika-settings-titlebar-widget-icon,
+.monaco-workbench .nika-settings-titlebar-widget:focus-visible > .nika-settings-titlebar-widget-icon {
+	opacity: 1;
+}
+
+.monaco-workbench .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-label {
+	display: inline-block;
+	max-width: 0;
+	opacity: 0;
+	margin-left: 0;
+	color: var(--vscode-foreground);
+	font: inherit;
+	overflow: hidden;
+	white-space: nowrap;
+}
+
+.monaco-enable-motion .monaco-workbench .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-label,
+.monaco-workbench.monaco-enable-motion .nika-settings-titlebar-widget > .nika-settings-titlebar-widget-label {
+	transition: max-width 160ms ease, opacity 160ms ease, margin-left 160ms ease;
+	transition-delay: 200ms;
+}
+
+.monaco-workbench .nika-settings-titlebar-widget:hover,
+.monaco-workbench .nika-settings-titlebar-widget:focus-visible {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	outline: none;
+}
+
+.monaco-workbench .nika-settings-titlebar-widget:hover > .nika-settings-titlebar-widget-label,
+.monaco-workbench .nika-settings-titlebar-widget:focus-visible > .nika-settings-titlebar-widget-label {
+	max-width: 200px;
+	opacity: 1;
+	margin-left: 6px;
+}
+
+.monaco-enable-motion .monaco-workbench .nika-settings-titlebar-widget:hover > .nika-settings-titlebar-widget-label,
+.monaco-enable-motion .monaco-workbench .nika-settings-titlebar-widget:focus-visible > .nika-settings-titlebar-widget-label,
+.monaco-workbench.monaco-enable-motion .nika-settings-titlebar-widget:hover > .nika-settings-titlebar-widget-label,
+.monaco-workbench.monaco-enable-motion .nika-settings-titlebar-widget:focus-visible > .nika-settings-titlebar-widget-label {
+	transition-delay: 0ms;
+}
+
+.monaco-workbench .nika-settings-titlebar-widget:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
