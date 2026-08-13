@@ -9,22 +9,24 @@ import { Config, ConfigKey } from '../../../platform/configuration/common/config
 import { packageJson } from '../../../platform/env/common/packagejson';
 
 describe('Configurations', () => {
-	it('package.json configuration contains stable, experimental, preview, and advanced sections', () => {
+	it('package.json configuration contains stable, experimental, preview, advanced, and nika sections', () => {
 		const configurationContributions = packageJson.contributes.configuration;
 
-		// Should have 4 sections
-		expect(configurationContributions, 'package.json should have exactly 4 sections').toHaveLength(4);
+		// Should have 5 sections (the NikaCode fork adds a `nika` section)
+		expect(configurationContributions, 'package.json should have exactly 5 sections').toHaveLength(5);
 
 		// Should have a stable section
 		const stableSection = configurationContributions.find(section => section.id === 'stable');
 		const preview = configurationContributions.find(section => section.id === 'preview');
 		const experimental = configurationContributions.find(section => section.id === 'experimental');
 		const advanced = configurationContributions.find(section => section.id === 'advanced');
+		const nika = configurationContributions.find(section => section.id === 'nika');
 
 		expect(stableSection, 'stable configuration section is missing').toBeDefined();
 		expect(preview, 'preview configuration section is missing').toBeDefined();
 		expect(experimental, 'experimental configuration section is missing').toBeDefined();
 		expect(advanced, 'advanced configuration section is missing').toBeDefined();
+		expect(nika, 'nika configuration section is missing').toBeDefined();
 	});
 
 	it('package.json configuration tags are correct for each section', () => {
@@ -109,8 +111,19 @@ describe('Configurations', () => {
 			expect(advancedConfigurationsInPackageJson, `Advanced setting ${key} should be defined in the advanced section of package.json`).toContain(key);
 		});
 
-		// Validate settings in package.json are in code
-		configurationsInPackageJson.forEach(key => {
+		// Validate settings in package.json are in code. `nika.*` settings are declared as
+		// extension configuration contributions (registered by VS Code when the bundled
+		// extension activates and read via getNonExtensionConfig), so they are not part of
+		// the in-process ConfigKey registry — validate them against the nika section instead.
+		const nikaConfigurationsInPackageJson = configurationsInPackageJson.filter(key => key.startsWith('nika.'));
+		const githubConfigurationsInPackageJson = configurationsInPackageJson.filter(key => !key.startsWith('nika.'));
+		const nikaSectionKeys = Object.keys(packageJson.contributes.configuration.find(section => section.id === 'nika')!.properties);
+		expect(nikaConfigurationsInPackageJson, 'Nika settings must live in the nika configuration section')
+			.toEqual(expect.arrayContaining(nikaSectionKeys));
+		expect(nikaSectionKeys, 'Nika settings must all use the nika. prefix')
+			.toEqual(expect.arrayContaining(nikaConfigurationsInPackageJson));
+
+		githubConfigurationsInPackageJson.forEach(key => {
 			expect(registered, 'Setting in package.json is not defined in code').toContain(key);
 		});
 	});
