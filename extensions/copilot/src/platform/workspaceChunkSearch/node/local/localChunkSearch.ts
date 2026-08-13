@@ -11,7 +11,7 @@ import { coalesce } from '../../../../util/vs/base/common/arrays';
 import { Limiter, raceCancellationError } from '../../../../util/vs/base/common/async';
 import { CancellationToken } from '../../../../util/vs/base/common/cancellation';
 import { CancellationError } from '../../../../util/vs/base/common/errors';
-import { Emitter } from '../../../../util/vs/base/common/event';
+import { Emitter, Event } from '../../../../util/vs/base/common/event';
 import { Disposable } from '../../../../util/vs/base/common/lifecycle';
 import { Schemas } from '../../../../util/vs/base/common/network';
 import { basename } from '../../../../util/vs/base/common/resources';
@@ -37,6 +37,7 @@ const GIT_HASH_BATCH_SIZE = 500;
 const EMBED_CONCURRENCY = 8;
 const MAX_LOCAL_CHUNK_TOKENS = 128;
 const MAX_INDEXABLE_FILE_BYTES = 1.5 * 1024 * 1024; // 1.5 MB (matches WorkspaceFileIndex)
+const AUTO_REBUILD_DEBOUNCE_MS = 2000;
 
 /**
  * `local` indexing scheme: fully offline, ONNX embeddings + node:sqlite ANN.
@@ -78,6 +79,31 @@ export class LocalChunkSearch extends Disposable implements IIndexingScheme {
 		this._embeddingsComputer = new LocalEmbeddingsComputer(this._modelManager);
 		this._vectorStore = this._register(new LocalVectorStore(this._dbPath(), LOCAL_EMBEDDING_TYPE));
 		this._register(this._vectorStore.onDidChange(() => this._fireStateChange()));
+
+		// Make sure the workspace file index's file watchers are live even when
+		// the index already exists on disk and no build runs this session.
+		// `WorkspaceFileIndex.registerListeners()` (file watcher + editor
+		// document events) only runs inside `initialize()`, which the build
+		// path calls — without this, file create/change/delete events never
+		// fire on a cold start and the auto-rebuild below would never trigger
+		// until the user manually rebuilds once.
+		void this._workspaceFileIndex.initialize().catch(error => {
+			this._logService.trace(`LocalChunkSearch: workspace file index init failed: ${String(error)}`);
+		});
+
+		// Keep the index up to date as files change. Rebuilds are incremental
+		// (git-hash change detection) and `build()` coalesces concurrent runs;
+		// the trigger is debounced so bursts of events (editor saves, git
+		// checkout, bulk rename) collapse into a single rebuild.
+		this._register(Event.debounce(
+			Event.any(
+				this._workspaceFileIndex.onDidChangeFiles,
+				this._workspaceFileIndex.onDidCreateFiles,
+				this._workspaceFileIndex.onDidDeleteFiles,
+			),
+			(_last, current) => current,
+			AUTO_REBUILD_DEBOUNCE_MS,
+		)(() => void this._autoRebuild()));
 	}
 
 	async getState(): Promise<IndexingState> {
@@ -108,6 +134,34 @@ export class LocalChunkSearch extends Disposable implements IIndexingScheme {
 			this._buildPromise = undefined;
 		});
 		return this._buildPromise;
+	}
+
+	/**
+	 * Debounced incremental refresh triggered by workspace file events.
+	 *
+	 * Only refreshes an index that already exists (`stats.files > 0`): a
+	 * first-time build stays user-initiated so a model download is never kicked
+	 * off by a stray file event, and a failed build (`_status === 'error'`) is
+	 * not retried on every file event — the user can rebuild from Nika Settings.
+	 * `build()` is a no-op while a build is already running, so a burst of
+	 * events after the debounce window still collapses into one rebuild.
+	 */
+	private async _autoRebuild(): Promise<void> {
+		try {
+			if (this._status === 'error') {
+				return;
+			}
+			const stats = await this._vectorStore.getStats();
+			if (stats.files === 0) {
+				return;
+			}
+			await this.build(() => { }, CancellationToken.None);
+		} catch (error) {
+			// `build()` transitions the scheme to 'error' and logs the failure;
+			// swallow here so a failed background refresh is not an unhandled
+			// rejection.
+			this._logService.trace(`LocalChunkSearch: auto rebuild failed: ${String(error)}`);
+		}
 	}
 
 	async search(queryText: string, topK: number, token: CancellationToken): Promise<StrategySearchResult> {
