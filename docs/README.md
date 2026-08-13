@@ -9,6 +9,7 @@ NikaCode. Read the docs in this order:
 
 | Document | What it covers |
 | --- | --- |
+| [**CONTRIBUTING.md**](./CONTRIBUTING.md) | How to contribute (fork → PR → review workflow, branch protection rules) |
 | [**ARCHITECTURE.md**](./ARCHITECTURE.md) | How versioning and the update pipeline fit together (background knowledge) |
 | [**DEPLOYMENT.md**](./DEPLOYMENT.md) | Building the app and the Windows installer from source |
 | [**RELEASING.md**](./RELEASING.md) | Cutting and publishing a release (the thing you do most often) |
