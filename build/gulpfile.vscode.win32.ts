@@ -81,18 +81,18 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
 		const productJson = JSON.parse(fs.readFileSync(originalProductJsonPath, 'utf8'));
 		productJson['target'] = target;
 
-		// NikaCode: use the fork's own version (productVersion) for the installer,
+		// SeeCode: use the fork's own version (productVersion) for the installer,
 		// falling back to the upstream VS Code version when not defined.
-		const nikaVersion = product.productVersion ?? pkg.version;
+		const seeVersion = product.productVersion ?? pkg.version;
 
 		const definitions: Record<string, unknown> = {
 			NameLong: product.nameLong,
 			NameShort: product.nameShort,
 			DirName: product.win32DirName,
-			Version: nikaVersion,
-			RawVersion: nikaVersion.replace(/-\w+$/, ''),
+			Version: seeVersion,
+			RawVersion: seeVersion.replace(/\-\w+$/, ''),
 			Commit: commit,
-			NameVersion: product.win32NameVersion + ' ' + nikaVersion + (target === 'user' ? ' (User)' : ''),
+			NameVersion: product.win32NameVersion + ' ' + seeVersion + (target === 'user' ? ' (User)' : ''),
 			ExeBasename: product.nameShort,
 			RegValueName: product.win32RegValueName,
 			ShellNameShort: product.win32ShellNameShort,
@@ -117,7 +117,7 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
 			Quality: quality
 		};
 
-		// NikaCode: only define the AppX context-menu package when the product
+		// SeeCode: only define the AppX context-menu package when the product
 		// actually ships one (win32ContextMenu). This fork doesn't publish AppX
 		// packages, so the `#ifdef AppxPackageName` block in code.iss must stay
 		// inactive to keep `quality: "stable"` buildable.

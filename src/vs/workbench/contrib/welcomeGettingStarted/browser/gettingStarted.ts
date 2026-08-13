@@ -923,14 +923,14 @@ export class GettingStartedPage extends EditorPane {
 			onShowOnStartupChanged();
 		}));
 
-		// NikaCode: surface the fork's own version (productVersion) alongside the
+		// SeeCode: surface the fork's own version (productVersion) alongside the
 		// VS Code base version it is built on, mirroring the About dialog.
-		const nikaVersion = this.productService.productVersion || this.productService.version;
+		const seeVersion = this.productService.productVersion || this.productService.version;
 
 		const header = $('.header', {},
 			$('h1.product-name.caption', {}, this.productService.nameLong),
 			$('p.subtitle.description', {}, localize({ key: 'gettingStarted.editingEvolved', comment: ['Shown as subtitle on the Welcome page.'] }, "Editing evolved")),
-			$('p.caption.getting-started-version', {}, localize({ key: 'gettingStarted.version', comment: ['{0} is the NikaCode version, {1} is the VS Code base version'] }, "Version {0} · VS Code {1}", nikaVersion, this.productService.version))
+			$('p.caption.getting-started-version', {}, localize({ key: 'gettingStarted.version', comment: ['{0} is the SeeCode version, {1} is the VS Code base version'] }, "Version {0} · VS Code {1}", seeVersion, this.productService.version))
 		);
 
 		const leftColumn = $('.categories-column.categories-column-left', {},);

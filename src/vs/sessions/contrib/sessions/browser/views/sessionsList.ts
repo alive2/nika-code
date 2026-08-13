@@ -2296,7 +2296,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		}
 		if (this.configurationService.getValue<boolean>(SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING)) {
 			// Only show sessions created with the Copilot Chat provider (which
-			// hosts the Nika BYOK models) and scoped to the current window's
+			// hosts the See BYOK models) and scoped to the current window's
 			// workspace folder — hiding sessions from other apps (e.g. Codex)
 			// and from other workspaces.
 			const currentWorkspaceFolder = this.openWindowSourceFolder ?? this.workspaceContextService.getWorkspace().folders[0]?.uri;
@@ -3327,7 +3327,7 @@ function sessionMatchesFolder(session: ISession, folder: URI): boolean {
 
 /**
  * Filters sessions to only those created with the Copilot Chat provider (which
- * hosts the Nika BYOK models) and, when a workspace folder is known, scoped to
+ * hosts the See BYOK models) and, when a workspace folder is known, scoped to
  * that folder. Sessions from other apps (e.g. Codex) and from other workspaces
  * are hidden. When no workspace folder is available, only the provider filter
  * is applied.

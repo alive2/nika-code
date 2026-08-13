@@ -1,6 +1,6 @@
-# NikaCode Auto-Update Infrastructure
+# SeeCode Auto-Update Infrastructure
 
-NikaCode self-updates exactly like VS Code: the client polls an update feed
+SeeCode self-updates exactly like VS Code: the client polls an update feed
 URL every hour, the feed returns a JSON manifest pointing at the latest setup
 installer, and the client downloads, SHA-256-verifies, and silently installs it
 via the Inno Setup update protocol (`build/win32/code.iss` already implements
@@ -9,12 +9,12 @@ this).
 ## How it works
 
 ```
-NikaCode client (win32-x64-user / stable / <commit>)
+SeeCode client (win32-x64-user / stable / <commit>)
         │  GET /api/update/win32-x64-user/stable/<commit>   (hourly)
         ▼
-Cloudflare Worker  nika-code-update.173david173.workers.dev
-        │  fetches https://api.github.com/repos/alive2/nika-code/releases/latest
-        │  dereferences the tag to a commit, finds NikaCodeSetup-*.exe
+Cloudflare Worker  seecode-update.173david173.workers.dev
+        │  fetches https://api.github.com/repos/Tetnd/SeeCode/releases/latest
+        │  dereferences the tag to a commit, finds SeeCodeSetup-*.exe
         ▼
   204 (up to date)  OR  200 {url, version, productVersion, timestamp, sha256hash}
 ```
@@ -51,7 +51,7 @@ The worker URL is already wired into `product.json` -> `"updateUrl"`.
    npm run gulp vscode-win32-x64-user-setup
    ```
 3. Publish a GitHub release tagged `v1.0.1` (use `gh release create`) with the
-   new `NikaCodeSetup-1.0.1.exe` asset.
+   new `SeeCodeSetup-1.0.1.exe` asset.
 4. Existing installs will detect the update within the hour (or immediately
    via **Help → Check for Updates**).
 
@@ -62,9 +62,9 @@ The worker URL is already wired into `product.json` -> `"updateUrl"`.
 cd build/update && node test-worker.mjs
 
 # Live worker (from a machine that can reach *.workers.dev):
-curl "https://nika-code-update.173david173.workers.dev/api/update/win32-x64-user/stable/<old-commit>"
+curl "https://seecode-update.173david173.workers.dev/api/update/win32-x64-user/stable/<old-commit>"
 #   -> 200 + manifest JSON
-curl "https://nika-code-update.173david173.workers.dev/api/update/win32-x64-user/stable/<latest-commit>"
+curl "https://seecode-update.173david173.workers.dev/api/update/win32-x64-user/stable/<latest-commit>"
 #   -> 204 (up to date)
 ```
 
@@ -75,4 +75,4 @@ curl "https://nika-code-update.173david173.workers.dev/api/update/win32-x64-user
 - On any upstream error the worker returns `204`, so background update checks
   stay silent; manual checks surface the error in the UI.
 - Environment variables `GITHUB_OWNER` / `GITHUB_REPO` (see `wrangler.toml`)
-  override the default repo `alive2/nika-code`.
+  override the default repo `Tetnd/SeeCode`.

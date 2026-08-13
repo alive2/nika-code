@@ -1,4 +1,4 @@
-// Local verification harness for the NikaCode update worker.
+// Local verification harness for the SeeCode update worker.
 // Mocks the Cloudflare Cache API, exercises the worker's default export
 // against the real GitHub API, and validates the client-facing protocol.
 import { Worker } from 'node:worker_threads';
@@ -32,12 +32,12 @@ const { default: worker } = await import('./src/index.js');
 
 // The release tag we just published; its tag deref commit is 3c1a6045...
 // (We can't know it statically, so derive from the GitHub API like the worker does.)
-const latestRes = await fetch('https://api.github.com/repos/alive2/nika-code/releases/latest', {
-	headers: { 'User-Agent': 'NikaCode-Test' },
+const latestRes = await fetch('https://api.github.com/repos/Tetnd/SeeCode/releases/latest', {
+	headers: { 'User-Agent': 'SeeCode-Test' },
 });
 const latest = await latestRes.json();
-const tagRes = await fetch(`https://api.github.com/repos/alive2/nika-code/git/ref/tags/${latest.tag_name}`, {
-	headers: { 'User-Agent': 'NikaCode-Test' },
+const tagRes = await fetch(`https://api.github.com/repos/Tetnd/SeeCode/git/ref/tags/${latest.tag_name}`, {
+	headers: { 'User-Agent': 'SeeCode-Test' },
 });
 const tagRef = await tagRes.json();
 const latestCommit = tagRef.object.sha;
@@ -47,7 +47,7 @@ console.log('Latest commit      :', latestCommit);
 
 const results = [];
 async function check(label, path, expect) {
-	const res = await worker.fetch({ url: `https://nika-code-update.test${path}` }, {});
+	const res = await worker.fetch({ url: `https://seecode-update.test${path}` }, {});
 	const status = res.status;
 	let body = null;
 	try { body = await res.clone().json(); } catch { body = await res.text(); }
@@ -72,5 +72,5 @@ console.log('\n--- results ---');
 console.log(results.join('\n'));
 
 // Also print the manifest the stale-commit check would return, for the release notes.
-const manifestRes = await worker.fetch({ url: 'https://nika-code-update.test/api/update/win32-x64-user/stable/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, {});
+const manifestRes = await worker.fetch({ url: 'https://seecode-update.test/api/update/win32-x64-user/stable/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, {});
 console.log('\nExample manifest:', JSON.stringify(await manifestRes.json(), null, 2));

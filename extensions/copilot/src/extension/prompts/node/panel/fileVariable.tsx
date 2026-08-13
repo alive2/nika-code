@@ -75,7 +75,7 @@ export class FileVariable extends PromptElement<FileVariableProps, unknown> {
 		}
 
 		const isPdf = /\.pdf$/i.test(uri.path);
-		// PDFs stay attached in agent mode so Nika can extract their contents before
+		// PDFs stay attached in agent mode so See can extract their contents before
 		// sending them to text-only DeepSeek endpoints.
 		if (this.props.omitContents && !isPdf) {
 			const filePath = this.promptPathRepresentationService.getFilePath(uri);

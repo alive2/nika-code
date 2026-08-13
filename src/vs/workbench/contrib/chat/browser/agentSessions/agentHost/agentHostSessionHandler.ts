@@ -5183,7 +5183,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			return languageModelIdentifier.substring(prefix.length);
 		}
 		if (languageModelIdentifier.includes('/')) {
-			// A `${vendor}/${id}` identifier (e.g. a Nika `nika/deepseek-v4-flash-responses`
+			// A `${vendor}/${id}` identifier (e.g. a See `nika/deepseek-v4-flash-responses`
 			// general-pool model) is normally foreign to this agent host. But the BYOK
 			// bridge mirrors renderer BYOK models into the host's pool under the exact
 			// same provider-qualified selection id (`vendor/[group/]id`, see

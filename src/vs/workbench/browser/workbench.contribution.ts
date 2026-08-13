@@ -22,8 +22,8 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 
 MenuRegistry.appendMenuItem(MenuId.GlobalActivity, {
 	command: {
-		id: 'nika.openSettings',
-		title: localize('nikaSettings', "Nika Settings"),
+		id: 'see.openSettings',
+		title: localize('seeSettings', "See Settings"),
 	},
 	group: '2_configuration',
 	order: 4,
@@ -31,8 +31,8 @@ MenuRegistry.appendMenuItem(MenuId.GlobalActivity, {
 
 MenuRegistry.appendMenuItem(MenuId.MenubarPreferencesMenu, {
 	command: {
-		id: 'nika.openSettings',
-		title: localize({ key: 'miNikaSettings', comment: ['&& denotes a mnemonic'] }, "&&Nika Settings"),
+		id: 'see.openSettings',
+		title: localize({ key: 'miSeeSettings', comment: ['&& denotes a mnemonic'] }, "&&See Settings"),
 	},
 	group: '2_configuration',
 	order: 4,

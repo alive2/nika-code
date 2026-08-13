@@ -1,6 +1,6 @@
 name: Deploy Update Worker
 
-# Deploys the Cloudflare Worker that serves NikaCode update manifests.
+# Deploys the Cloudflare Worker that serves SeeCode update manifests.
 # Runs automatically when build/update/** changes, and can be triggered
 # manually from the Actions tab.
 #

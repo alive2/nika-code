@@ -60,12 +60,12 @@ import { createSessionOutputObs, ISessionOutputObs } from './agentHostSessionFil
 const STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES = 'sessions.agentHost.sessionConfigPicker.selectedValues';
 const UNSAFE_SESSION_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-/** Vendor ID of the Nika BYOK language-model provider. */
+/** Vendor ID of the See BYOK language-model provider. */
 export const NIKA_VENDOR_ID = 'nika';
 
 /**
- * Matches Nika language models that are not scoped to a specific session
- * type (the "general pool"). Nika models are provided by the built-in
+ * Matches See language models that are not scoped to a specific session
+ * type (the "general pool"). See models are provided by the built-in
  * extension and carry no `targetChatSessionType`, so sessions providers must
  * surface them explicitly alongside per-session-type models.
  */
@@ -3352,10 +3352,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			const manageModelsIdentifier = ILanguageModelChatMetadata.getAgentHostByokManageModelsIdentifier(model.metadata);
 			return manageModelsIdentifier === undefined || !this._languageModelsService.isModelHidden(manageModelsIdentifier);
 		});
-		// The agent host may already mirror Nika models into its pool through the
+		// The agent host may already mirror See models into its pool through the
 		// BYOK bridge (as `agent-host-<provider>` copies carrying a
 		// `byokModelIdentifier`). Those are included via the `targetChatSessionType`
-		// match above; drop the general-pool duplicate so Nika appears only once in
+		// match above; drop the general-pool duplicate so See appears only once in
 		// the picker. The deduped general copy is still resolvable for a remembered/
 		// configured `nika/...` selection: `AgentHostSessionHandler` maps those ids
 		// onto the bridged copy at send time, so they must not resolve 'unavailable'

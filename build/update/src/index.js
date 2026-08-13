@@ -1,7 +1,7 @@
 /**
- * NikaCode update manifest endpoint (Cloudflare Worker)
+ * SeeCode update manifest endpoint (Cloudflare Worker)
  * ------------------------------------------------------------------
- * Implements the VS Code update protocol that the NikaCode client polls:
+ * Implements the VS Code update protocol that the SeeCode client polls:
  *
  *   GET /api/update/{platform}/{quality}/{commit}
  *
@@ -23,13 +23,13 @@
  * setup exe with `/verysilent /update=...`; build/win32/code.iss already
  * implements the Inno update protocol (background updates, session-end, cancel).
  *
- * The manifest is derived from the latest GitHub release of the NikaCode repo,
+ * The manifest is derived from the latest GitHub release of the SeeCode repo,
  * so publishing a new release automatically makes it available as an update.
  * The GitHub lookup is cached (Cache API) to stay well under API rate limits.
  */
 
-const DEFAULT_OWNER = 'alive2';
-const DEFAULT_REPO = 'nika-code';
+const DEFAULT_OWNER = 'Tetnd';
+const DEFAULT_REPO = 'SeeCode';
 const GITHUB_API = 'https://api.github.com';
 const CACHE_TTL_SECONDS = 300; // 5 minutes
 
@@ -42,7 +42,7 @@ const CACHE_TTL_SECONDS = 300; // 5 minutes
 async function githubFetch(path, env) {
 	const headers = {
 		'Accept': 'application/vnd.github+json',
-		'User-Agent': 'NikaCode-Update-Worker',
+		'User-Agent': 'SeeCode-Update-Worker',
 	};
 	if (env.GITHUB_TOKEN) {
 		headers['Authorization'] = `Bearer ${env.GITHUB_TOKEN}`;
@@ -122,7 +122,7 @@ export default {
 			}
 
 			// Find the Windows setup asset.
-			const asset = (release.assets || []).find(a => /^NikaCodeSetup-.*\.exe$/.test(a.name));
+			const asset = (release.assets || []).find(a => /^SeeCodeSetup-.*\.exe$/.test(a.name));
 			if (!asset) {
 				return new Response(null, { status: 204 });
 			}

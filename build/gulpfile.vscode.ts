@@ -568,7 +568,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			result = es.merge(result, gulp.src('.build/policies/win32/**', { base: '.build/policies/win32' })
 				.pipe(rename(f => f.dirname = `policies/${f.dirname}`)));
 
-			// NikaCode: the AppX packaging block only applies when the product
+			// SeeCode: the AppX packaging block only applies when the product
 			// defines a File Explorer context menu (win32ContextMenu). This fork
 			// doesn't publish AppX packages, so skip it to keep `quality: "stable"`
 			// usable for the update protocol.
@@ -611,7 +611,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
 	return new Promise((resolve, reject) => {
 		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
-		// NikaCode: local OSS builds may not have the Windows SDK (and thus
+		// SeeCode: local OSS builds may not have the Windows SDK (and thus
 		// `signtool.exe`) on PATH. The Electron binaries shipped by the npm
 		// package are unsigned anyway, so treat a missing signtool as "no
 		// Authenticode signature" and let `rcedit` patch version info directly.

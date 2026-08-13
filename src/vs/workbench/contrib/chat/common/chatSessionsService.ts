@@ -366,7 +366,7 @@ export namespace SessionType {
 /**
  * Controls whether the sessions lists (both the Agents window and the GitHub
  * Copilot Chat sessions view) only show sessions created with the Copilot
- * Chat provider (which hosts the Nika BYOK models) scoped to the current
+ * Chat provider (which hosts the See BYOK models) scoped to the current
  * workspace folder — hiding sessions from other apps (e.g. Codex) and from
  * other workspaces.
  */

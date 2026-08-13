@@ -7,7 +7,7 @@ import { ModelSupportedEndpoint } from '../../../platform/endpoint/common/endpoi
 import { BYOKModelCapabilities } from '../common/byokProvider';
 
 export const NIKA_PROVIDER_ID = 'nika';
-export const NIKA_PROVIDER_NAME = 'Nika';
+export const NIKA_PROVIDER_NAME = 'See';
 
 export const NIKA_DEEPSEEK_SECRET = 'nika.deepseek.apiKey';
 export const NIKA_GEMINI_SECRET = 'nika.gemini.apiKey';

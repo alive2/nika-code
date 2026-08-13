@@ -37,7 +37,7 @@ export function hasPdfMagicBytes(data: Uint8Array): boolean {
 /**
  * pdfjs-dist 3.x rejects Node.js `Buffer` inputs in its `getDocument` data
  * property check (`val instanceof Buffer` throws). The LM API hands PDF bytes
- * to Nika as Buffer-backed `Uint8Array`s in the extension host, so normalize to
+ * to See as Buffer-backed `Uint8Array`s in the extension host, so normalize to
  * a plain `Uint8Array` before handing the bytes to pdfjs. The copy is scoped to
  * exactly the buffer's bytes so pooled-Buffer offsets cannot truncate it.
  */

@@ -101,7 +101,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return {
 				...base,
 				name: capabilities.name,
-				detail: vscode.l10n.t('Nika'),
+				detail: vscode.l10n.t('See'),
 				tooltip: this._tooltipFor(id),
 				isBYOK: true,
 				isDefault: id === defaultModel,
@@ -112,12 +112,12 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 
 	async provideLanguageModelChatResponse(model: NikaLanguageModelChatInformation, messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, options: vscode.ProvideLanguageModelChatResponseOptions, progress: vscode.Progress<vscode.LanguageModelResponsePart2>, token: vscode.CancellationToken): Promise<void> {
 		if (!isNikaModelId(model.id)) {
-			throw new Error(vscode.l10n.t('Unknown Nika model: {0}', model.id));
+			throw new Error(vscode.l10n.t('Unknown See model: {0}', model.id));
 		}
 		if (isNikaDeepSeekModel(model.id)) {
 			const key = await this._context.secrets.get(NIKA_DEEPSEEK_SECRET);
 			if (!key) {
-				throw new Error(vscode.l10n.t('Configure a DeepSeek API key in Nika Settings before using this model.'));
+				throw new Error(vscode.l10n.t('Configure a DeepSeek API key in See Settings before using this model.'));
 			}
 			try {
 				const endpoint = this._createDeepSeekEndpoint(model.id, key);
@@ -132,7 +132,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				if (model.id === 'deepseek-v4-flash-responses' && !token.isCancellationRequested) {
 					const switchAction = vscode.l10n.t('Use Flash Chat Completions');
 					const selected = await vscode.window.showErrorMessage(
-						vscode.l10n.t('The experimental DeepSeek Responses request failed. Nika did not fall back automatically.'),
+						vscode.l10n.t('The experimental DeepSeek Responses request failed. See did not fall back automatically.'),
 						switchAction,
 					);
 					if (selected === switchAction) {
@@ -147,7 +147,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		if (isNikaGeminiModel(model.id)) {
 			const key = await this._context.secrets.get(NIKA_GEMINI_SECRET);
 			if (!key) {
-				throw new Error(vscode.l10n.t('Configure a Gemini API key in Nika Settings before using this model.'));
+				throw new Error(vscode.l10n.t('Configure a Gemini API key in See Settings before using this model.'));
 			}
 			const delegate: ExtendedLanguageModelChatInformation<LanguageModelChatConfiguration> = {
 				...model,
@@ -167,7 +167,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 
 	async provideTokenCount(model: NikaLanguageModelChatInformation, text: string | vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2, token: vscode.CancellationToken): Promise<number> {
 		if (!isNikaModelId(model.id)) {
-			throw new Error(vscode.l10n.t('Unknown Nika model: {0}', model.id));
+			throw new Error(vscode.l10n.t('Unknown See model: {0}', model.id));
 		}
 		if (isNikaDeepSeekModel(model.id)) {
 			const endpoint = this._createDeepSeekEndpoint(model.id, await this._context.secrets.get(NIKA_DEEPSEEK_SECRET) ?? '');
@@ -215,7 +215,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return vscode.l10n.t('Experimental DeepSeek Responses API model. It never falls back silently to Chat Completions.');
 		}
 		if (isNikaDeepSeekModel(id)) {
-			return vscode.l10n.t('DeepSeek V4 through the native Nika provider. Images and PDFs are converted to text first.');
+			return vscode.l10n.t('DeepSeek V4 through the native See provider. Images and PDFs are converted to text first.');
 		}
 		if (isNikaGeminiModel(id)) {
 			return vscode.l10n.t('Native Gemini model with image and document input.');

@@ -379,9 +379,9 @@ export async function resolveByokSessionConfig(
 			id: selectionId,
 			provider: m.vendor,
 			// The Copilot runtime's native attachment admission check consults the
-			// behaviour model before the loopback provider receives a request. Nika
+			// behaviour model before the loopback provider receives a request. See
 			// preprocesses PDFs itself, so use a PDF-capable behaviour profile solely
-			// for that admission check while retaining the Nika model as the wire id.
+			// for that admission check while retaining the See model as the wire id.
 			...(m.vendor.toLowerCase() === 'nika' ? { modelId: 'gemini-2.5-flash', wireModel: selectionId } : {}),
 			...(m.name !== undefined ? { name: m.name } : {}),
 			...(m.maxContextWindowTokens !== undefined ? { maxContextWindowTokens: m.maxContextWindowTokens } : {}),
@@ -394,7 +394,7 @@ export async function resolveByokSessionConfig(
 
 /**
  * The Copilot runtime decides whether a blob attachment becomes a native
- * document from the selected model's advertised media types. Nika preprocesses
+ * document from the selected model's advertised media types. See preprocesses
  * images and PDFs before sending them to its text-only DeepSeek endpoints, so
  * its models must explicitly advertise those media types to keep attachments on
  * the local-agent path. Other BYOK providers retain their renderer-declared

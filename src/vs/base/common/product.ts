@@ -102,7 +102,7 @@ export interface IProductConfiguration {
 	readonly quality?: string;
 	readonly commit?: string;
 
-	// NikaCode: the fork's own version, separate from the upstream VS Code version
+	// SeeCode: the fork's own version, separate from the upstream VS Code version
 	readonly productVersion?: string;
 
 	readonly nameShort: string;

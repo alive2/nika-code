@@ -153,8 +153,8 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 	/**
 	 * Returns whether the session should be hidden from the sessions list by
-	 * the Nika fork's `sessions.list.showOnlyNikaAndCurrentWorkspace` setting:
-	 * only Copilot Chat sessions (which host the Nika BYOK models) scoped to
+	 * the See fork's `sessions.list.showOnlyNikaAndCurrentWorkspace` setting:
+	 * only Copilot Chat sessions (which host the See BYOK models) scoped to
 	 * the current workspace are kept — sessions from other apps (e.g. Codex)
 	 * and from other workspaces are hidden. When the setting is off, or no
 	 * workspace folder is available, only the provider dimension applies.

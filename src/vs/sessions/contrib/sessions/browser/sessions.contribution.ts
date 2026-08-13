@@ -90,7 +90,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		[SESSIONS_LIST_SHOW_ONLY_NIKA_AND_CURRENT_WORKSPACE_SETTING]: {
 			type: 'boolean',
 			tags: ['preview'],
-			description: localize('sessions.list.showOnlyNikaAndCurrentWorkspace', "Controls whether the sessions list only shows sessions created with Nika (Copilot Chat) and scoped to the current workspace folder, hiding sessions from other apps (e.g. Codex) and from other workspaces."),
+			description: localize('sessions.list.showOnlyNikaAndCurrentWorkspace', "Controls whether the sessions list only shows sessions created with See (Copilot Chat) and scoped to the current workspace folder, hiding sessions from other apps (e.g. Codex) and from other workspaces."),
 			default: true,
 			experiment: { mode: 'auto' }
 		},

@@ -1737,7 +1737,7 @@
       {
         "vendor": "nika",
         "displayName": "%nika.provider.displayName%",
-        "managementCommand": "nika.openSettings"
+        "managementCommand": "see.openSettings"
       },
       {
         "vendor": "copilotcli",
@@ -2427,25 +2427,25 @@
     ],
     "commands": [
       {
-        "command": "nika.openSettings",
+        "command": "see.openSettings",
         "title": "%nika.command.openSettings%",
         "category": "%nika.category%",
         "icon": "$(settings-gear)"
       },
       {
-        "command": "nika.checkForUpdates",
+        "command": "see.checkForUpdates",
         "title": "%nika.command.checkForUpdates%",
         "category": "%nika.category%",
         "icon": "$(cloud-download)"
       },
       {
-        "command": "nika.openLogs",
+        "command": "see.openLogs",
         "title": "%nika.command.openLogs%",
         "category": "%nika.category%",
         "icon": "$(output)"
       },
       {
-        "command": "nika.exportDiagnostics",
+        "command": "see.exportDiagnostics",
         "title": "%nika.command.exportDiagnostics%",
         "category": "%nika.category%",
         "icon": "$(file-export)"

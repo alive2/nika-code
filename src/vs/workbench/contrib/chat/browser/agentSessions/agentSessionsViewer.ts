@@ -1123,7 +1123,7 @@ export class AgentSessionsDataSource extends Disposable implements IAsyncDataSou
 		private readonly repositoryGroupLimit?: number,
 		/**
 		 * Additional predicate that hides sessions from the list regardless of
-		 * the user-configurable filter. Used by the Nika fork to scope the
+		 * the user-configurable filter. Used by the See fork to scope the
 		 * sessions list to Copilot Chat sessions in the current workspace.
 		 */
 		private readonly extraExclude?: (session: IAgentSession) => boolean,

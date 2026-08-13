@@ -63,7 +63,7 @@ export function compareVersions(a: string, b: string): number {
 export class NikaSettingsEditor extends Disposable {
 	private _panel: vscode.WebviewPanel | undefined;
 	private _activeSection: NikaSettingsSection = 'overview';
-	private readonly _output = this._register(vscode.window.createOutputChannel(vscode.l10n.t('Nika')));
+	private readonly _output = this._register(vscode.window.createOutputChannel(vscode.l10n.t('See')));
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
 
 	constructor(
@@ -72,10 +72,10 @@ export class NikaSettingsEditor extends Disposable {
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super();
-		this._register(vscode.commands.registerCommand('nika.openSettings', () => this.open()));
-		this._register(vscode.commands.registerCommand('nika.checkForUpdates', () => this.checkForUpdates(true)));
-		this._register(vscode.commands.registerCommand('nika.openLogs', () => this._output.show(true)));
-		this._register(vscode.commands.registerCommand('nika.exportDiagnostics', () => this.exportDiagnostics()));
+		this._register(vscode.commands.registerCommand('see.openSettings', () => this.open()));
+		this._register(vscode.commands.registerCommand('see.checkForUpdates', () => this.checkForUpdates(true)));
+		this._register(vscode.commands.registerCommand('see.openLogs', () => this._output.show(true)));
+		this._register(vscode.commands.registerCommand('see.exportDiagnostics', () => this.exportDiagnostics()));
 		this._register(vscode.workspace.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('nika')) {
 				void this._render(this._activeSection);
@@ -102,9 +102,9 @@ export class NikaSettingsEditor extends Disposable {
 			]);
 			if (!deepseekKey && !geminiKey) {
 				this.open('providers');
-				void vscode.window.showInformationMessage(vscode.l10n.t('Welcome to NikaCode. Nika Settings is open: add and test a DeepSeek key to start chatting. A Gemini key is optional for Gemini and vision features.'));
+				void vscode.window.showInformationMessage(vscode.l10n.t('Welcome to SeeCode. See Settings is open: add and test a DeepSeek key to start chatting. A Gemini key is optional for Gemini and vision features.'));
 			} else {
-				void vscode.window.showInformationMessage(vscode.l10n.t('Nika is ready to use. Open Nika Settings at any time to manage providers, models, vision, and PDF features.'));
+				void vscode.window.showInformationMessage(vscode.l10n.t('See is ready to use. Open See Settings at any time to manage providers, models, vision, and PDF features.'));
 			}
 		}
 
@@ -152,7 +152,7 @@ export class NikaSettingsEditor extends Disposable {
 		])) as Record<string, string>;
 		await this._applyNativeAgentMappings(assignments);
 		await this._context.globalState.update('nika.agentDefaultsVersion', 2);
-		this.log('INFO', vscode.l10n.t('Migrated Nika agent defaults to DeepSeek V4 Flash Responses.'));
+		this.log('INFO', vscode.l10n.t('Migrated See agent defaults to DeepSeek V4 Flash Responses.'));
 	}
 
 	private async _migrateLegacyModelSetting(): Promise<void> {
@@ -177,7 +177,7 @@ export class NikaSettingsEditor extends Disposable {
 		await this._context.globalState.update('nika.externalExtensionWarningShown', true);
 		const open = vscode.l10n.t('Open Extension');
 		const choice = await vscode.window.showWarningMessage(
-			vscode.l10n.t('The external Nika extension conflicts with the built-in Nika provider. Disable or uninstall it, then re-enter its keys in Nika Settings.'),
+			vscode.l10n.t('The external See extension conflicts with the built-in See provider. Disable or uninstall it, then re-enter its keys in See Settings.'),
 			open,
 		);
 		if (choice === open) {
@@ -196,7 +196,7 @@ export class NikaSettingsEditor extends Disposable {
 		this._activeSection = initialSection ?? this._activeSection;
 		this._panel = vscode.window.createWebviewPanel(
 			'nika.settings',
-			vscode.l10n.t('Nika Settings'),
+			vscode.l10n.t('See Settings'),
 			vscode.ViewColumn.Active,
 			{ enableScripts: true, retainContextWhenHidden: true },
 		);
@@ -304,7 +304,7 @@ export class NikaSettingsEditor extends Disposable {
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			this.log('ERROR', detail);
-			void vscode.window.showErrorMessage(vscode.l10n.t('Nika Settings could not apply the change: {0}', detail));
+			void vscode.window.showErrorMessage(vscode.l10n.t('See Settings could not apply the change: {0}', detail));
 		} finally {
 			await this._render(this._activeSection);
 		}
@@ -407,7 +407,7 @@ export class NikaSettingsEditor extends Disposable {
 		await Promise.all(Object.entries(recommended).map(([key, value]) => config.update(key, value, vscode.ConfigurationTarget.Global)));
 		await this._applyNativeAgentMappings(recommended);
 		if (showMessage) {
-			void vscode.window.showInformationMessage(vscode.l10n.t('Applied the recommended Nika agent mappings.'));
+			void vscode.window.showInformationMessage(vscode.l10n.t('Applied the recommended See agent mappings.'));
 		}
 	}
 
@@ -432,12 +432,12 @@ export class NikaSettingsEditor extends Disposable {
 			'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
 			'gemma4:31b': 'Gemma 4 31B (Ollama)',
 		};
-		return names[id] ? `${names[id]} (nika)` : value;
+		return names[id] ? `${names[id]} (see)` : value;
 	}
 
 	async checkForUpdates(showNoUpdate: boolean): Promise<void> {
 		try {
-			const response = await this._fetcherService.fetch('https://api.github.com/repos/alive2/nika-code/releases/latest', {
+			const response = await this._fetcherService.fetch('https://api.github.com/repos/Tetnd/SeeCode/releases/latest', {
 				method: 'GET',
 				headers: { Accept: 'application/vnd.github+json' },
 				callSite: 'nika-release-check',
@@ -456,25 +456,25 @@ export class NikaSettingsEditor extends Disposable {
 			const current = vscode.version;
 			if (compareVersions(release.tag_name, current) > 0) {
 				const view = vscode.l10n.t('View Release');
-				const choice = await vscode.window.showInformationMessage(vscode.l10n.t('NikaCode {0} is available. You have {1}.', release.tag_name, current), view);
+				const choice = await vscode.window.showInformationMessage(vscode.l10n.t('SeeCode {0} is available. You have {1}.', release.tag_name, current), view);
 				if (choice === view && release.html_url) {
 					await vscode.env.openExternal(vscode.Uri.parse(release.html_url));
 				}
 			} else if (showNoUpdate) {
-				void vscode.window.showInformationMessage(vscode.l10n.t('NikaCode is up to date.'));
+				void vscode.window.showInformationMessage(vscode.l10n.t('SeeCode is up to date.'));
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log('ERROR', vscode.l10n.t('Release check failed: {0}', message));
-			if (showNoUpdate) { void vscode.window.showErrorMessage(vscode.l10n.t('Could not check for NikaCode updates: {0}', message)); }
+			if (showNoUpdate) { void vscode.window.showErrorMessage(vscode.l10n.t('Could not check for SeeCode updates: {0}', message)); }
 		}
 	}
 
 	async exportDiagnostics(): Promise<void> {
 		const target = await vscode.window.showSaveDialog({
-			defaultUri: vscode.Uri.file('nika-diagnostics.json'),
+			defaultUri: vscode.Uri.file('see-diagnostics.json'),
 			filters: { [vscode.l10n.t('JSON files')]: ['json'] },
-			saveLabel: vscode.l10n.t('Export Nika Diagnostics'),
+			saveLabel: vscode.l10n.t('Export See Diagnostics'),
 		});
 		if (!target) {
 			return;
@@ -490,7 +490,7 @@ export class NikaSettingsEditor extends Disposable {
 			settings: state.settings,
 		};
 		await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(JSON.stringify(diagnostics, undefined, 2)));
-		void vscode.window.showInformationMessage(vscode.l10n.t('Nika diagnostics exported.'));
+		void vscode.window.showInformationMessage(vscode.l10n.t('See diagnostics exported.'));
 	}
 
 	log(level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR', message: string): void {
@@ -501,10 +501,10 @@ export class NikaSettingsEditor extends Disposable {
 		}
 		const line = `${new Date().toISOString()} [${level}] ${message}`;
 		this._output.appendLine(line);
-		if (level === 'ERROR') { this._logService.error(`[Nika] ${message}`); }
-		else if (level === 'WARN') { this._logService.warn(`[Nika] ${message}`); }
-		else if (level === 'DEBUG') { this._logService.debug(`[Nika] ${message}`); }
-		else { this._logService.info(`[Nika] ${message}`); }
+		if (level === 'ERROR') { this._logService.error(`[See] ${message}`); }
+		else if (level === 'WARN') { this._logService.warn(`[See] ${message}`); }
+		else if (level === 'DEBUG') { this._logService.debug(`[See] ${message}`); }
+		else { this._logService.info(`[See] ${message}`); }
 	}
 
 	private _html(webview: vscode.Webview, state: Record<string, unknown>): string {
@@ -513,7 +513,7 @@ export class NikaSettingsEditor extends Disposable {
 		return `<!DOCTYPE html>
 <html lang="${vscode.env.language}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${token}';">
-<title>${vscode.l10n.t('Nika Settings')}</title>
+<title>${vscode.l10n.t('See Settings')}</title>
 <style>
 :root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;color:var(--vscode-foreground);background:var(--vscode-editor-background);font:13px var(--vscode-font-family)}
 .shell{display:grid;grid-template-columns:210px minmax(0,760px);max-width:1040px;margin:0 auto;min-height:100vh}.side{position:sticky;top:0;height:100vh;padding:34px 18px;border-right:1px solid var(--vscode-panel-border)}
@@ -522,14 +522,14 @@ nav button{display:block;width:100%;border:0;border-radius:6px;background:transp
 main{padding:38px 46px 80px}section{display:none}section.active{display:block}h1{font-size:26px;margin:0 0 8px}h2{font-size:16px;margin:30px 0 8px}.lead{color:var(--vscode-descriptionForeground);margin:0 0 28px;line-height:1.55}
 .card{padding:18px;border:1px solid var(--vscode-panel-border);border-radius:10px;margin:12px 0;background:color-mix(in srgb,var(--vscode-editor-background) 94%,var(--vscode-sideBar-background))}.row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(210px,1fr);gap:22px;align-items:center;padding:11px 0}.row+.row{border-top:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent)}label strong{display:block;margin-bottom:4px}.hint,.status{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}.agent-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px}
 input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}.controls{display:flex;gap:7px;align-items:center}.controls input{flex:1}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
-</style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>NikaCode</div><nav>
+</style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>SeeCode</div><nav>
 ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
 </nav></aside><main>
-<section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, vision, and PDF support for NikaCode.')}</p>
-<div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
+<section id="overview" class="active"><h1>${vscode.l10n.t('See Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, vision, and PDF support for SeeCode.')}</p>
+<div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make See models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for See chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
 <div class="card"><div class="row"><label><strong>${vscode.l10n.t('DeepSeek')}</strong><span class="hint">${vscode.l10n.t('Flash, Pro, and experimental Responses')}</span></label><span data-provider-status="deepseek"></span></div><div class="row"><label><strong>${vscode.l10n.t('Gemini')}</strong><span class="hint">${vscode.l10n.t('Flash and Flash Lite')}</span></label><span data-provider-status="gemini"></span></div><div class="row"><label><strong>${vscode.l10n.t('Ollama')}</strong><span class="hint">${vscode.l10n.t('Gemma 4 31B at the configured host')}</span></label><span data-provider-status="ollama"></span></div></div>
-<div class="card"><div class="row"><label><strong>${vscode.l10n.t('NikaCode version')}</strong></label><span id="app-version"></span></div><div class="row"><label><strong>${vscode.l10n.t('Bundled Copilot version')}</strong></label><span id="extension-version"></span></div></div></section>
-<section id="providers"><h1>${vscode.l10n.t('Set up Nika')}</h1><p class="lead">${vscode.l10n.t('Start with DeepSeek: paste the key, select Save, then select Test. Gemini is optional and enables native Gemini chat plus vision features. API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
+<div class="card"><div class="row"><label><strong>${vscode.l10n.t('SeeCode version')}</strong></label><span id="app-version"></span></div><div class="row"><label><strong>${vscode.l10n.t('Bundled Copilot version')}</strong></label><span id="extension-version"></span></div></div></section>
+<section id="providers"><h1>${vscode.l10n.t('Set up See')}</h1><p class="lead">${vscode.l10n.t('Start with DeepSeek: paste the key, select Save, then select Test. Gemini is optional and enables native Gemini chat plus vision features. API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
 ${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
 </div></section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
@@ -540,7 +540,7 @@ ${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['
 </div></section>
 <section id="pdf"><h1>${vscode.l10n.t('PDF')}</h1><p class="lead">${vscode.l10n.t('PDF limits apply only to PDF reads. Page ranges can be requested in English or Hebrew.')}</p><div class="card">${this._numberRow('pdfMaxFileSizeMB', vscode.l10n.t('Maximum PDF size (MB)'), '1', '1024', '1')}${this._numberRow('pdfMaxPages', vscode.l10n.t('Pages without an explicit range'), '1', '1000', '1')}${this._checkboxRow('pdfPageNotice', vscode.l10n.t('Show truncation notice'))}${this._checkboxRow('pdfSparseFallback', vscode.l10n.t('Use Gemini for sparse or scanned PDFs'))}${this._numberRow('pdfSparseThreshold', vscode.l10n.t('Sparse-document character threshold'), '1', '100000', '100')}</div></section>
 <section id="agents"><h1>${vscode.l10n.t('Agents')}</h1><p class="lead">${vscode.l10n.t('Assign a model and thinking effort to each built-in role. The recommended profile uses DeepSeek V4 Flash Responses for every role.')}</p><div class="card">${(['plan','explore','utility','utilitySmall','inlineChat'] as const).map(id=>this._agentRow(id, ({plan:vscode.l10n.t('Plan'),explore:vscode.l10n.t('Explore'),utility:vscode.l10n.t('Utility'),utilitySmall:vscode.l10n.t('Utility Small'),inlineChat:vscode.l10n.t('Inline Chat')} as Record<string,string>)[id])).join('')}</div><div class="actions"><button class="action" data-action="recommendedAgents">${vscode.l10n.t('Apply recommended mappings')}</button></div></section>
-<section id="diagnostics"><h1>${vscode.l10n.t('Diagnostics')}</h1><p class="lead">${vscode.l10n.t('Nika writes to a native output channel and never creates an automatic log file.')}</p><div class="card">${this._selectRow('logLevel', vscode.l10n.t('Log level'), ['DEBUG','INFO','WARN','ERROR'].map(v=>[v,v]))}${this._checkboxRow('releaseCheckEnabled', vscode.l10n.t('Check for releases on startup'))}</div><div class="actions"><button class="action" data-action="openLogs">${vscode.l10n.t('Open Nika Output')}</button><button class="action secondary" data-action="exportDiagnostics">${vscode.l10n.t('Export Diagnostics')}</button><button class="action secondary" data-action="checkUpdates">${vscode.l10n.t('Check for Updates')}</button></div></section>
+<section id="diagnostics"><h1>${vscode.l10n.t('Diagnostics')}</h1><p class="lead">${vscode.l10n.t('See writes to a native output channel and never creates an automatic log file.')}</p><div class="card">${this._selectRow('logLevel', vscode.l10n.t('Log level'), ['DEBUG','INFO','WARN','ERROR'].map(v=>[v,v]))}${this._checkboxRow('releaseCheckEnabled', vscode.l10n.t('Check for releases on startup'))}</div><div class="actions"><button class="action" data-action="openLogs">${vscode.l10n.t('Open Nika Output')}</button><button class="action secondary" data-action="exportDiagnostics">${vscode.l10n.t('Export Diagnostics')}</button><button class="action secondary" data-action="checkUpdates">${vscode.l10n.t('Check for Updates')}</button></div></section>
 </main></div><script nonce="${token}">const vscode=acquireVsCodeApi();const state=${encoded};
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('ollama',true);

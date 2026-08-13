@@ -483,7 +483,7 @@ export function packageCopilotExtensionStream(disableMangle: boolean): Stream {
 	const productionDependencies = getProductionDependencies('extensions/copilot');
 	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
 
-	// NikaCode: the copilot esbuild step runs the extension postinstall, which
+	// SeeCode: the copilot esbuild step runs the extension postinstall, which
 	// mutates `node_modules/@github/copilot` (removes and recreates `sdk/` and
 	// deletes the transient `shims.txt` marker). Glob the production dependency
 	// tree only AFTER the local extension stream starts emitting, because

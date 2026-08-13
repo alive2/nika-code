@@ -156,11 +156,11 @@ MenuRegistry.appendMenuItem(AccountMenu, {
 	order: 1,
 });
 
-// Nika Settings (hidden on phone — no settings UI on mobile)
+// See Settings (hidden on phone — no settings UI on mobile)
 MenuRegistry.appendMenuItem(AccountMenu, {
 	command: {
-		id: 'nika.openSettings',
-		title: localize('nikaSettings', "Nika Settings"),
+		id: 'see.openSettings',
+		title: localize('seeSettings', "See Settings"),
 		icon: Codicon.settingsGear,
 	},
 	when: IsPhoneLayoutContext.negate(),
