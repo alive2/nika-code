@@ -1,2 +1,9 @@
 @anthropic-ai/claude-agent-sdk/vendor/audio-capture/*-darwin/**
 @anthropic-ai/claude-agent-sdk/vendor/audio-capture/*-linux/**
+
+# onnxruntime-node ships native binaries for every platform. Only the win32
+# binding is needed on Windows; the darwin/linux ELF and dylib .node files
+# break cross-platform bundling (rcedit fails on non-PE .node files) and would
+# otherwise be shipped wastefully in the app.
+onnxruntime-node/bin/napi-v6/darwin/**
+onnxruntime-node/bin/napi-v6/linux/**
