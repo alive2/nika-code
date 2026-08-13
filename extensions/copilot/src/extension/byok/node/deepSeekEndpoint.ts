@@ -3,7 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IChatEndpoint, ICreateEndpointBodyOptions, IEndpointBody } from '../../../platform/networking/common/networking';
+import type { CancellationToken } from 'vscode';
+import { ChatResponse } from '../../../platform/chat/common/commonTypes';
+import { IChatEndpoint, ICreateEndpointBodyOptions, IEndpointBody, IMakeChatRequestOptions } from '../../../platform/networking/common/networking';
 import { isOpenAiFunctionTool, OpenAiResponsesFunctionTool } from '../../../platform/networking/common/fetch';
 import { OpenAIEndpoint } from './openAIEndpoint';
 
@@ -94,6 +96,17 @@ export class DeepSeekEndpoint extends OpenAIEndpoint {
 		const thinkingDisabled = this.useResponsesApi ? body.reasoning?.effort === 'none' : body.thinking?.type === 'disabled';
 		body.temperature = thinkingDisabled ? (this._configurationService.getNonExtensionConfig<number>('nika.temperature') ?? 0.7) : undefined;
 		delete body.top_p;
+	}
+
+	public override async makeChatRequest2(options: IMakeChatRequestOptions, token: CancellationToken): Promise<ChatResponse> {
+		// DeepSeek's Responses API is stateless: `previous_response_id` is unsupported and the
+		// full conversation (including historical `function_call` items) must be sent in `input`
+		// on every request. Never honor stateful markers here — honoring one slices the history
+		// down to only the post-marker items, which leaves `function_call_output` entries without
+		// their matching tool calls. The stateless server then rejects the whole request with
+		// "No tool call found for tool output with call_id ...".
+		const modifiedOptions: IMakeChatRequestOptions = { ...options, ignoreStatefulMarker: true };
+		return super.makeChatRequest2(modifiedOptions, token);
 	}
 
 	override cloneWithTokenOverride(modelMaxPromptTokens: number): IChatEndpoint {

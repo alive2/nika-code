@@ -4,11 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Raw } from '@vscode/prompt-tsx';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChatFetchResponseType, ChatResponse } from '../../../../platform/chat/common/commonTypes';
 import { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { IChatModelInformation, ModelSupportedEndpoint } from '../../../../platform/endpoint/common/endpointProvider';
-import { ICreateEndpointBodyOptions } from '../../../../platform/networking/common/networking';
+import { ChatEndpoint } from '../../../../platform/endpoint/node/chatEndpoint';
+import { ICreateEndpointBodyOptions, IMakeChatRequestOptions } from '../../../../platform/networking/common/networking';
 import { ITestingServicesAccessor } from '../../../../platform/test/node/services';
+import { CancellationToken } from '../../../../util/vs/base/common/cancellation';
 import { DisposableStore } from '../../../../util/vs/base/common/lifecycle';
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
@@ -93,6 +96,30 @@ describe('DeepSeekEndpoint', () => {
 		expect(body.max_output_tokens).toBe(8_000);
 		expect(body.store).toBeUndefined();
 		expect(body.previous_response_id).toBeUndefined();
+	});
+
+	it('never honors stateful markers so stateless tool outputs stay paired with their calls', async () => {
+		const endpoint = instantiationService.createInstance(DeepSeekEndpoint, metadata('deepseek-v4-flash-responses', ModelSupportedEndpoint.Responses), 'secret', 'https://api.deepseek.com/responses');
+		const parentResponse: ChatResponse = {
+			type: ChatFetchResponseType.Success,
+			requestId: 'request-id',
+			serverRequestId: 'server-request-id',
+			usage: undefined,
+			resolvedModel: 'deepseek-v4-flash-responses',
+			value: ''
+		};
+		const parentRequestSpy = vi.spyOn(ChatEndpoint.prototype, 'makeChatRequest2').mockResolvedValue(parentResponse);
+
+		const requestOptions: IMakeChatRequestOptions = {
+			debugName: 'nika-test',
+			messages: [{ role: Raw.ChatRole.User, content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: 'hello' }] }],
+			finishedCb: undefined,
+			location: undefined as any,
+		};
+		await endpoint.makeChatRequest2(requestOptions, CancellationToken.None);
+
+		expect(parentRequestSpy).toHaveBeenCalledOnce();
+		expect(parentRequestSpy.mock.calls[0][0].ignoreStatefulMarker).toBe(true);
 	});
 
 	it('normalizes empty and invalid Responses tool schemas to object-root JSON Schema', () => {
