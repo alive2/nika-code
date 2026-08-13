@@ -1,23 +1,27 @@
 name: Deploy Update Worker
 
-# Deploys the Cloudflare Worker that serves NikaCode update manifests.
-# Runs automatically when build/update/** changes, and can be triggered
-# manually from the Actions tab.
+# DISABLED: auto-deploy of the Cloudflare Worker is turned off. The repo has
+# no CLOUDFLARE_API_TOKEN secret configured, so every push touching
+# build/update/** or product.json failed with a red check ("In a non-
+# interactive environment, it's necessary to set a CLOUDFLARE_API_TOKEN...").
+# The worker is deployed manually instead (cd build/update && npx wrangler
+# deploy).
 #
-# Setup (one time):
+# To re-enable auto-deploy:
 #   1. Create a Cloudflare API token with "Workers Scripts: Edit" permission:
 #      https://dash.cloudflare.com/profile/api-tokens
 #   2. Add it as a GitHub Actions secret named CLOUDFLARE_API_TOKEN
-#      (repo Settings -> Secrets and variables -> Actions).
-#   3. Push this workflow; it deploys to the account bound to the token.
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'build/update/**'
-      - 'product.json'
-  workflow_dispatch:
+#      (repo Settings -> Secrets and variables -> Actions), or via
+#      `gh secret set CLOUDFLARE_API_TOKEN`.
+#   3. Restore the `on:` block below.
+#
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - 'build/update/**'
+#       - 'product.json'
+#   workflow_dispatch:
 
 jobs:
   deploy:
