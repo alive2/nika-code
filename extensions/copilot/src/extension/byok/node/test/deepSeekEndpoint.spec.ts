@@ -98,6 +98,17 @@ describe('DeepSeekEndpoint', () => {
 		expect(body.previous_response_id).toBeUndefined();
 	});
 
+	it('aliases the Pro Responses model to deepseek-v4-pro on the wire', () => {
+		const endpoint = instantiationService.createInstance(DeepSeekEndpoint, metadata('deepseek-v4-pro-responses', ModelSupportedEndpoint.Responses), 'secret', 'https://api.deepseek.com/responses');
+		const body = endpoint.createRequestBody(options('high'));
+		endpoint.interceptBody(body);
+		expect(body.model).toBe('deepseek-v4-pro');
+		expect(body.reasoning).toEqual({ effort: 'high' });
+		expect(body.max_output_tokens).toBe(8_000);
+		expect(body.store).toBeUndefined();
+		expect(body.previous_response_id).toBeUndefined();
+	});
+
 	it('never honors stateful markers so stateless tool outputs stay paired with their calls', async () => {
 		const endpoint = instantiationService.createInstance(DeepSeekEndpoint, metadata('deepseek-v4-flash-responses', ModelSupportedEndpoint.Responses), 'secret', 'https://api.deepseek.com/responses');
 		const parentResponse: ChatResponse = {

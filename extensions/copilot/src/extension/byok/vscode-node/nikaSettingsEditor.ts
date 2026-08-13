@@ -503,6 +503,7 @@ export class NikaSettingsEditor extends Disposable {
 			'deepseek-v4-flash': 'DeepSeek V4 Flash',
 			'deepseek-v4-pro': 'DeepSeek V4 Pro',
 			'deepseek-v4-flash-responses': 'DeepSeek V4 Flash (Responses, Experimental)',
+			'deepseek-v4-pro-responses': 'DeepSeek V4 Pro (Responses, Experimental)',
 			'gemini-2.5-flash': 'Gemini 2.5 Flash',
 			'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
 			'gemma4:31b': 'Gemma 4 31B (Ollama)',
@@ -608,7 +609,7 @@ ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Provide
 ${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
 </div></section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
-${this._selectRow('defaultModel', vscode.l10n.t('Default model for new chats'), [['nika/deepseek-v4-flash','DeepSeek V4 Flash'],['nika/deepseek-v4-pro','DeepSeek V4 Pro'],['nika/deepseek-v4-flash-responses','DeepSeek V4 Flash (Responses)'],['nika/gemini-2.5-flash','Gemini 2.5 Flash'],['nika/gemini-2.5-flash-lite','Gemini 2.5 Flash Lite'],['nika/gemma4:31b','Gemma 4 31B']])}
+${this._selectRow('defaultModel', vscode.l10n.t('Default model for new chats'), [['nika/deepseek-v4-flash','DeepSeek V4 Flash'],['nika/deepseek-v4-pro','DeepSeek V4 Pro'],['nika/deepseek-v4-flash-responses','DeepSeek V4 Flash (Responses)'],['nika/deepseek-v4-pro-responses','DeepSeek V4 Pro (Responses)'],['nika/gemini-2.5-flash','Gemini 2.5 Flash'],['nika/gemini-2.5-flash-lite','Gemini 2.5 Flash Lite'],['nika/gemma4:31b','Gemma 4 31B']])}
 ${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K','8K','16K','32K','64K','128K','384K'].map(v=>[v,v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K','64K','128K','256K','512K','1M'].map(v=>[v,v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._selectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), [['none',vscode.l10n.t('None')],['low',vscode.l10n.t('Low')],['high',vscode.l10n.t('High')],['max',vscode.l10n.t('Max')]])}</div></section>
 <section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only DeepSeek models. Provider credentials are managed on the Providers page.')}</p><div class="card">
 ${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['gemini-2.5-flash','Gemini 2.5 Flash'],['gemini-2.5-flash-lite','Gemini 2.5 Flash Lite'],['gemma4:31b','Gemma 4 31B (Ollama)'],['vscode',vscode.l10n.t('Another VS Code vision model')]])}${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}
@@ -666,6 +667,7 @@ document.querySelectorAll('[data-secret-remove]').forEach(button=>button.addEven
 			[NIKA_RESPONSES_MODEL, vscode.l10n.t('DeepSeek V4 Flash (Responses)')],
 			['nika/deepseek-v4-flash', vscode.l10n.t('DeepSeek V4 Flash')],
 			['nika/deepseek-v4-pro', vscode.l10n.t('DeepSeek V4 Pro')],
+			['nika/deepseek-v4-pro-responses', vscode.l10n.t('DeepSeek V4 Pro (Responses)')],
 			['nika/gemini-2.5-flash', vscode.l10n.t('Gemini 2.5 Flash')],
 			['nika/gemini-2.5-flash-lite', vscode.l10n.t('Gemini 2.5 Flash Lite')],
 			['nika/gemma4:31b', vscode.l10n.t('Gemma 4 31B (Ollama)')],

@@ -16,6 +16,7 @@ export type NikaModelId =
 	| 'deepseek-v4-flash'
 	| 'deepseek-v4-pro'
 	| 'deepseek-v4-flash-responses'
+	| 'deepseek-v4-pro-responses'
 	| 'gemini-2.5-flash'
 	| 'gemini-2.5-flash-lite'
 	| 'gemma4:31b';
@@ -24,6 +25,7 @@ export const NIKA_DEEPSEEK_MODEL_IDS: readonly NikaModelId[] = [
 	'deepseek-v4-flash',
 	'deepseek-v4-pro',
 	'deepseek-v4-flash-responses',
+	'deepseek-v4-pro-responses',
 ];
 
 export const NIKA_GEMINI_MODEL_IDS: readonly NikaModelId[] = [
@@ -112,8 +114,15 @@ export function getVisibleNikaModelIds(hasDeepSeekKey: boolean, hasGeminiKey: bo
 
 export function getNikaModelCapabilities(id: NikaModelId, limits: NikaTokenLimits): BYOKModelCapabilities {
 	if (isNikaDeepSeekModel(id)) {
+		const name = id === 'deepseek-v4-pro'
+			? 'DeepSeek V4 Pro'
+			: id === 'deepseek-v4-pro-responses'
+				? 'DeepSeek V4 Pro (Responses, Experimental)'
+				: id === 'deepseek-v4-flash-responses'
+					? 'DeepSeek V4 Flash (Responses, Experimental)'
+					: 'DeepSeek V4 Flash';
 		return {
-			name: id === 'deepseek-v4-pro' ? 'DeepSeek V4 Pro' : id.endsWith('-responses') ? 'DeepSeek V4 Flash (Responses, Experimental)' : 'DeepSeek V4 Flash',
+			name,
 			contextWindow: limits.contextWindow,
 			maxInputTokens: limits.maxInputTokens,
 			maxOutputTokens: limits.maxOutputTokens,

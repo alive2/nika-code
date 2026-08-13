@@ -40,6 +40,16 @@ export function normalizeDeepSeekToolSchemas(body: IEndpointBody): void {
 
 /** DeepSeek's OpenAI-compatible APIs differ in several important body fields. */
 export class DeepSeekEndpoint extends OpenAIEndpoint {
+
+	/**
+	 * The Responses API aliases Nika's `-responses` model ids back to the
+	 * plain DeepSeek model name (e.g. `deepseek-v4-pro-responses` →
+	 * `deepseek-v4-pro`).
+	 */
+	private _responsesModelName(): string {
+		return this.model.endsWith('-responses') ? this.model.slice(0, -'-responses'.length) : this.model;
+	}
+
 	override createRequestBody(options: ICreateEndpointBodyOptions): IEndpointBody {
 		const body = super.createRequestBody(options);
 		normalizeDeepSeekToolSchemas(body);
@@ -51,7 +61,7 @@ export class DeepSeekEndpoint extends OpenAIEndpoint {
 			: (defaultEffort === 'none' || defaultEffort === 'low' || defaultEffort === 'max' ? defaultEffort : 'high');
 
 		if (this.useResponsesApi) {
-			body.model = this.model === 'deepseek-v4-flash-responses' ? 'deepseek-v4-flash' : this.model;
+			body.model = this._responsesModelName();
 			body.max_output_tokens = this.maxOutputTokens;
 			body.max_tokens = undefined;
 			body.max_completion_tokens = undefined;
@@ -82,7 +92,7 @@ export class DeepSeekEndpoint extends OpenAIEndpoint {
 		}
 		normalizeDeepSeekToolSchemas(body);
 		if (this.useResponsesApi) {
-			body.model = this.model === 'deepseek-v4-flash-responses' ? 'deepseek-v4-flash' : this.model;
+			body.model = this._responsesModelName();
 			body.max_output_tokens = this.maxOutputTokens;
 			delete body.max_completion_tokens;
 			delete body.max_tokens;

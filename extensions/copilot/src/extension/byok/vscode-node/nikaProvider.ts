@@ -131,15 +131,18 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				for (const marker of processed.replayMarkers) { progress.report(marker); }
 				return await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, effectiveOptions, options.requestInitiator, progress, token);
 			} catch (error) {
-				if (model.id === 'deepseek-v4-flash-responses' && !token.isCancellationRequested) {
-					const switchAction = vscode.l10n.t('Use Flash Chat Completions');
+				if (model.id.endsWith('-responses') && !token.isCancellationRequested) {
+					const chatModel = model.id.slice(0, -'-responses'.length);
+					const chatModelLabel = chatModel === 'deepseek-v4-pro' ? 'DeepSeek V4 Pro' : 'DeepSeek V4 Flash';
+					const switchAction = vscode.l10n.t('Use {0} Chat Completions', chatModelLabel);
 					const selected = await vscode.window.showErrorMessage(
 						vscode.l10n.t('The experimental DeepSeek Responses request failed. Nika did not fall back automatically.'),
 						switchAction,
 					);
 					if (selected === switchAction) {
-						await vscode.workspace.getConfiguration('chat').update('defaultModel', 'nika/deepseek-v4-flash', vscode.ConfigurationTarget.Global);
-						await vscode.workspace.getConfiguration('nika').update('defaultModel', 'nika/deepseek-v4-flash', vscode.ConfigurationTarget.Global);
+						const qualified = `nika/${chatModel}`;
+						await vscode.workspace.getConfiguration('chat').update('defaultModel', qualified, vscode.ConfigurationTarget.Global);
+						await vscode.workspace.getConfiguration('nika').update('defaultModel', qualified, vscode.ConfigurationTarget.Global);
 					}
 				}
 				throw error;
@@ -189,7 +192,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private _createDeepSeekEndpoint(id: NikaModelId, apiKey: string): DeepSeekEndpoint {
 		const capabilities = getNikaModelCapabilities(id, this._limits());
 		const modelInfo = resolveModelInfo(id, NIKA_PROVIDER_NAME, { [id]: capabilities });
-		const url = id === 'deepseek-v4-flash-responses'
+		const url = id.endsWith('-responses')
 			? 'https://api.deepseek.com/responses'
 			: 'https://api.deepseek.com/chat/completions';
 		return this._instantiationService.createInstance(DeepSeekEndpoint, modelInfo, apiKey, url);
@@ -213,7 +216,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	private _tooltipFor(id: NikaModelId): string {
-		if (id === 'deepseek-v4-flash-responses') {
+		if (id.endsWith('-responses')) {
 			return vscode.l10n.t('Experimental DeepSeek Responses API model. It never falls back silently to Chat Completions.');
 		}
 		if (isNikaDeepSeekModel(id)) {

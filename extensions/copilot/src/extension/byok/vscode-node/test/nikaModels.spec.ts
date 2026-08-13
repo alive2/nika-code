@@ -28,6 +28,7 @@ describe('Nika model metadata', () => {
 		expect(isNikaModelId('deepseek-v4-flash')).toBe(true);
 		expect(isNikaModelId('deepseek-v4-pro')).toBe(true);
 		expect(isNikaModelId('deepseek-v4-flash-responses')).toBe(true);
+		expect(isNikaModelId('deepseek-v4-pro-responses')).toBe(true);
 		expect(isNikaModelId('gemini-2.5-flash')).toBe(true);
 		expect(isNikaModelId('gemini-2.5-flash-lite')).toBe(true);
 		expect(isNikaModelId('gemma4:31b')).toBe(true);
@@ -35,6 +36,8 @@ describe('Nika model metadata', () => {
 		expect(isNikaDeepSeekModel('deepseek-v4-flash')).toBe(true);
 		expect(isNikaGeminiModel('gemini-2.5-flash')).toBe(true);
 		expect(getNikaModelCapabilities('deepseek-v4-flash-responses', limits).supportedEndpoints).toHaveLength(1);
+		expect(getNikaModelCapabilities('deepseek-v4-pro-responses', limits).name).toBe('DeepSeek V4 Pro (Responses, Experimental)');
+		expect(getNikaModelCapabilities('deepseek-v4-pro-responses', limits).supportedEndpoints).toHaveLength(1);
 		expect(getNikaModelCapabilities('gemini-2.5-flash', limits).vision).toBe(true);
 		expect(getNikaModelCapabilities('gemma4:31b', limits).vision).toBe(true);
 	});
@@ -42,7 +45,7 @@ describe('Nika model metadata', () => {
 	it('hides cloud models until their corresponding key exists', () => {
 		expect(getVisibleNikaModelIds(false, false)).toEqual(['gemma4:31b']);
 		expect(getVisibleNikaModelIds(true, false)).toEqual([
-			'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-responses', 'gemma4:31b',
+			'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-responses', 'deepseek-v4-pro-responses', 'gemma4:31b',
 		]);
 		expect(getVisibleNikaModelIds(false, true)).toEqual([
 			'gemma4:31b', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
