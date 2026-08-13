@@ -174,6 +174,34 @@ npm run gulp vscode-win32-x64 *> .build\vscode-win32-x64-build.log
 Get-Content .build\vscode-win32-x64-build.log -Tail 10
 ```
 
+### Keyboard shortcuts don't work (Ctrl+B / Ctrl+Shift+P / Ctrl+J do nothing, F1 works)
+
+Symptom: most shortcuts are dead, but non-letter keys like `F1` still work.
+The main-process log shows:
+
+```
+Error: Cannot find module './build/Debug/keymapping'
+    at ... node_modules\native-keymap\index.js
+TypeError: Cannot read properties of null (reading 'getCurrentKeyboardLayout')
+```
+
+Root cause: `node_modules/native-keymap` has no compiled binary (only
+`build/config.gypi` + `.vcxproj` — the build never produced
+`build/Release/keymapping.node`). The Windows keyboard mapper then drops every
+letter-key default keybinding (letters are not "immutable" key codes), so
+`ctrl+B`, `ctrl+shift+p`, … resolve to nothing while `f1` survives.
+
+**Fix** (rebuild the module for the fork's Electron, which the repo `.npmrc`
+already targets — `runtime=electron`, `target=42.8.0`):
+
+```powershell
+npm rebuild native-keymap
+# verify: node_modules\native-keymap\build\Release\keymapping.node exists
+```
+
+Then fully restart NikaCode (the module loads in the main process). Run
+`npm run postinstall` if other native modules are also missing binaries.
+
 ---
 
 ## Quick links

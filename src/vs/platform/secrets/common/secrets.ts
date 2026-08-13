@@ -11,7 +11,6 @@ import { Emitter, Event } from '../../../base/common/event.js';
 import { ILogService } from '../../log/common/log.js';
 import { Disposable, DisposableStore } from '../../../base/common/lifecycle.js';
 import { Lazy } from '../../../base/common/lazy.js';
-import { isWindows } from '../../../base/common/platform.js';
 
 /**
  * The storage key prefix used for all secrets.
@@ -74,15 +73,6 @@ export async function writeEncryptedSecret(
 	logService?.trace('[secrets] stored encrypted secret for key:', fullKey);
 }
 
-/**
- * Secret keys that should be shared between the VS Code app and the agents app.
- * When the agents app starts and doesn't have these secrets, it requests them
- * from VS Code via crossAppIPC.
- */
-export const CROSS_APP_SHARED_SECRET_KEYS: readonly string[] = [
-	'{"extensionId":"vscode.github-authentication","key":"github.auth"}',
-];
-
 export const ISecretStorageService = createDecorator<ISecretStorageService>('secretStorageService');
 
 export interface ISecretStorageProvider {
@@ -119,8 +109,16 @@ export class BaseSecretStorageService extends Disposable implements ISecretStora
 		super();
 	}
 
+	/**
+	 * Secrets are persisted in the normal APPLICATION scope. The agents window and
+	 * the workbench window share the same user-data directory, so they already share
+	 * this storage without needing a cross-app shared storage indirection. (Routing
+	 * `github.auth` through `APPLICATION_SHARED` caused the GitHub login to be lost
+	 * on every Windows launch because that separate shared-storage database was not
+	 * reliably read back on restart.)
+	 */
 	protected useSharedStorage(key: string): boolean {
-		return isWindows && CROSS_APP_SHARED_SECRET_KEYS.includes(key);
+		return false;
 	}
 
 	/**
