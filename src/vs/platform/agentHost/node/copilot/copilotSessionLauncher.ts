@@ -375,6 +375,21 @@ export async function resolveByokSessionConfig(
 	const models: ProviderModelConfig[] = byokModels.map(m => {
 		const capabilities = nikaModelCapabilities(m);
 		const selectionId = getByokLmSelectionModelId(m);
+		// Nika's `-responses` suffix is an internal-only model id (e.g.
+		// `deepseek-v4-flash-responses`): the DeepSeek Responses API knows only the
+		// canonical `deepseek-v4-flash` / `deepseek-v4-pro` names. The Copilot
+		// runtime sends `wireModel` verbatim in the request body (and validates it
+		// against its own model registry), so exposing the suffix on the wire makes
+		// the runtime's background utility calls — conversation titles, inline-chat
+		// progress messages — fail with the API's `not_found_error`
+		// ("model 'deepseek-v4-flash-responses' not found"). The selection `id` must
+		// stay the full `-responses` id (it is what the bridge routes on, and it
+		// dedupes against the plain `deepseek-v4-flash` model), but the wire model
+		// is emitted in its canonical form. The loopback bridge still resolves the
+		// canonical name to the Nika provider, which handles it correctly.
+		const wireModel = m.vendor.toLowerCase() === 'nika' && selectionId.endsWith('-responses')
+			? selectionId.slice(0, -'-responses'.length)
+			: selectionId;
 		return {
 			id: selectionId,
 			provider: m.vendor,
@@ -382,7 +397,7 @@ export async function resolveByokSessionConfig(
 			// behaviour model before the loopback provider receives a request. Nika
 			// preprocesses PDFs itself, so use a PDF-capable behaviour profile solely
 			// for that admission check while retaining the Nika model as the wire id.
-			...(m.vendor.toLowerCase() === 'nika' ? { modelId: 'gemini-2.5-flash', wireModel: selectionId } : {}),
+			...(m.vendor.toLowerCase() === 'nika' ? { modelId: 'gemini-2.5-flash', wireModel } : {}),
 			...(m.name !== undefined ? { name: m.name } : {}),
 			...(m.maxContextWindowTokens !== undefined ? { maxContextWindowTokens: m.maxContextWindowTokens } : {}),
 			...(capabilities ? { capabilities } : {}),
