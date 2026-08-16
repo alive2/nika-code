@@ -87,6 +87,16 @@ describe('DeepSeekEndpoint', () => {
 		expect(body.temperature).toBe(0.7);
 	});
 
+	it.each(['deepseek-v4-flash-responses', 'deepseek-v4-pro-responses'])('strips the -responses suffix on the Chat Completions branch too (%s)', model => {
+		// Defensive hardening: a `-responses` id routed to the Chat Completions
+		// URL must never reach the wire verbatim.
+		const endpoint = instantiationService.createInstance(DeepSeekEndpoint, metadata(model, ModelSupportedEndpoint.ChatCompletions), 'secret', 'https://api.deepseek.com/chat/completions');
+		const body = endpoint.createRequestBody(options('high'));
+		endpoint.interceptBody(body);
+		expect(body.model).toBe(model.slice(0, -'-responses'.length));
+		expect(body.max_tokens).toBe(8_000);
+	});
+
 	it.each(['none', 'low', 'high', 'max'])('aliases the Responses model and maps %s effort', effort => {
 		const endpoint = instantiationService.createInstance(DeepSeekEndpoint, metadata('deepseek-v4-flash-responses', ModelSupportedEndpoint.Responses), 'secret', 'https://api.deepseek.com/responses');
 		const body = endpoint.createRequestBody(options(effort));

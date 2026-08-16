@@ -39,6 +39,61 @@ export function isDeepSeekPeakHour(date: Date = new Date()): boolean {
 	return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10);
 }
 
+/** Peak window boundaries in UTC minutes-of-day: 01:00–04:00 and 06:00–10:00. */
+const PEAK_WINDOWS: ReadonlyArray<readonly [number, number]> = [
+	[1 * 60, 4 * 60],
+	[6 * 60, 10 * 60],
+];
+
+export interface NikaRatePeriodInfo {
+	/** True when the current UTC hour is inside a peak window. */
+	readonly peak: boolean;
+	/** Epoch ms at which the current period ends and the opposite rate begins. */
+	readonly endsAt: number;
+	/** True when the period starting at {@link endsAt} is a peak window. */
+	readonly nextIsPeak: boolean;
+}
+
+/**
+ * Describe the current DeepSeek rate period and when it flips, so callers can
+ * render a countdown ("1h 23m left" / "2h 05m to PEAK").
+ */
+export function getDeepSeekRatePeriod(date: Date = new Date()): NikaRatePeriodInfo {
+	const minutes = date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
+	const dayStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+
+	for (const [start, end] of PEAK_WINDOWS) {
+		if (minutes >= start && minutes < end) {
+			// Inside a peak window: it ends at the window's end (today).
+			return { peak: true, endsAt: dayStart + end * 60_000, nextIsPeak: false };
+		}
+		if (minutes < start) {
+			// Off-peak, before the first peak window of the day: it ends when the
+			// next peak window starts (today).
+			return { peak: false, endsAt: dayStart + start * 60_000, nextIsPeak: true };
+		}
+	}
+	// Off-peak, after the last peak window of the day: it ends at the first
+	// peak window of the NEXT day (01:00 tomorrow).
+	return { peak: false, endsAt: dayStart + 24 * 60 * 60_000 + PEAK_WINDOWS[0][0] * 60_000, nextIsPeak: true };
+}
+
+/**
+ * Format a duration for countdowns, e.g. `45m`, `1h`, `1h 23m`, `<1m`.
+ */
+export function formatDuration(ms: number): string {
+	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+	if (totalSeconds < 60) {
+		return '<1m';
+	}
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	if (hours > 0) {
+		return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+	}
+	return `${minutes}m`;
+}
+
 /**
  * Resolve the canonical pricing key for a Nika DeepSeek model id. The
  * `-responses` models bill at their base model's rate.

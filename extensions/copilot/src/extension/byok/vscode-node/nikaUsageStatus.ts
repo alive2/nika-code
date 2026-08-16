@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import { ILogService } from '../../../platform/log/common/logService';
 import { Disposable, toDisposable } from '../../../util/vs/base/common/lifecycle';
-import { formatCost, formatTokenCount, isDeepSeekPeakHour } from './nikaPricing';
+import { formatCost, formatDuration, formatTokenCount, getDeepSeekRatePeriod } from './nikaPricing';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaUsageTracker } from './nikaUsageTracker';
 
@@ -24,12 +24,15 @@ export class NikaUsageStatus extends Disposable {
 	 * the stable `showProgress` spinner keeps spinning smoothly.
 	 */
 	private static readonly UPDATE_THROTTLE_MS = 250;
+	/** How often the idle rate-period countdown refreshes. */
+	private static readonly COUNTDOWN_REFRESH_MS = 30_000;
 
 	private readonly _statusItem: vscode.StatusBarItem;
 
 	private _lastRender = 0;
 	private _lastText = '';
 	private _timer: ReturnType<typeof setTimeout> | undefined;
+	private _countdownTimer: ReturnType<typeof setInterval> | undefined;
 
 	constructor(
 		private readonly _settingsEditor: NikaSettingsEditor,
@@ -49,7 +52,13 @@ export class NikaUsageStatus extends Disposable {
 				clearTimeout(this._timer);
 				this._timer = undefined;
 			}
+			if (this._countdownTimer) {
+				clearInterval(this._countdownTimer);
+				this._countdownTimer = undefined;
+			}
 		}));
+		// Keep the idle rate-period countdown fresh even when no events change.
+		this._countdownTimer = setInterval(() => this._scheduleUpdate(), NikaUsageStatus.COUNTDOWN_REFRESH_MS);
 		this._register(this._statusItem);
 		this._scheduleUpdate();
 	}
@@ -88,8 +97,12 @@ export class NikaUsageStatus extends Disposable {
 
 			this._statusItem.showProgress = false;
 			const totals = todayTotals(this._usageTracker);
-			const rate = isDeepSeekPeakHour() ? 'PEAK' : 'OFF-PEAK';
-			this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · ${rate}`);
+			const rate = getDeepSeekRatePeriod();
+			const countdown = formatDuration(rate.endsAt - Date.now());
+			const rateLabel = rate.peak
+				? `PEAK · ${countdown} left`
+				: `OFF-PEAK · ${countdown} to PEAK`;
+			this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · ${rateLabel}`);
 			this._statusItem.tooltip = vscode.l10n.t('Nika DeepSeek token usage today. Click to open the usage dashboard.');
 			this._statusItem.show();
 		} catch (error) {

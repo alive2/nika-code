@@ -218,9 +218,14 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	private _createDeepSeekEndpoint(id: NikaModelId, apiKey: string): DeepSeekEndpoint {
-		const capabilities = getNikaModelCapabilities(id, this._limits());
-		const modelInfo = resolveModelInfo(id, NIKA_PROVIDER_NAME, { [id]: capabilities });
-		const url = id.endsWith('-responses')
+		// Normalize defensively: the provider is normally handed the bare model
+		// id, but a provider-qualified id (`nika/...`) would break capabilities
+		// resolution and leak the `-responses` suffix to the wire if it reached
+		// the endpoint verbatim.
+		const normalizedId = id.replace(/^nika\//, '') as NikaModelId;
+		const capabilities = getNikaModelCapabilities(normalizedId, this._limits());
+		const modelInfo = resolveModelInfo(normalizedId, NIKA_PROVIDER_NAME, { [normalizedId]: capabilities });
+		const url = normalizedId.endsWith('-responses')
 			? 'https://api.deepseek.com/responses'
 			: 'https://api.deepseek.com/chat/completions';
 		return this._instantiationService.createInstance(DeepSeekEndpoint, modelInfo, apiKey, url);

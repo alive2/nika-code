@@ -10,7 +10,7 @@ import { IFetcherService } from '../../../platform/networking/common/fetcherServ
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_SECRET, NIKA_RESPONSES_MODEL } from './nikaModels';
-import { isDeepSeekPeakHour } from './nikaPricing';
+import { getDeepSeekRatePeriod, isDeepSeekPeakHour } from './nikaPricing';
 import { NikaUsageTracker } from './nikaUsageTracker';
 
 type NikaConnection = 'deepseek' | 'gemini' | 'ollama';
@@ -280,10 +280,12 @@ export class NikaSettingsEditor extends Disposable {
 	private _usageState(): Record<string, unknown> {
 		const daily = this._usageTracker.getDailySummary(14);
 		const today = daily.length > 0 ? daily[daily.length - 1] : undefined;
+		const rate = getDeepSeekRatePeriod();
 		return {
 			enabled: this._usageTracker.enabled,
 			peak: isDeepSeekPeakHour(),
 			peakHoursLabel: '01:00–04:00 & 06:00–10:00 UTC',
+			rate: { peak: rate.peak, endsAt: rate.endsAt, nextIsPeak: rate.nextIsPeak },
 			daily,
 			sessions: this._usageTracker.getSessionSummaries(10),
 			workspaces: this._usageTracker.getWorkspaceSummaries(),
@@ -654,7 +656,7 @@ ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', 
 <div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong><span class="hint">${vscode.l10n.t('Apply the scheme to every workspace or only this one.')}</span></label><div class="controls wrap"><button class="action secondary" data-action="setIndexingWorkspace">${vscode.l10n.t('Use for this workspace')}</button><button class="action secondary" data-action="clearIndexingWorkspace">${vscode.l10n.t('Clear workspace override')}</button></div></div>
 </div><div class="card"><h2>${vscode.l10n.t('Status')}</h2><div class="row"><label><strong>${vscode.l10n.t('State')}</strong></label><span data-indexing-status></span></div><div class="row"><label><strong>${vscode.l10n.t('Progress')}</strong></label><span data-indexing-progress></span></div><div class="row"><label><strong>${vscode.l10n.t('Activity')}</strong></label><span data-indexing-message></span></div><div class="row"><label><strong>${vscode.l10n.t('Last error')}</strong></label><span data-indexing-error></span></div><div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong></label><span data-indexing-scope></span></div><div class="actions"><button class="action" data-action="rebuildIndex">${vscode.l10n.t('Build / Rebuild index')}</button><button class="action danger" data-action="clearIndex">${vscode.l10n.t('Clear index')}</button><button class="action secondary" data-action="clearModelCache">${vscode.l10n.t('Clear model cache')}</button></div></div></section>
 <section id="usage"><h1>${vscode.l10n.t('Usage')}</h1><p class="lead">${vscode.l10n.t('DeepSeek token usage, cost, and rate periods on this machine. Exact token counts come from the DeepSeek API; costs use the current peak / off-peak pricing.')}</p>
-<div class="card">${this._checkboxRow('usage.enabled', vscode.l10n.t('Track token usage'))}<div class="row"><label><strong>${vscode.l10n.t('Current rate period')}</strong><span class="hint">${vscode.l10n.t('Peak hours {0}; all other hours are off-peak at half price.', '01:00–04:00 & 06:00–10:00 UTC')}</span></label><span id="usage-peak-badge"></span></div></div>
+<div class="card">${this._checkboxRow('usage.enabled', vscode.l10n.t('Track token usage'))}<div class="row"><label><strong>${vscode.l10n.t('Current rate period')}</strong><span class="hint">${vscode.l10n.t('Peak hours {0}; all other hours are off-peak at half price.', '01:00–04:00 & 06:00–10:00 UTC')}</span></label><span id="usage-peak-badge"></span></div><div class="row"><label><strong>${vscode.l10n.t('Next rate change')}</strong><span class="hint">${vscode.l10n.t('Counts down live until the billing rate flips.')}</span></label><span id="usage-rate-countdown"></span></div></div>
 <div class="card"><div class="kpi"><div><div class="k">${vscode.l10n.t('Today')}</div><div class="v" id="usage-today-tokens"></div></div><div><div class="k">${vscode.l10n.t('Today cost')}</div><div class="v" id="usage-today-cost"></div></div><div><div class="k">${vscode.l10n.t('Last 14 days')}</div><div class="v" id="usage-total-tokens"></div></div><div><div class="k">${vscode.l10n.t('Cost')}</div><div class="v" id="usage-total-cost"></div></div></div></div>
 <div class="card"><h2>${vscode.l10n.t('Tokens per day')}</h2><div class="chart" data-usage-chart></div></div>
 <div class="card"><h2>${vscode.l10n.t('Sessions')}</h2><div data-usage-sessions></div></div>
@@ -676,11 +678,14 @@ document.querySelectorAll('[data-secret-test]').forEach(button=>button.addEventL
 document.querySelectorAll('[data-secret-remove]').forEach(button=>button.addEventListener('click',()=>post({type:'removeSecret',provider:button.dataset.secretRemove})));
 function fmtTok(n){if(n>=1e6)return (n/1e6).toFixed(1).replace(/\.0$/,'')+'M';if(n>=1e3)return (n/1e3).toFixed(1).replace(/\.0$/,'')+'k';return String(n||0);}
 function fmtCost(c){if(!c||c<=0)return '$0';if(c<0.01)return '$'+c.toFixed(4).replace(/0+$/,'');if(c<100)return '$'+c.toFixed(2);return '$'+c.toFixed(0);}
+function fmtDuration(ms){ms=Math.max(0,ms);const s=Math.floor(ms/1000);const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);if(h>0)return m>0?h+'h '+m+'m':h+'h';if(m>0)return m+'m';return '<1m';}
+function renderRateCountdown(){const r=(state.usage&&state.usage.rate)||{};const el=document.getElementById('usage-rate-countdown');if(!el||typeof r.endsAt!=='number'){if(el)el.textContent='—';return;}const left=r.endsAt-Date.now();el.textContent=(r.nextIsPeak?'PEAK in ':'OFF-PEAK in ')+fmtDuration(left);}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function renderUsage(){
   const u=state.usage||{};const daily=u.daily||[];
   const peakEl=document.getElementById('usage-peak-badge');
   if(peakEl){const peak=u.peak;peakEl.innerHTML='<span class="peak-badge'+(peak?' peak':'')+'"><span class="dot"></span>'+(peak?'PEAK':'OFF-PEAK')+'</span>';}
+  renderRateCountdown();
   document.getElementById('usage-today-tokens').textContent=fmtTok(u.todayTokens);
   document.getElementById('usage-today-cost').textContent=fmtCost(u.todayCost);
   document.getElementById('usage-total-tokens').textContent=fmtTok(u.totalTokens);
@@ -697,6 +702,8 @@ function renderUsage(){
   document.querySelectorAll('[data-usage-messages]').forEach(el=>{const rows=(u.messages||[]).map(m=>'<tr><td>'+new Date(m.t).toLocaleString()+'</td><td>'+esc(m.model)+'</td><td class="num">'+fmtTok(m.totalTokens)+'</td><td class="num">'+fmtCost(m.cost)+'</td><td>'+(m.peak?'<span class="pill">PEAK</span>':'<span class="pill">off</span>')+'</td><td>'+(m.error?'<span style="color:var(--vscode-errorForeground)">error</span>':'')+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Time</th><th>Model</th><th>Tokens</th><th>Cost</th><th>Rate</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No requests yet.</div>';});
 }
 renderUsage();
+if(window.__rateTimer)clearInterval(window.__rateTimer);
+window.__rateTimer=setInterval(renderRateCountdown,1000);
 </script></body></html>`;
 	}
 

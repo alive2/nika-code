@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest';
 import {
 	deepSeekPricingKey,
 	formatCost,
+	formatDuration,
 	formatTokenCount,
+	getDeepSeekRatePeriod,
 	getDeepSeekTokenCost,
 	isDeepSeekPeakHour,
 	NIKA_DEEPSEEK_PEAK_PRICES,
@@ -91,5 +93,50 @@ describe('Nika DeepSeek pricing', () => {
 		expect(formatCost(0.031)).toBe('$0.03');
 		expect(formatCost(1.24)).toBe('$1.24');
 		expect(formatCost(123.456)).toBe('$123');
+	});
+
+	describe('getDeepSeekRatePeriod', () => {
+		it('reports peak windows and their end time', () => {
+			// 02:30 UTC → inside 01:00–04:00; ends at 04:00, next is off-peak.
+			const mid = getDeepSeekRatePeriod(new Date(Date.UTC(2026, 7, 16, 2, 30, 0)));
+			expect(mid.peak).toBe(true);
+			expect(mid.nextIsPeak).toBe(false);
+			expect(mid.endsAt).toBe(Date.UTC(2026, 7, 16, 4, 0, 0));
+
+			// 08:00 UTC → inside 06:00–10:00; ends at 10:00.
+			const late = getDeepSeekRatePeriod(new Date(Date.UTC(2026, 7, 16, 8, 0, 0)));
+			expect(late.peak).toBe(true);
+			expect(late.endsAt).toBe(Date.UTC(2026, 7, 16, 10, 0, 0));
+		});
+
+		it('reports the next peak start during off-peak gaps', () => {
+			// 05:00 UTC → off-peak gap between 04:00 and 06:00; next peak at 06:00.
+			const gap = getDeepSeekRatePeriod(new Date(Date.UTC(2026, 7, 16, 5, 0, 0)));
+			expect(gap.peak).toBe(false);
+			expect(gap.nextIsPeak).toBe(true);
+			expect(gap.endsAt).toBe(Date.UTC(2026, 7, 16, 6, 0, 0));
+
+			// 12:00 UTC → off-peak after 10:00; next peak at 01:00 the NEXT day.
+			const afternoon = getDeepSeekRatePeriod(new Date(Date.UTC(2026, 7, 16, 12, 0, 0)));
+			expect(afternoon.peak).toBe(false);
+			expect(afternoon.nextIsPeak).toBe(true);
+			expect(afternoon.endsAt).toBe(Date.UTC(2026, 7, 17, 1, 0, 0));
+
+			// 00:30 UTC → off-peak before 01:00; next peak at 01:00 today.
+			const midnight = getDeepSeekRatePeriod(new Date(Date.UTC(2026, 7, 16, 0, 30, 0)));
+			expect(midnight.peak).toBe(false);
+			expect(midnight.nextIsPeak).toBe(true);
+			expect(midnight.endsAt).toBe(Date.UTC(2026, 7, 16, 1, 0, 0));
+		});
+	});
+
+	it('formats durations for countdowns', () => {
+		expect(formatDuration(0)).toBe('<1m');
+		expect(formatDuration(59_000)).toBe('<1m');
+		expect(formatDuration(60_000)).toBe('1m');
+		expect(formatDuration(45 * 60_000)).toBe('45m');
+		expect(formatDuration(60 * 60_000)).toBe('1h');
+		expect(formatDuration(83 * 60_000)).toBe('1h 23m');
+		expect(formatDuration(-5000)).toBe('<1m');
 	});
 });

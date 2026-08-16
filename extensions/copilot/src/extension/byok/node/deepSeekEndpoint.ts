@@ -73,7 +73,10 @@ export class DeepSeekEndpoint extends OpenAIEndpoint {
 			body.temperature = effort === 'none' ? temperature : undefined;
 			body.top_p = undefined;
 		} else {
-			body.model = this.model;
+			// Always send the canonical DeepSeek model name (strip the Nika
+			// `-responses` suffix) even on the Chat Completions branch, so a
+			// `-responses` id can never reach the API verbatim.
+			body.model = this._responsesModelName();
 			body.max_tokens = this.maxOutputTokens;
 			body.max_completion_tokens = undefined;
 			body.reasoning = undefined;
@@ -100,6 +103,7 @@ export class DeepSeekEndpoint extends OpenAIEndpoint {
 			delete body.previous_response_id;
 			delete body.include;
 		} else {
+			body.model = this._responsesModelName();
 			body.max_tokens = this.maxOutputTokens;
 			delete body.max_completion_tokens;
 		}
