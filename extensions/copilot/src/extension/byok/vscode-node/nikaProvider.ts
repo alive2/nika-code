@@ -175,6 +175,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			} finally {
 				disposeStream();
 			}
+			// Must return here: otherwise execution falls through to the Ollama
+			// fallback branch below, which would fire a second request for this
+			// DeepSeek model id against the local Ollama host and surface its
+			// "model not found" error, masking the successful DeepSeek response.
+			return;
 		}
 
 		if (isNikaGeminiModel(model.id)) {
