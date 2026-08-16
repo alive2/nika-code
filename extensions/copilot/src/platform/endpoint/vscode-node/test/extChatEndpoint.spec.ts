@@ -66,6 +66,31 @@ describe('ExtensionContributedChatEndpoint', () => {
 		expect(capturedOptions.map(options => options.modelOptions?._nikaThinkingEffort)).toEqual(['high', 'none']);
 	});
 
+	it('forwards the conversation id as the Nika session id through model options', async () => {
+		const capturedOptions: vscode.LanguageModelChatRequestOptions[] = [];
+		const languageModel = createLanguageModel(options => capturedOptions.push(options));
+		const endpoint = new ExtensionContributedChatEndpoint(
+			languageModel,
+			createInstantiationService(),
+			new NoopOTelService(resolveOTelConfig({ env: {}, extensionVersion: '1.0.0', sessionId: 'test' })),
+		);
+
+		const result = await endpoint.makeChatRequest2({
+			debugName: 'test',
+			messages: [{
+				role: Raw.ChatRole.User,
+				content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: 'hello' }]
+			}],
+			finishedCb: undefined,
+			location: ChatLocation.Panel,
+			requestOptions: {},
+			conversationId: 'conv-42',
+		}, new vscode.CancellationTokenSource().token);
+
+		expect(result.type).toBe(ChatFetchResponseType.Success);
+		expect(capturedOptions[0].modelOptions?._nikaSessionId).toBe('conv-42');
+	});
+
 	it('only forwards telemetry turn for base-10 non-negative integer request properties', async () => {
 		const capturedOptions: vscode.LanguageModelChatRequestOptions[] = [];
 		const languageModel = createLanguageModel(options => capturedOptions.push(options));

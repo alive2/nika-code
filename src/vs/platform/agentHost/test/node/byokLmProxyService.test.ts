@@ -138,6 +138,25 @@ suite('ByokLmProxyService', () => {
 		assert.deepStrictEqual(captured?.input, [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'hi' }] }]);
 	});
 
+	test('threads the agent session id through as _nikaSessionId in modelOptions', async () => {
+		let captured: IByokLmChatRequest | undefined;
+		await withProxy(
+			async (request) => {
+				captured = request;
+				return { output: [] };
+			},
+			async (handle) => {
+				const response = await fetch(responsesUrl(handle, 'acme'), {
+					method: 'POST',
+					headers: authHeaders(handle),
+					body: JSON.stringify({ model: 'claude', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }] }),
+				});
+				assert.strictEqual(response.status, 200);
+			},
+		);
+		assert.strictEqual(captured?.modelOptions?._nikaSessionId, sessionId);
+	});
+
 	test('forwards image input on the initial and subsequent turns', async () => {
 		const captured: IByokLmChatRequest[] = [];
 		const statuses: number[] = [];

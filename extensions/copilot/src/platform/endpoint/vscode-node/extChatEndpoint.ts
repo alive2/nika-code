@@ -176,6 +176,7 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 		source,
 		telemetryProperties,
 		modelCapabilities,
+		conversationId,
 	}: IMakeChatRequestOptions, token: CancellationToken): Promise<ChatResponse> {
 		const vscodeMessages = convertToApiChatMessage(messages, {
 			ignoreStatefulMarker,
@@ -205,6 +206,9 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 				_otelTraceContext: activeTraceCtx ?? null,
 				...(telemetryTurn !== undefined ? { _telemetryTurn: telemetryTurn } : {}),
 				...(reasoningEffort ? { _nikaThinkingEffort: reasoningEffort } : {}),
+				// Thread the chat conversation id through so BYOK providers (e.g.
+				// Nika token tracking) can attribute tokens to a real session.
+				...(conversationId ? { _nikaSessionId: conversationId } : {}),
 			}
 		};
 

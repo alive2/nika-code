@@ -152,7 +152,7 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 
 		const vendor = this._parseVendorFromResponsesPath(pathname);
 		if (method === 'POST' && vendor !== undefined) {
-			await this._handleResponses(req, res, runtime, vendor);
+			await this._handleResponses(req, res, runtime, vendor, auth.sessionId);
 			return;
 		}
 
@@ -185,7 +185,7 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 		return vendor;
 	}
 
-	private async _handleResponses(req: http.IncomingMessage, res: http.ServerResponse, runtime: ILoopbackProxyRuntime<ByokLmProxyState>, vendor: string): Promise<void> {
+	private async _handleResponses(req: http.IncomingMessage, res: http.ServerResponse, runtime: ILoopbackProxyRuntime<ByokLmProxyState>, vendor: string, sessionId: string | undefined): Promise<void> {
 		let body: IResponsesRequest;
 		try {
 			const raw = await readProxyRequestBody(req);
@@ -198,6 +198,11 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 		let bridgeRequest;
 		try {
 			bridgeRequest = responsesRequestToBridge(vendor, body);
+			if (sessionId) {
+				// Thread the agent session id through so BYOK providers (e.g. Nika
+				// token tracking) can attribute tokens to a real session.
+				bridgeRequest = { ...bridgeRequest, modelOptions: { ...(bridgeRequest.modelOptions ?? {}), _nikaSessionId: sessionId } };
+			}
 		} catch (err) {
 			const message = err instanceof ResponsesTranslationError ? err.message : String(err);
 			this._writeJsonError(res, 400, message, 'invalid_request_error');
