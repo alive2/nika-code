@@ -498,10 +498,26 @@ export function packageCopilotExtensionStream(disableMangle: boolean): Stream {
 			return;
 		}
 		dependenciesStarted = true;
-		gulp.src(dependenciesSrc, { base: '.' })
-			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
-			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`)))
-			.pipe(dependenciesGate);
+
+		// NikaCode: `build/.moduleignore` strips `@github/copilot/sdk/index.js`
+		// and `**/*.ts` strips the SDK's `index.d.ts`. Those rules exist for the
+		// APP-level node_modules, where the agent host loads the SDK from the
+		// `@github/copilot-<platform>` package instead. The built-in extension,
+		// however, resolves `import('@github/copilot/sdk')` against its OWN
+		// `node_modules`, so the SDK entry file must survive packaging or Copilot
+		// CLI sessions fail with "Cannot find module './@github/copilot/sdk'".
+		// Re-add the entry file after the shared ignore filters (postinstall is
+		// done by now, so the file is stable on disk).
+		const sdkEntryFiles = gulp.src([
+			'extensions/copilot/node_modules/@github/copilot/sdk/index.js',
+		], { base: '.', allowEmpty: true });
+
+		es.merge(
+			gulp.src(dependenciesSrc, { base: '.' })
+				.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
+				.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`))),
+			sdkEntryFiles
+		).pipe(dependenciesGate);
 	};
 
 	// Start the dependencies glob once the local stream produces its first file
