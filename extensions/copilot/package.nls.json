@@ -36,6 +36,7 @@
 	"nika.config.indexing.scheme.githubRemote": "Reuse GitHub Copilot's existing remote index for GitHub-hosted repos. Requires a GitHub sign-in.",
 	"nika.config.indexing.scheme.local": "Fully local semantic index: ONNX embeddings with a local vector store. Works offline; code never leaves the machine.",
 	"nika.config.indexing.scheme.cloud": "Cursor-style cloud index: sync a file-hash tree to a Nika backend (or BYOK embedding API) for server-side embeddings and ranking. Requires network and a Nika account.",
+	"nika.config.usage.enabled": "Record DeepSeek token usage (per message, session, workspace, and day) and show live token/cost counters in the status bar and Nika Settings → Usage.",
 	"nika.config.selectedModel": "Legacy Nika extension model selection.",
 	"nika.config.selectedModel.deprecated": "Use chat.defaultModel instead. Nika migrates this value automatically.",
 	"github.copilot.badge.signUp": "Sign up for GitHub Copilot",

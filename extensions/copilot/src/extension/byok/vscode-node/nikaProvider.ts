@@ -16,6 +16,7 @@ import { IBYOKStorageService } from './byokStorageService';
 import { byokKnownModelToAPIInfoWithEffort } from './byokModelInfo';
 import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
 import { NikaIndexingStatus } from './nikaIndexingStatus';
+import { NikaUsageStatus } from './nikaUsageStatus';
 import {
 	getNikaModelCapabilities,
 	getVisibleNikaModelIds,
@@ -35,6 +36,7 @@ import {
 } from './nikaModels';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaAttachmentProcessor } from './nikaAttachments';
+import { NikaUsageTracker, TokenTrackingProgress } from './nikaUsageTracker';
 import { OllamaConfig, OllamaLMProvider } from './ollamaProvider';
 
 export interface NikaLanguageModelChatInformation extends vscode.LanguageModelChatInformation {
@@ -53,6 +55,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private readonly _ollamaProvider: OllamaLMProvider;
 	private readonly _attachmentProcessor: NikaAttachmentProcessor;
 	readonly settingsEditor: NikaSettingsEditor;
+	readonly usageTracker: NikaUsageTracker;
 
 	constructor(
 		byokStorageService: IBYOKStorageService,
@@ -65,9 +68,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._geminiProvider = this._instantiationService.createInstance(GeminiNativeBYOKLMProvider, this._geminiKnownModels(), byokStorageService);
 		this._ollamaProvider = this._instantiationService.createInstance(OllamaLMProvider, byokStorageService);
 		this._ollamaProvider.updateKnownModels(this._gemmaKnownModels());
-		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor));
+		this.usageTracker = this._register(this._instantiationService.createInstance(NikaUsageTracker));
+		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker));
 		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor);
 		this._register(this._instantiationService.createInstance(NikaIndexingStatus, this.settingsEditor));
+		this._register(this._instantiationService.createInstance(NikaUsageStatus, this.settingsEditor, this.usageTracker));
 
 		this._register(this._context.secrets.onDidChange(event => {
 			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET) {
@@ -121,6 +126,13 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			if (!key) {
 				throw new Error(vscode.l10n.t('Configure a DeepSeek API key in Nika Settings before using this model.'));
 			}
+			// Wrap the progress reporter to track live output tokens and capture
+			// the exact server-reported usage at the end of the stream.
+			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
+			const disposeStream = this.usageTracker.trackStream(trackedProgress);
+			const sessionId = typeof options.modelOptions?._nikaSessionId === 'string' ? options.modelOptions._nikaSessionId : undefined;
+			const title = extractPromptTitle(messages);
+			const workspace = currentWorkspaceName();
 			try {
 				const endpoint = this._createDeepSeekEndpoint(model.id, key);
 				const processed = await this._attachmentProcessor.process(messages, token);
@@ -128,9 +140,23 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				const effectiveOptions = isNikaThinkingEffort(requestedEffort)
 					? { ...options, modelConfiguration: { ...options.modelConfiguration, reasoningEffort: requestedEffort } }
 					: options;
-				for (const marker of processed.replayMarkers) { progress.report(marker); }
-				return await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, effectiveOptions, options.requestInitiator, progress, token);
+				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
+				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, effectiveOptions, options.requestInitiator, trackedProgress, token);
+				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator });
 			} catch (error) {
+				this.usageTracker.record({
+					model: model.id,
+					sessionId,
+					initiator: options.requestInitiator,
+					title,
+					workspace,
+					promptTokens: 0,
+					completionTokens: 0,
+					totalTokens: 0,
+					cachedTokens: 0,
+					reasoningTokens: 0,
+					error: true,
+				});
 				if (model.id.endsWith('-responses') && !token.isCancellationRequested) {
 					const chatModel = model.id.slice(0, -'-responses'.length);
 					const chatModelLabel = chatModel === 'deepseek-v4-pro' ? 'DeepSeek V4 Pro' : 'DeepSeek V4 Flash';
@@ -146,6 +172,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 					}
 				}
 				throw error;
+			} finally {
+				disposeStream();
 			}
 		}
 
@@ -198,6 +226,42 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return this._instantiationService.createInstance(DeepSeekEndpoint, modelInfo, apiKey, url);
 	}
 
+	private _recordUsage(modelId: string, tracked: TokenTrackingProgress, meta: { sessionId?: string; title?: string; workspace?: string; initiator?: string }): void {
+		const usage = tracked.exactUsage;
+		if (usage) {
+			this.usageTracker.record({
+				model: modelId,
+				sessionId: meta.sessionId,
+				initiator: meta.initiator,
+				title: meta.title,
+				workspace: meta.workspace,
+				promptTokens: usage.prompt_tokens,
+				completionTokens: usage.completion_tokens,
+				totalTokens: usage.total_tokens,
+				cachedTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+				reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? 0,
+			});
+			return;
+		}
+		// No server-reported usage (e.g. a stream that ended without one):
+		// fall back to the live estimate so the request is still accounted for.
+		const estimate = tracked.liveEstimateTokens;
+		if (estimate > 0) {
+			this.usageTracker.record({
+				model: modelId,
+				sessionId: meta.sessionId,
+				initiator: meta.initiator,
+				title: meta.title,
+				workspace: meta.workspace,
+				promptTokens: 0,
+				completionTokens: estimate,
+				totalTokens: estimate,
+				cachedTokens: 0,
+				reasoningTokens: 0,
+			});
+		}
+	}
+
 	private _limits() {
 		const config = vscode.workspace.getConfiguration('nika');
 		return resolveNikaTokenLimits(
@@ -227,4 +291,42 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		}
 		return vscode.l10n.t('Gemma 4 31B through the configured Ollama host.');
 	}
+}
+
+/**
+ * Extract a short title (first user text) from the message list, used to label
+ * a token-usage session in the Nika Settings dashboard.
+ */
+function extractPromptTitle(messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>): string | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const content = (messages[i] as { content?: string | unknown[] }).content;
+		if (typeof content === 'string' && content.trim()) {
+			return content.trim().slice(0, 80);
+		}
+		if (Array.isArray(content)) {
+			for (const part of content) {
+				if (part instanceof vscode.LanguageModelTextPart && part.value.trim()) {
+					return part.value.trim().slice(0, 80);
+				}
+			}
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Best-effort current workspace folder name for token-usage attribution.
+ * Falls back to the folder of the active text editor, then to `undefined`.
+ */
+function currentWorkspaceName(): string | undefined {
+	const folders = vscode.workspace.workspaceFolders;
+	if (folders && folders.length > 0) {
+		return folders[0].name;
+	}
+	const editor = vscode.window.activeTextEditor;
+	if (editor && editor.document.uri.scheme === 'file') {
+		const relative = vscode.workspace.asRelativePath(editor.document.uri, false);
+		return relative.split(/[\\/]/)[0];
+	}
+	return undefined;
 }

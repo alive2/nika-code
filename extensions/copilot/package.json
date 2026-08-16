@@ -3422,6 +3422,15 @@
             ],
             "markdownDescription": "%nika.config.indexing.scheme%"
           },
+          "nika.usage.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "tags": [
+              "preview"
+            ],
+            "markdownDescription": "%nika.config.usage.enabled%"
+          },
           "nika.selectedModel": {
             "type": "string",
             "markdownDescription": "%nika.config.selectedModel%",

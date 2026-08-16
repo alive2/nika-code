@@ -10,9 +10,11 @@ import { IFetcherService } from '../../../platform/networking/common/fetcherServ
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_SECRET, NIKA_RESPONSES_MODEL } from './nikaModels';
+import { isDeepSeekPeakHour } from './nikaPricing';
+import { NikaUsageTracker } from './nikaUsageTracker';
 
 type NikaConnection = 'deepseek' | 'gemini' | 'ollama';
-type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf' | 'agents' | 'indexing' | 'diagnostics';
+type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf' | 'agents' | 'indexing' | 'usage' | 'diagnostics';
 type ConnectionResult = { readonly ok: boolean; readonly message: string; readonly checkedAt: string };
 
 const SETTINGS = new Set([
@@ -21,7 +23,7 @@ const SETTINGS = new Set([
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
-	'logLevel', 'releaseCheckEnabled', 'indexing.scheme',
+	'logLevel', 'releaseCheckEnabled', 'indexing.scheme', 'usage.enabled',
 ]);
 
 const SECRET_KEYS: Record<'deepseek' | 'gemini', string> = {
@@ -34,7 +36,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isNikaSettingsSection(value: unknown): value is NikaSettingsSection {
-	return value === 'overview' || value === 'providers' || value === 'models' || value === 'vision' || value === 'pdf' || value === 'agents' || value === 'indexing' || value === 'diagnostics';
+	return value === 'overview' || value === 'providers' || value === 'models' || value === 'vision' || value === 'pdf' || value === 'agents' || value === 'indexing' || value === 'usage' || value === 'diagnostics';
 }
 
 function nonce(): string {
@@ -68,6 +70,7 @@ export class NikaSettingsEditor extends Disposable {
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
 
 	constructor(
+		private readonly _usageTracker: NikaUsageTracker,
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 		@ILogService private readonly _logService: ILogService,
@@ -80,6 +83,11 @@ export class NikaSettingsEditor extends Disposable {
 		this._register(vscode.commands.registerCommand('nika.exportDiagnostics', () => this.exportDiagnostics()));
 		this._register(this._indexingSchemeManager.onDidChangeState(() => {
 			void this._render(this._activeSection);
+		}));
+		this._register(this._usageTracker.onDidChange(() => {
+			if (this._activeSection === 'usage') {
+				void this._render(this._activeSection);
+			}
 		}));
 		this._register(vscode.workspace.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('nika')) {
@@ -259,11 +267,31 @@ export class NikaSettingsEditor extends Disposable {
 				logLevel: value('logLevel', 'INFO'),
 				releaseCheckEnabled: value('releaseCheckEnabled', true),
 				'indexing.scheme': value('indexing.scheme', 'off'),
+				'usage.enabled': value('usage.enabled', true),
 			},
 			indexing: {
 				workspaceOverride: config.inspect<string>('indexing.scheme')?.workspaceValue !== undefined,
 				...(await this._indexingState()),
 			},
+			usage: this._usageState(),
+		};
+	}
+
+	private _usageState(): Record<string, unknown> {
+		const daily = this._usageTracker.getDailySummary(14);
+		const today = daily.length > 0 ? daily[daily.length - 1] : undefined;
+		return {
+			enabled: this._usageTracker.enabled,
+			peak: isDeepSeekPeakHour(),
+			peakHoursLabel: '01:00–04:00 & 06:00–10:00 UTC',
+			daily,
+			sessions: this._usageTracker.getSessionSummaries(10),
+			workspaces: this._usageTracker.getWorkspaceSummaries(),
+			messages: this._usageTracker.getMessageHistory(20),
+			todayTokens: today?.totalTokens ?? 0,
+			todayCost: today?.cost ?? 0,
+			totalTokens: daily.reduce((sum, day) => sum + day.totalTokens, 0),
+			totalCost: daily.reduce((sum, day) => sum + day.cost, 0),
 		};
 	}
 
@@ -352,6 +380,10 @@ export class NikaSettingsEditor extends Disposable {
 					break;
 				case 'clearModelCache':
 					await this._indexingSchemeManager.clearModelCache();
+					break;
+				case 'clearUsage':
+					await this._usageTracker.clear();
+					void vscode.window.showInformationMessage(vscode.l10n.t('Nika usage data cleared.'));
 					break;
 			}
 		} catch (error) {
@@ -597,9 +629,10 @@ export class NikaSettingsEditor extends Disposable {
 nav button{display:block;width:100%;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);padding:9px 10px;text-align:left;cursor:pointer}nav button:hover,nav button.active{background:var(--vscode-list-hoverBackground)}
 main{padding:38px 46px 80px}section{display:none}section.active{display:block}h1{font-size:26px;margin:0 0 8px}h2{font-size:16px;margin:30px 0 8px}.lead{color:var(--vscode-descriptionForeground);margin:0 0 28px;line-height:1.55}
 .card{padding:18px;border:1px solid var(--vscode-panel-border);border-radius:10px;margin:12px 0;background:color-mix(in srgb,var(--vscode-editor-background) 94%,var(--vscode-sideBar-background))}.row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(210px,1fr);gap:22px;align-items:center;padding:11px 0}.row+.row{border-top:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent)}label strong{display:block;margin-bottom:4px}.hint,.status{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}.agent-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px}
-input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
+input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.chart{margin:8px 0 4px}.chart svg{display:block;width:100%;height:auto}.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0 4px}.kpi .k{color:var(--vscode-descriptionForeground);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.kpi .v{font-size:21px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}table.usage{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}table.usage th,table.usage td{text-align:left;padding:6px 10px;border-bottom:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent);vertical-align:top}table.usage th{color:var(--vscode-descriptionForeground);font-weight:600;white-space:nowrap}table.usage td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}table.usage tr:last-child td{border-bottom:0}.peak-badge{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:color-mix(in srgb,var(--vscode-badge-background) 55%,transparent)}.peak-badge .dot{background:#22c55e}.peak-badge.peak .dot{background:#ef4444}.empty{color:var(--vscode-descriptionForeground);font-style:italic;padding:10px 0}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>NikaCode</div><nav>
-${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['indexing', vscode.l10n.t('Indexing')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
+${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['indexing', vscode.l10n.t('Indexing')], ['usage', vscode.l10n.t('Usage')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
 </nav></aside><main>
 <section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, vision, and PDF support for NikaCode.')}</p>
 <div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
@@ -620,6 +653,14 @@ ${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['
 ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', vscode.l10n.t('Off (ripgrep only)')], ['github-remote', vscode.l10n.t('GitHub remote')], ['local', vscode.l10n.t('Local (ONNX)')], ['cloud', vscode.l10n.t('Cloud')]])}
 <div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong><span class="hint">${vscode.l10n.t('Apply the scheme to every workspace or only this one.')}</span></label><div class="controls wrap"><button class="action secondary" data-action="setIndexingWorkspace">${vscode.l10n.t('Use for this workspace')}</button><button class="action secondary" data-action="clearIndexingWorkspace">${vscode.l10n.t('Clear workspace override')}</button></div></div>
 </div><div class="card"><h2>${vscode.l10n.t('Status')}</h2><div class="row"><label><strong>${vscode.l10n.t('State')}</strong></label><span data-indexing-status></span></div><div class="row"><label><strong>${vscode.l10n.t('Progress')}</strong></label><span data-indexing-progress></span></div><div class="row"><label><strong>${vscode.l10n.t('Activity')}</strong></label><span data-indexing-message></span></div><div class="row"><label><strong>${vscode.l10n.t('Last error')}</strong></label><span data-indexing-error></span></div><div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong></label><span data-indexing-scope></span></div><div class="actions"><button class="action" data-action="rebuildIndex">${vscode.l10n.t('Build / Rebuild index')}</button><button class="action danger" data-action="clearIndex">${vscode.l10n.t('Clear index')}</button><button class="action secondary" data-action="clearModelCache">${vscode.l10n.t('Clear model cache')}</button></div></div></section>
+<section id="usage"><h1>${vscode.l10n.t('Usage')}</h1><p class="lead">${vscode.l10n.t('DeepSeek token usage, cost, and rate periods on this machine. Exact token counts come from the DeepSeek API; costs use the current peak / off-peak pricing.')}</p>
+<div class="card">${this._checkboxRow('usage.enabled', vscode.l10n.t('Track token usage'))}<div class="row"><label><strong>${vscode.l10n.t('Current rate period')}</strong><span class="hint">${vscode.l10n.t('Peak hours {0}; all other hours are off-peak at half price.', '01:00–04:00 & 06:00–10:00 UTC')}</span></label><span id="usage-peak-badge"></span></div></div>
+<div class="card"><div class="kpi"><div><div class="k">${vscode.l10n.t('Today')}</div><div class="v" id="usage-today-tokens"></div></div><div><div class="k">${vscode.l10n.t('Today cost')}</div><div class="v" id="usage-today-cost"></div></div><div><div class="k">${vscode.l10n.t('Last 14 days')}</div><div class="v" id="usage-total-tokens"></div></div><div><div class="k">${vscode.l10n.t('Cost')}</div><div class="v" id="usage-total-cost"></div></div></div></div>
+<div class="card"><h2>${vscode.l10n.t('Tokens per day')}</h2><div class="chart" data-usage-chart></div></div>
+<div class="card"><h2>${vscode.l10n.t('Sessions')}</h2><div data-usage-sessions></div></div>
+<div class="card"><h2>${vscode.l10n.t('Workspaces')}</h2><div data-usage-workspaces></div></div>
+<div class="card"><h2>${vscode.l10n.t('Recent requests')}</h2><div data-usage-messages></div></div>
+<div class="actions"><button class="action danger" data-action="clearUsage">${vscode.l10n.t('Clear usage data')}</button></div></section>
 <section id="diagnostics"><h1>${vscode.l10n.t('Diagnostics')}</h1><p class="lead">${vscode.l10n.t('Nika writes to a native output channel and never creates an automatic log file.')}</p><div class="card">${this._selectRow('logLevel', vscode.l10n.t('Log level'), ['DEBUG','INFO','WARN','ERROR'].map(v=>[v,v]))}${this._checkboxRow('releaseCheckEnabled', vscode.l10n.t('Check for releases on startup'))}</div><div class="actions"><button class="action" data-action="openLogs">${vscode.l10n.t('Open Nika Output')}</button><button class="action secondary" data-action="exportDiagnostics">${vscode.l10n.t('Export Diagnostics')}</button><button class="action secondary" data-action="checkUpdates">${vscode.l10n.t('Check for Updates')}</button></div></section>
 </main></div><script nonce="${token}">const vscode=acquireVsCodeApi();const state=${encoded};
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
@@ -633,6 +674,29 @@ document.querySelectorAll('[data-action]').forEach(button=>button.addEventListen
 document.querySelectorAll('[data-secret-save]').forEach(button=>button.addEventListener('click',()=>{const provider=button.dataset.secretSave;const input=document.querySelector('[data-secret="'+provider+'"]');post({type:'saveSecret',provider,value:input.value});input.value='';}));
 document.querySelectorAll('[data-secret-test]').forEach(button=>button.addEventListener('click',()=>post({type:'testConnection',provider:button.dataset.secretTest})));
 document.querySelectorAll('[data-secret-remove]').forEach(button=>button.addEventListener('click',()=>post({type:'removeSecret',provider:button.dataset.secretRemove})));
+function fmtTok(n){if(n>=1e6)return (n/1e6).toFixed(1).replace(/\.0$/,'')+'M';if(n>=1e3)return (n/1e3).toFixed(1).replace(/\.0$/,'')+'k';return String(n||0);}
+function fmtCost(c){if(!c||c<=0)return '$0';if(c<0.01)return '$'+c.toFixed(4).replace(/0+$/,'');if(c<100)return '$'+c.toFixed(2);return '$'+c.toFixed(0);}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function renderUsage(){
+  const u=state.usage||{};const daily=u.daily||[];
+  const peakEl=document.getElementById('usage-peak-badge');
+  if(peakEl){const peak=u.peak;peakEl.innerHTML='<span class="peak-badge'+(peak?' peak':'')+'"><span class="dot"></span>'+(peak?'PEAK':'OFF-PEAK')+'</span>';}
+  document.getElementById('usage-today-tokens').textContent=fmtTok(u.todayTokens);
+  document.getElementById('usage-today-cost').textContent=fmtCost(u.todayCost);
+  document.getElementById('usage-total-tokens').textContent=fmtTok(u.totalTokens);
+  document.getElementById('usage-total-cost').textContent=fmtCost(u.totalCost);
+  const now=new Date();const days=[];
+  for(let i=13;i>=0;i--){const d=new Date(now.getTime()-i*86400000);const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');const rec=daily.find(x=>x.date===key);days.push({key,label:key.slice(5),total:rec?rec.totalTokens:0,cost:rec?rec.cost:0});}
+  const max=Math.max(1,...days.map(d=>d.total));const W=640,H=180,P=26,bw=W/days.length,inner=H-P*2;
+  const barColor='color-mix(in srgb,var(--vscode-foreground) 55%,transparent)';
+  const bars=days.map((d,i)=>{const h=Math.max(2,d.total/max*inner);const x=i*bw+5,y=H-P-h;return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+(bw-10).toFixed(1)+'" height="'+h.toFixed(1)+'" rx="2" fill="'+barColor+'"><title>'+d.key+': '+fmtTok(d.total)+' tokens · '+fmtCost(d.cost)+'</title></rect>';}).join('');
+  const labels=days.map((d,i)=>'<text x="'+(i*bw+bw/2).toFixed(1)+'" y="'+(H-P+16)+'" text-anchor="middle" font-size="10" fill="var(--vscode-descriptionForeground)">'+d.label+'</text>').join('');
+  document.querySelectorAll('[data-usage-chart]').forEach(el=>{el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Nika tokens per day (last 14 days)">'+bars+labels+'</svg>';});
+  document.querySelectorAll('[data-usage-sessions]').forEach(el=>{const rows=(u.sessions||[]).map(s=>'<tr><td>'+(s.title?esc(s.title):'<span class="empty">Untitled session</span>')+'</td><td>'+(s.workspace?esc(s.workspace):'—')+'</td><td class="num">'+s.requests+'</td><td class="num">'+fmtTok(s.totalTokens)+'</td><td class="num">'+fmtCost(s.cost)+'</td><td class="num">'+new Date(s.end).toLocaleDateString()+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Session</th><th>Workspace</th><th>Req</th><th>Tokens</th><th>Cost</th><th>Last</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No sessions recorded yet.</div>';});
+  document.querySelectorAll('[data-usage-workspaces]').forEach(el=>{const rows=(u.workspaces||[]).map(w=>'<tr><td>'+esc(w.workspace)+'</td><td class="num">'+w.sessions+'</td><td class="num">'+w.requests+'</td><td class="num">'+fmtTok(w.totalTokens)+'</td><td class="num">'+fmtCost(w.cost)+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Workspace</th><th>Sessions</th><th>Requests</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No workspace usage yet.</div>';});
+  document.querySelectorAll('[data-usage-messages]').forEach(el=>{const rows=(u.messages||[]).map(m=>'<tr><td>'+new Date(m.t).toLocaleString()+'</td><td>'+esc(m.model)+'</td><td class="num">'+fmtTok(m.totalTokens)+'</td><td class="num">'+fmtCost(m.cost)+'</td><td>'+(m.peak?'<span class="pill">PEAK</span>':'<span class="pill">off</span>')+'</td><td>'+(m.error?'<span style="color:var(--vscode-errorForeground)">error</span>':'')+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Time</th><th>Model</th><th>Tokens</th><th>Cost</th><th>Rate</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No requests yet.</div>';});
+}
+renderUsage();
 </script></body></html>`;
 	}
 
