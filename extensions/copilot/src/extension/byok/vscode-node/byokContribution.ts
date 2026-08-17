@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { LanguageModelChatInformation, LanguageModelChatProvider, lm } from 'vscode';
 import { IAuthenticationService } from '../../../platform/authentication/common/authentication';
+import { IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
@@ -22,6 +23,7 @@ import { OllamaLMProvider } from './ollamaProvider';
 import { OAIBYOKLMProvider } from './openAIProvider';
 import { OpenRouterLMProvider } from './openRouterProvider';
 import { XAIBYOKLMProvider } from './xAIProvider';
+import { NIKA_GITHUB_ENABLED_CONFIG_KEY } from './nikaModels';
 import { NikaLMProvider } from './nikaProvider';
 
 export class BYOKContrib extends Disposable implements IExtensionContribution {
@@ -40,6 +42,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		@IVSCodeExtensionContext extensionContext: IVSCodeExtensionContext,
 		@IAuthenticationService private readonly _authService: IAuthenticationService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@IConfigurationService private readonly _configService: IConfigurationService,
 	) {
 		super();
 		this._byokStorageService = new BYOKStorageService(extensionContext);
@@ -76,7 +79,14 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	}
 
 	private _applyPolicy(): void {
-		const allowed = isClientBYOKAllowed(!!this._authService.anyGitHubSession, this._authService.copilotToken);
+		// NikaCode: with the GitHub integration off (the default), BYOK is always
+		// allowed client-side. The enterprise-policy denial below only applies when
+		// a Copilot token can actually be minted — otherwise a failed token fetch
+		// (e.g. a GitHub outage) would tear down the BYOK providers mid-session.
+		const githubEnabled = this._configService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) === true;
+		const allowed = githubEnabled
+			? isClientBYOKAllowed(!!this._authService.anyGitHubSession, this._authService.copilotToken)
+			: true;
 		if (allowed && !this._providersRegistered) {
 			if (this._providers.size === 0) {
 				this._buildProviders();

@@ -244,6 +244,12 @@ export abstract class BaseAuthenticationService extends Disposable implements IA
 	//#region Copilot Token Source
 
 	get hasCopilotTokenSource(): boolean {
+		// NikaCode: with the GitHub integration off (the default) there is no
+		// Copilot token source, even if a GitHub session exists locally — the
+		// session must not trigger CAPI token fetches.
+		if (this._configurationService.getNonExtensionConfig<boolean>('nika.github.enabled') !== true) {
+			return false;
+		}
 		return !!this._anyGitHubSession;
 	}
 
@@ -353,12 +359,16 @@ export abstract class BaseAuthenticationService extends Disposable implements IA
 			this._onDidAccessTokenChange.fire();
 			this._logService.debug('Auth state changed (identity change), minting a new CopilotToken...');
 			// The identity has changed, so mint a new Copilot token and fire the identity change event
-			try {
-				await this.getCopilotToken(true);
-			} catch (e) {
-				// Ignore errors
+			// NikaCode: with the GitHub integration off there is no Copilot token
+			// source — skip the CAPI token mint entirely.
+			if (this.hasCopilotTokenSource) {
+				try {
+					await this.getCopilotToken(true);
+				} catch (e) {
+					// Ignore errors
+				}
+				this._logService.debug('Minted a new CopilotToken.');
 			}
-			this._logService.debug('Minted a new CopilotToken.');
 			this.fireAuthenticationChange('handleAuthChangeEvent identity change');
 			return;
 		}
@@ -369,10 +379,14 @@ export abstract class BaseAuthenticationService extends Disposable implements IA
 		}
 
 		// Identity hasn't changed, but the Copilot token might have refreshed
-		try {
-			await this.getCopilotToken();
-		} catch (e) {
-			// Ignore errors
+		// NikaCode: with the GitHub integration off there is no Copilot token
+		// source — skip the token refresh entirely.
+		if (this.hasCopilotTokenSource) {
+			try {
+				await this.getCopilotToken();
+			} catch (e) {
+				// Ignore errors
+			}
 		}
 
 		this._logService.debug('Finished handling auth change event.');

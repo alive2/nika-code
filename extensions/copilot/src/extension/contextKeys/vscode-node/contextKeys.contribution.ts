@@ -236,7 +236,7 @@ export class ContextKeysContribution extends Disposable {
 		// NikaCode: with GitHub integration off (default), BYOK is always
 		// allowed client-side and no token lookup is needed.
 		if (this._configService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) !== true) {
-			commands.executeCommand('setContext', clientByokEnabledContextKey, isClientBYOKAllowed(hasGitHubSession, undefined));
+			commands.executeCommand('setContext', clientByokEnabledContextKey, true);
 			return;
 		}
 		try {
