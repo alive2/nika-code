@@ -1,6 +1,6 @@
 ---
 name: discord-community-manager
-description: "Act as the Nika Code community manager WHILE developing: post feature showcases and announcements to the Nika Code Discord server, share code review summaries, file bug reports as GitHub issues (automatically mirrored to Discord), and verify release/feed webhook delivery. Use when you implement a notable feature, finish a milestone, review code, find a bug, publish a release, or need to send any update to the Discord community."
+description: "Act as the Nika Code community manager WHILE developing: post feature showcases and announcements to the Nika Code Discord server through the local discord-mcp bot, share code review summaries, file bug reports as GitHub issues (automatically mirrored to Discord), and verify release/feed mirror delivery. Use when you implement a notable feature, finish a milestone, review code, find a bug, publish a release, or need to send any update to the Discord community."
 ---
 
 # Nika Code — Discord Community Manager
@@ -44,51 +44,38 @@ You are the community manager for the Nika Code Discord server while you develop
 
 Roles: Admin (red) → Moderator (orange) → Core Developer (purple) → Contributor (green) → Developer (blue).
 
-## Webhook config (secrets)
+## The MCP bot (primary posting channel)
 
-- Webhook URLs live in **`<this-skill-dir>/.local/webhooks.json`** — gitignored. **NEVER commit, paste, or reference these URLs in code, issues, PRs, or public chat.** They grant write access to channels.
-- A pre-commit hook (`.github/hooks/pre-commit`, installed to `.git/hooks/pre-commit`) blocks staging of any `.local/` config or file containing a webhook URL / credential. Never bypass it with `--no-verify`; if it fires, the staged content must be fixed.
-- Committed template: `<this-skill-dir>/webhooks.example.json`.
-- Config format (key = channel name):
+All posting goes through the **Nika Discord MCP server** (repo `alive2/discord-mcp`, bot user "Nika", ID `1538805149865091092`) — **not webhooks**. The MCP server runs locally in Docker, HTTP mode on `http://localhost:8085/mcp` (streamable HTTP). It exposes 111 tools: `send_message` (embeds + files), `reply_to_message`, `edit_message`, `delete_message`, `read_messages`, `find_channel`, `list_webhooks`, `create_invite`, moderation, roles, and more, plus a raw `discord_api_request` passthrough.
 
-```json
-{
-  "announcements": "https://discord.com/api/webhooks/<id>/<token>",
-  "github-feed": "https://discord.com/api/webhooks/<id>/<token>",
-  "releases": "https://discord.com/api/webhooks/<id>/<token>",
-  "dev-chat": "...",
-  "code-review": "...",
-  "showcase": "...",
-  "bug-reports": "..."
-}
-```
+The bot has Administrator perms, so it can do everything the webhooks could — and more (read channels, edit/delete messages, pin, react, moderate).
 
-- If a channel key is missing, create a webhook for that channel: Discord → Server Settings → Integrations → Webhooks → **New Webhook** → name it (e.g. `Announcements`) → pick the channel → **Save Changes** → **Copy Webhook URL** → add it to the config. (You can also ask the main agent to do this via the Discord web UI.)
-- After config changes, sanity-check with a clearly-labeled test post to `#dev-chat` (e.g. `-Content "Webhook config test — ignore"`).
+### Connecting
 
-## Posting helper
+MCP streamable-HTTP handshake against `http://localhost:8085/mcp`:
 
-Script: **`<this-skill-dir>/scripts/post.ps1`** (resolve relative to the skill dir, never hardcode an absolute path). It reads the config, builds the request, and posts.
+1. `POST` `initialize` with `Accept: application/json, text/event-stream` — response includes an `mcp-session-id` header.
+2. `POST` `notifications/initialized`.
+3. `POST` `tools/call` with `{"name": "<tool>", "arguments": {...}}` and the session-id header. Responses are SSE (`data: {...}` lines) — parse them as JSON.
 
-```powershell
-$post = Join-Path '<this-skill-dir>' 'scripts\post.ps1'
+### Posting
 
-# Plain message
-& $post -Channel dev-chat -Content "Pushed the BYOK provider rewrite — multi-turn tool calls are now stable."
+- **Plain message**: `send_message { channelId, content }`.
+- **Rich embed**: `send_message` with `embedTitle`, `embedDescription`, `embedUrl`, `embedColor`, `embedFooter`, `embedFields`. Colors: `blurple` (default), `purple`, `blue`, `green`, `orange`, `grey`, `red`.
+- **Reply/edit/delete**: `reply_to_message`, `edit_message`, `delete_message` (great for fixing typos — the bot can do it; webhooks couldn't).
+- **Read the room**: `read_messages` before posting to avoid duplicates; `find_channel` resolves channel names.
+- `send_message` returns the created message object — its `id` and `jump_url` are proof of delivery.
 
-# Rich embed (announcements)
-& $post -Channel announcements -Title "NikaCode 1.1.0 released" `
-  -Description "What's new, 2-4 sentences." `
-  -Url "https://github.com/alive2/nika-code/releases/tag/v1.1.0" `
-  -Color green -Footer "NikaCode team"
+Channel IDs (all under guild `1538566082695274667`): see the channel map above.
 
-# Code review summary
-& $post -Channel code-review -Title "Review: PR #42" `
-  -Description "Approved with nits — summary of findings." `
-  -Url "https://github.com/alive2/nika-code/pull/42" -Color blue
-```
+### Webhooks — what's left
 
-Colors: `blurple` (default), `purple`, `blue`, `green`, `orange`, `grey`, `red`. Exit code `0` + `Posted to #<channel>` = delivered.
+The 5 manual-posting webhooks (Announcements, Dev Chat, Code Review, Showcase, Bug Reports) were **deleted** on 2026-08-17; they are superseded by the bot. **Do not recreate them.** Two webhooks remain on purpose, and are **mirror-only** — the GitHub repo webhooks POST to them, and the bot must never post there:
+
+- `GitHub` webhook (ID `1538580763941937256`) → `#github-feed`
+- `Releases` webhook (ID `1538581127751667864`) → `#releases`
+
+Their URLs are recorded in `<this-skill-dir>/.local/webhooks.json` (gitignored) purely for troubleshooting the GitHub mirror. **NEVER commit, paste, or reference these URLs in code, issues, PRs, or public chat.** A pre-commit hook (`.github/hooks/pre-commit`) blocks staging of any `.local/` config or file containing a webhook URL / credential — never bypass it with `--no-verify`.
 
 ## Community manager workflow — do these WHILE developing
 
@@ -145,7 +132,9 @@ Issue body template:
    ```
 3. For major releases, also post a short `#announcements` highlight (link to the release, which also hits `#releases` via webhook — fine, different channels).
 
-## GitHub webhook management (maintenance)
+## GitHub mirror webhooks (maintenance only)
+
+These two GitHub repo webhooks keep `#github-feed` and `#releases` alive. The bot does not use them; they are maintained for the GitHub → Discord mirror. Do not delete them unless the mirror is intentionally being retired.
 
 - **Feed hook** `666614198` → `#github-feed`. Events: `push`, `pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment`, `issues`, `discussion`, `discussion_comment`, `commit_comment`, `release`, `star`, `fork`.
 - **Releases hook** `666614303` → `#releases`. Events: `release`.
@@ -163,11 +152,12 @@ gh api -X PATCH repos/alive2/nika-code/hooks/666614198 `
 
 - Professional, concise, accurate. Follow the server rules (respect, on-topic, English).
 - **No spam**: never post the same update twice; consolidate related updates; prefer fewer, higher-quality posts.
-- Never post into webhook-only channels (`#github-feed`, `#releases`) or info channels (`#rules`, `#welcome`).
-- Never reveal webhook URLs or other secrets anywhere.
-- If webhook config is unavailable and a post is urgent, fall back to driving the Discord web UI (navigate to the channel, type into the message box, send) — but webhooks are always preferred.
+- Never post into mirror-only channels (`#github-feed`, `#releases`) or info channels (`#rules`, `#welcome`) — the bot must never send messages there.
+- Never reveal webhook URLs, the bot token, or other secrets anywhere.
+- Prefer the MCP bot for everything. If the MCP server is unreachable, fall back to driving the Discord web UI (navigate to the channel, type into the message box, send) — but check `docker ps` / the endpoint first.
 
 ## Verification
 
-- Posting script: exit code `0` and `Posted to #<channel>` means delivered. On HTTP 4xx/5xx, verify the URL in config is intact (full `/webhooks/<id>/<token>`), the channel still exists, and the channel allows the webhook.
-- GitHub events: check `gh api .../hooks/<id>/deliveries` (see Releases section). Expected: `status OK`, `code 204`.
+- MCP `send_message` returns the created message object with an `id` and `jump_url` — that is delivery proof. Errors come back as readable messages (e.g. `Missing permissions: ...`).
+- If a call fails, check: is the `discord-mcp` container running (`docker ps`)? Is the bot in the server? Does the channel still exist (`find_channel`)?
+- GitHub mirror events: check `gh api .../hooks/<id>/deliveries` (see Releases section). Expected: `status OK`, `code 204`.

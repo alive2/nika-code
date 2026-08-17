@@ -1,9 +1,4 @@
 {
-  "announcements": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>",
   "github-feed": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>",
-  "releases": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>",
-  "dev-chat": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>",
-  "code-review": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>",
-  "showcase": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>",
-  "bug-reports": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>"
+  "releases": "https://discord.com/api/webhooks/<webhook-id>/<webhook-token>"
 }
