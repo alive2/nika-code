@@ -30,6 +30,9 @@ export interface IPlanViewService {
 
 	/** The session resource bound to a plan file, if any. */
 	getSessionResource(planUri: URI): URI | undefined;
+
+	/** The plan file bound to a chat session, if any. */
+	getPlanUri(sessionResource: URI): URI | undefined;
 }
 
 export class PlanViewService extends Disposable implements IPlanViewService {
@@ -56,5 +59,14 @@ export class PlanViewService extends Disposable implements IPlanViewService {
 
 	getSessionResource(planUri: URI): URI | undefined {
 		return this._bindings.get(planUri.toString())?.sessionResource;
+	}
+
+	getPlanUri(sessionResource: URI): URI | undefined {
+		for (const binding of this._bindings.values()) {
+			if (isEqual(binding.sessionResource, sessionResource)) {
+				return binding.planUri;
+			}
+		}
+		return undefined;
 	}
 }

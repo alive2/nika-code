@@ -281,6 +281,35 @@ suite('PlanAgentProvider', () => {
 		assert.ok(content.includes('- [ ]'), 'Body style guide should show checkbox task examples');
 	});
 
+	test('plan agent body requires a mermaid diagram in every plan', async () => {
+		const provider = createProvider();
+		const agents = await provider.provideCustomAgents({}, {} as any);
+
+		assert.equal(agents.length, 1);
+		const content = await getAgentContent(agents[0]);
+
+		assert.ok(content.includes('```mermaid'), 'Style guide should include a mermaid code fence');
+		assert.ok(content.includes('flowchart'), 'Style guide mermaid example should be a flowchart');
+		assert.ok(content.includes('**Diagram**'), 'Style guide should include a Diagram section');
+	});
+
+	test('plan agent body places the Tasks checklist at the end of the plan', async () => {
+		const provider = createProvider();
+		const agents = await provider.provideCustomAgents({}, {} as any);
+
+		assert.equal(agents.length, 1);
+		const content = await getAgentContent(agents[0]);
+
+		// Use lastIndexOf to scope to the style-guide template (earlier rule
+		// mentions reference the Tasks/Diagram sections too).
+		const tasksIndex = content.lastIndexOf('**Tasks**');
+		assert.ok(tasksIndex > -1, 'Style guide should include a Tasks section');
+		assert.ok(content.lastIndexOf('**Diagram**') < tasksIndex, 'Tasks should come after the Diagram section');
+		assert.ok(content.lastIndexOf('**Relevant files**') < tasksIndex, 'Tasks should come after Relevant files');
+		assert.ok(content.lastIndexOf('**Verification**') < tasksIndex, 'Tasks should come after Verification');
+		assert.ok(content.lastIndexOf('**Further Considerations**') < tasksIndex, 'Tasks should come after Further Considerations');
+	});
+
 	test('has correct label property', () => {
 		const provider = createProvider();
 		assert.ok(provider.label.includes('Plan'));

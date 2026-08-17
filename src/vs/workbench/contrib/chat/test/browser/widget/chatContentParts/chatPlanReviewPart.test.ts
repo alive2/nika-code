@@ -102,6 +102,7 @@ suite('ChatPlanReviewPart', () => {
 			onDidRegisterPlan: VSCodeEvent.None,
 			registerPlan: () => ({ dispose: () => { } }),
 			getSessionResource: () => undefined,
+			getPlanUri: () => undefined,
 		});
 		instantiationService.stub(IChatOutputRendererService, {
 			_serviceBrand: undefined,

@@ -120,6 +120,7 @@ Your SOLE responsibility is planning. NEVER start implementation.
 - Use #tool:vscode/askQuestions freely to clarify requirements — don't make large assumptions
 - Present a well-researched plan with loose ends tied BEFORE implementation
 - Present your plan via the \`vscode_reviewPlan\` tool (Review Plan) — never as plain markdown
+- ALWAYS include a mermaid **Diagram** visualizing the plan (phases → steps → dependencies) — a plan without a diagram is incomplete
 </rules>
 
 <workflow>
@@ -148,7 +149,8 @@ The plan should reflect:
 - Explicit scope boundaries — what's included and what's deliberately excluded
 - Reference decisions from the discussion
 - Leave no ambiguity
-- End with a **Tasks** checklist (\`- [ ]\` items, one per implementation step) so progress can be tracked while the plan executes
+- Include a mermaid **Diagram** (flowchart) showing phases, steps, and dependencies/parallelism — every plan MUST have one
+- End with a **Tasks** checklist (\`- [ ]\` items, one per implementation step) as the FINAL section of the plan so progress can be tracked while it executes
 
 Save the comprehensive plan document to \`/memories/session/plan.md\` via #tool:vscode/memory, then present the scannable plan to the user by calling the **\`vscode_reviewPlan\`** tool: pass \`content\` (the scannable plan markdown, including the Tasks checklist), \`actions\` (e.g. \`[{\"label\": \"Implement Plan\", \"default\": true}, {\"label\": \"Approve Plan Only\"}]\`), and \`canProvideFeedback: true\`. Omit the \`plan\` parameter — the plan file is resolved from the session automatically. You MUST present the plan this way, as the plan file is for persistence only, not a substitute for showing it to the user.
 
@@ -173,10 +175,12 @@ Keep iterating until explicit approval or handoff.
 1. {Implementation step-by-step — note dependency ("*depends on N*") or parallelism ("*parallel with step N*") when applicable}
 2. {For plans with 5+ steps, group steps into named phases with enough detail to be independently actionable}
 
-**Tasks** — the execution checklist; one checkbox per implementation step so progress can be tracked while the plan is executed:
-- [ ] {Task 1: short action matching step 1}
-- [ ] {Task 2: short action matching step 2}
-- [ ] {Task 3: short action matching step 3}
+**Diagram** — a mermaid flowchart of the plan (phases → steps, with dependency/parallel edges):
+\`\`\`mermaid
+flowchart LR
+    P1[Phase 1: Discovery] --> P2[Phase 2: Core]
+    P2 --> P3[Phase 3: Verify]
+\`\`\`
 
 **Relevant files**
 - \`{full/path/to/file}\` — {what to modify or reuse, referencing specific functions/patterns}
@@ -190,13 +194,18 @@ Keep iterating until explicit approval or handoff.
 **Further Considerations** (if applicable, 1-3 items)
 1. {Clarifying question with recommendation. Option A / Option B / Option C}
 2. {…}
+
+**Tasks** — the execution checklist; one checkbox per implementation step, placed as the FINAL section of the plan so progress can be tracked while it is executed:
+- [ ] {Task 1: short action matching step 1}
+- [ ] {Task 2: short action matching step 2}
+- [ ] {Task 3: short action matching step 3}
 \`\`\`
 
 Rules:
-- NO code blocks — describe changes, link to files and specific symbols/functions
+- NO code blocks except the mermaid diagram in the **Diagram** section — describe changes, link to files and specific symbols/functions
 - NO blocking questions at the end — ask during workflow via #tool:vscode/askQuestions
 - The plan MUST be presented via the \`vscode_reviewPlan\` tool, don't just mention the plan file.
-- The **Tasks** checklist is REQUIRED — it powers live progress tracking while the plan executes.
+- The **Tasks** checklist is REQUIRED and must be the FINAL section of the plan — it powers live progress tracking while the plan executes.
 </plan_style_guide>`;
 	}
 
@@ -213,7 +222,7 @@ Rules:
 		const startImplementationHandoff: AgentHandoff = {
 			label: 'Start Implementation',
 			agent: 'agent',
-			prompt: 'Start implementation',
+			prompt: 'Start implementation. First read /memories/session/plan.md, then create your todo list from its **Tasks** checklist using the todo tool with the exact same task titles. Begin with the first task.',
 			send: true,
 			...(implementAgentModelOverride ? { model: implementAgentModelOverride } : {})
 		};
