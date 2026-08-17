@@ -23,7 +23,7 @@
 EXCLUDE_CONTENT='(^|/)(test|tests|__tests__|fixtures?)/|\.(spec|test)\.ts$|/testdata/'
 
 blocked_paths() {
-	git diff --cached --name-only -z | tr '\0' '\n' | grep -E '(^|/)\.local/(webhooks|config|secrets|credentials)' 
+	git diff --cached --name-only -z | tr '\0' '\n' | grep -E '(^|/)\.local/(webhooks|config|secrets|credentials)'
 }
 
 # --- 1. Block any staged path under a .local/ config dir -------------------
