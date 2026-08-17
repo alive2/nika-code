@@ -17,7 +17,7 @@ updater.
 | Quality | `stable` (user install, Windows) |
 | Releases | [github.com/alive2/nika-code/releases](https://github.com/alive2/nika-code/releases) |
 | Update feed | `https://nika-code-update.173david173.workers.dev` (Cloudflare Worker) |
-| Discord | [discord.gg/Z6rS3TmQZ](https://discord.gg/Z6rS3TmQZ) |
+| Discord | [discord.gg/RdXzRzPVD9](https://discord.gg/RdXzRzPVD9) |
 | License | [MIT](LICENSE.txt) |
 
 ---
@@ -83,7 +83,7 @@ takes to push an update to installed clients (see
 
 ## Community
 
-Join the **Nika Code Discord server**: [**discord.gg/Z6rS3TmQZ**](https://discord.gg/Z6rS3TmQZ)
+Join the **Nika Code Discord server**: [**discord.gg/RdXzRzPVD9**](https://discord.gg/RdXzRzPVD9)
 
 It's the official community hub for everything NikaCode:
 
