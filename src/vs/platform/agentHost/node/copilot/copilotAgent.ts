@@ -1019,8 +1019,14 @@ export class CopilotAgent extends Disposable implements IAgent {
 	}
 
 	getProtectedResources(): ProtectedResourceMetadata[] {
+		// NikaCode: GitHub is an optional resource by default. The
+		// `nikaGithubEnabled` root-config key (forwarded from the workbench
+		// `nika.github.enabled` setting, default off) controls whether the
+		// Copilot agent *requires* GitHub sign-in. When off, a signed-out user
+		// can still use the agent with BYOK (Nika) models — no sign-in dialog.
+		const githubRequired = this._configurationService.getRootValue(agentHostCustomizationConfigSchema, AgentHostConfigKey.NikaGithubEnabled) === true;
 		return [
-			this._gitHubEndpointService.getCopilotResource(),
+			{ ...this._gitHubEndpointService.getCopilotResource(), required: githubRequired },
 			this._gitHubEndpointService.getRepoResource(),
 		];
 	}

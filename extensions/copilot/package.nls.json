@@ -32,6 +32,7 @@
 	"nika.config.logLevel": "The minimum level written to the native Nika output channel.",
 	"nika.config.releaseCheckEnabled": "Check GitHub for published NikaCode releases when the bundled provider starts. Updates are never installed automatically.",
 	"nika.config.safetyRules.enabled": "Add Copilot safety rules (Microsoft content policies, copyright, and harmful-content restrictions) to prompts sent to Nika models. Turn off to omit them from all prompts.",
+	"nika.config.github.enabled": "Enable GitHub Copilot integration: GitHub sign-in prompts, Copilot utility models, the GitHub MCP server, and cloud features. Off by default - NikaCode runs fully on your own Nika (BYOK) models without a GitHub account. Turn on to restore upstream Copilot behavior.",
 	"nika.config.indexing.scheme": "How Nika semantic indexing runs for the current workspace. Choose per workspace, or leave the default.",
 	"nika.config.indexing.scheme.off": "No semantic index. Ripgrep search only (NikaCode default).",
 	"nika.config.indexing.scheme.githubRemote": "Reuse GitHub Copilot's existing remote index for GitHub-hosted repos. Requires a GitHub sign-in.",

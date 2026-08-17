@@ -19,6 +19,7 @@ import { ITelemetryService } from '../../../platform/telemetry/common/telemetry'
 import { Emitter, Event } from '../../../util/vs/base/common/event';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
+import { NIKA_GITHUB_ENABLED_CONFIG_KEY } from '../../byok/vscode-node/nikaModels';
 
 
 // Keep in sync with `BYOKUtilityModelDefault` in `src/vs/workbench/contrib/chat/common/constants.ts` and the `chat.byokUtilityModelDefault` enum in `chat.shared.contribution.ts`.
@@ -66,6 +67,7 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 				e.affectsConfiguration(ProductionEndpointProvider.UTILITY_MODEL_CONFIG_KEY)
 				|| e.affectsConfiguration(ProductionEndpointProvider.UTILITY_SMALL_MODEL_CONFIG_KEY)
 				|| e.affectsConfiguration(ProductionEndpointProvider.BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY)
+				|| e.affectsConfiguration(NIKA_GITHUB_ENABLED_CONFIG_KEY)
 				|| e.affectsConfiguration('nika.agent.utilityThinkingEffort')
 				|| e.affectsConfiguration('nika.agent.utilitySmallThinkingEffort')
 			) {
@@ -197,9 +199,13 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 				case BYOKUtilityModelDefault.None:
 					throw this._createMissingUtilityModelError(family);
 				case BYOKUtilityModelDefault.Copilot:
-					// Copilot utility models require a Copilot token source (unavailable for air-gapped / signed-out BYOK).
+					// Copilot utility models require a Copilot token source
+					// (unavailable for air-gapped / signed-out BYOK). When
+					// GitHub is disabled or no token source exists, fall back
+					// to the main-agent BYOK model so utility flows keep
+					// working without a GitHub account.
 					if (!this._authService.hasCopilotTokenSource) {
-						throw this._createMissingUtilityModelError(family);
+						return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, this._mainAgentBYOKModel);
 					}
 					break;
 			}
@@ -223,6 +229,14 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 	}
 
 	private _getBYOKUtilityModelDefault(): BYOKUtilityModelDefault {
+		// NikaCode: when GitHub integration is disabled (the default), utility
+		// models must never resolve to Copilot's CAPI models — they would throw
+		// for signed-out users. Treat the toggle as if 'mainAgent' were
+		// configured.
+		if (this._configService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) !== true) {
+			return BYOKUtilityModelDefault.MainAgent;
+		}
+
 		const value = this._configService.getNonExtensionConfig<unknown>(ProductionEndpointProvider.BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY);
 		switch (value) {
 			case undefined:

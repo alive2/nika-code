@@ -388,6 +388,12 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 	 * to the server. Returns true if authentication succeeded.
 	 */
 	private async _resolveAuthenticationInteractively(protectedResources: ProtectedResourceMetadata[]): Promise<boolean> {
+		// NikaCode: with GitHub integration off (default), never show the GitHub
+		// sign-in dialog — not even on the auth-required retry path. The session
+		// fails cleanly with the auth-required error instead.
+		if (this._configurationService.getValue<boolean>('nika.github.enabled') !== true) {
+			return false;
+		}
 		const testToken = this._getScenarioAutomationToken();
 		if (testToken !== undefined) {
 			for (const resource of protectedResources) {

@@ -17,6 +17,7 @@ import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { autorun } from '../../../util/vs/base/common/observableInternal';
 import { GHPR_EXTENSION_ID } from '../../chatSessions/vscode/chatSessionsUriHandler';
 import { isClientBYOKAllowed } from '../../byok/common/byokProvider';
+import { NIKA_GITHUB_ENABLED_CONFIG_KEY } from '../../byok/vscode-node/nikaModels';
 import { EXTENSION_ID } from '../../common/constants';
 
 const welcomeViewContextKeys = {
@@ -136,8 +137,15 @@ export class ContextKeysContribution extends Disposable {
 		let error: unknown | undefined = undefined;
 		let key: string | undefined;
 		try {
-			await this._authenticationService.getCopilotToken();
-			key = welcomeViewContextKeys.Activated;
+			// NikaCode: with GitHub integration off (default), never contact the
+			// Copilot auth endpoints — the extension is "activated" by Nika BYOK
+			// models alone, so report success without a token.
+			if (this._configService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) !== true) {
+				key = welcomeViewContextKeys.Activated;
+			} else {
+				await this._authenticationService.getCopilotToken();
+				key = welcomeViewContextKeys.Activated;
+			}
 		} catch (e: any) {
 			error = e;
 			const reason = e.message || e;
@@ -225,6 +233,12 @@ export class ContextKeysContribution extends Disposable {
 
 	private async _updateClientByokEnabledContext() {
 		const hasGitHubSession = !!this._authenticationService.anyGitHubSession;
+		// NikaCode: with GitHub integration off (default), BYOK is always
+		// allowed client-side and no token lookup is needed.
+		if (this._configService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) !== true) {
+			commands.executeCommand('setContext', clientByokEnabledContextKey, isClientBYOKAllowed(hasGitHubSession, undefined));
+			return;
+		}
 		try {
 			const copilotToken = await this._authenticationService.getCopilotToken();
 			commands.executeCommand('setContext', clientByokEnabledContextKey, isClientBYOKAllowed(hasGitHubSession, copilotToken));
@@ -274,12 +288,16 @@ export class ContextKeysContribution extends Disposable {
 		let hasPermissiveSession = false;
 		let missingPermissiveSession = false;
 		if (!this._authenticationService.isMinimalMode) {
-			try {
-				hasPermissiveSession = !!(await this._authenticationService.getGitHubSession('permissive', { silent: true }));
-			} catch (error) {
-				if (!(error instanceof MinimalModeError)) {
-					this._logService.trace(`[context keys] Failed to resolve permissive session: ${error instanceof Error ? error.message : String(error)}`);
-					hasPermissiveSession = !!this._authenticationService.permissiveGitHubSession;
+			// NikaCode: with GitHub integration off (default) there is no
+			// permissive session to be missing — skip the auth lookup entirely.
+			if (this._configService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) === true) {
+				try {
+					hasPermissiveSession = !!(await this._authenticationService.getGitHubSession('permissive', { silent: true }));
+				} catch (error) {
+					if (!(error instanceof MinimalModeError)) {
+						this._logService.trace(`[context keys] Failed to resolve permissive session: ${error instanceof Error ? error.message : String(error)}`);
+						hasPermissiveSession = !!this._authenticationService.permissiveGitHubSession;
+					}
 				}
 			}
 			missingPermissiveSession = !hasPermissiveSession;

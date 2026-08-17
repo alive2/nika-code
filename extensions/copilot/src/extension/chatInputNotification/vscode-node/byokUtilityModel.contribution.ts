@@ -8,6 +8,7 @@ import { IAuthenticationService } from '../../../platform/authentication/common/
 import { IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { ILogService } from '../../../platform/log/common/logService';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
+import { NIKA_GITHUB_ENABLED_CONFIG_KEY } from '../../byok/vscode-node/nikaModels';
 
 const NOTIFICATION_ID = 'copilot.byokUtilityModelHint';
 const UTILITY_MODEL_SETTING = 'chat.utilityModel';
@@ -51,6 +52,7 @@ export class ByokUtilityModelNotificationContribution extends Disposable {
 				|| e.affectsConfiguration(UTILITY_SMALL_MODEL_SETTING)
 				|| e.affectsConfiguration(BYOK_UTILITY_MODEL_DEFAULT_SETTING)
 				|| e.affectsConfiguration(ALLOW_SIGNED_OUT_WHEN_USABLE_SETTING)
+				|| e.affectsConfiguration(NIKA_GITHUB_ENABLED_CONFIG_KEY)
 			) {
 				this._update();
 			}
@@ -81,8 +83,12 @@ export class ByokUtilityModelNotificationContribution extends Disposable {
 		const utilityUnset = !this._isUtilityOverrideSet(UTILITY_MODEL_SETTING);
 		const utilitySmallUnset = !this._isUtilityOverrideSet(UTILITY_SMALL_MODEL_SETTING);
 		const byokUtilityModelDefault = this._configService.getNonExtensionConfig<unknown>(BYOK_UTILITY_MODEL_DEFAULT_SETTING);
+		// NikaCode: with GitHub integration off (default), utility models
+		// resolve to the main-agent Nika model automatically, so the hint is
+		// never needed.
+		const githubDisabled = this._configService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) !== true;
 
-		if (!signedOut || !this._hasByokModels || byokUtilityModelDefault === MAIN_AGENT_BYOK_UTILITY_MODEL_DEFAULT || (!utilityUnset && !utilitySmallUnset)) {
+		if (!signedOut || !this._hasByokModels || githubDisabled || byokUtilityModelDefault === MAIN_AGENT_BYOK_UTILITY_MODEL_DEFAULT || (!utilityUnset && !utilitySmallUnset)) {
 			this._hideNotification();
 			return;
 		}

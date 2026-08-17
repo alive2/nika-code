@@ -197,6 +197,7 @@ suite('ProductionEndpointProvider — utility model overrides', () => {
 	});
 
 	test('no override configured — uses the Copilot utility model when the selected main agent model is BYOK and a Copilot token is available', async () => {
+		await configService.setNonExtensionConfig('nika.github.enabled', true);
 		setFetcher([makeChatModel('copilot-utility')]);
 		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'anthropic' }));
 
@@ -205,12 +206,61 @@ suite('ProductionEndpointProvider — utility model overrides', () => {
 		assert.strictEqual(endpoint.model, 'copilot-utility');
 	});
 
-	test('no override configured — rejects when the selected main agent model is BYOK and no Copilot token is available (air-gapped)', async () => {
+	test('GitHub disabled (default) — utility models resolve to the main-agent BYOK model even when a Copilot token is available', async () => {
+		setFetcher([makeChatModel('copilot-utility')]);
+		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'anthropic', id: 'claude-haiku-4.5' }));
+
+		const endpoint = await endpointProvider.getChatEndpoint('copilot-utility');
+
+		assert.ok(endpoint instanceof ExtensionContributedChatEndpoint);
+		assert.strictEqual(endpoint.model, 'claude-haiku-4.5');
+	});
+
+	test('GitHub disabled (default) — no Copilot token source never throws; falls back to the main-agent BYOK model (air-gapped)', async () => {
 		setFetcher([makeChatModel('copilot-utility')]);
 		// Simulate a signed-out / air-gapped BYOK session with no Copilot token source.
 		// @ts-expect-error — access the protected auth service to stub its token-source signal.
 		sandbox.stub(endpointProvider._authService, 'hasCopilotTokenSource').get(() => false);
-		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'anthropic' }));
+		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'customendpoint', id: 'qwen3.6' }));
+
+		const endpoint = await endpointProvider.getChatEndpoint('copilot-utility');
+
+		assert.ok(endpoint instanceof ExtensionContributedChatEndpoint);
+		assert.strictEqual(endpoint.model, 'qwen3.6');
+	});
+
+	test('GitHub disabled (default) — explicit \'copilot\' utility default still resolves to the main-agent BYOK model', async () => {
+		setFetcher([makeChatModel('copilot-utility')]);
+		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'anthropic', id: 'claude-haiku-4.5' }));
+		await configService.setNonExtensionConfig('chat.byokUtilityModelDefault', 'copilot');
+
+		const endpoint = await endpointProvider.getChatEndpoint('copilot-utility');
+
+		assert.ok(endpoint instanceof ExtensionContributedChatEndpoint);
+		assert.strictEqual(endpoint.model, 'claude-haiku-4.5');
+	});
+
+	test('GitHub enabled — signed-out BYOK with the Copilot utility default falls back to the main-agent BYOK model (air-gapped)', async () => {
+		await configService.setNonExtensionConfig('nika.github.enabled', true);
+		setFetcher([makeChatModel('copilot-utility')]);
+		// Simulate a signed-out / air-gapped BYOK session with no Copilot token source.
+		// @ts-expect-error — access the protected auth service to stub its token-source signal.
+		sandbox.stub(endpointProvider._authService, 'hasCopilotTokenSource').get(() => false);
+		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'customendpoint', id: 'qwen3.6' }));
+
+		const endpoint = await endpointProvider.getChatEndpoint('copilot-utility');
+
+		assert.ok(endpoint instanceof ExtensionContributedChatEndpoint);
+		assert.strictEqual(endpoint.model, 'qwen3.6');
+	});
+
+	test('GitHub enabled — explicit \'none\' utility default rejects for a BYOK main agent model', async () => {
+		await configService.setNonExtensionConfig('nika.github.enabled', true);
+		setFetcher([makeChatModel('copilot-utility')]);
+		// @ts-expect-error — access the protected auth service to stub its token-source signal.
+		sandbox.stub(endpointProvider._authService, 'hasCopilotTokenSource').get(() => false);
+		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'customendpoint', id: 'qwen3.6' }));
+		await configService.setNonExtensionConfig('chat.byokUtilityModelDefault', 'none');
 
 		await assert.rejects(
 			() => endpointProvider.getChatEndpoint('copilot-utility'),
@@ -219,6 +269,7 @@ suite('ProductionEndpointProvider — utility model overrides', () => {
 	});
 
 	test('Copilot default applies when the selected main agent model is BYOK', async () => {
+		await configService.setNonExtensionConfig('nika.github.enabled', true);
 		setFetcher([makeChatModel('copilot-utility')]);
 		await endpointProvider.getChatEndpoint(makeFakeLanguageModelChat({ vendor: 'anthropic' }));
 		await configService.setNonExtensionConfig('chat.byokUtilityModelDefault', 'copilot');

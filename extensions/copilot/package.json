@@ -3406,6 +3406,11 @@
             "default": true,
             "markdownDescription": "%nika.config.safetyRules.enabled%"
           },
+          "nika.github.enabled": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "%nika.config.github.enabled%"
+          },
           "nika.indexing.scheme": {
             "type": "string",
             "enum": [

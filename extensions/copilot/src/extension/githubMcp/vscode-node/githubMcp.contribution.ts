@@ -9,6 +9,7 @@ import { ConfigKey, IConfigurationService } from '../../../platform/configuratio
 import { ILogService } from '../../../platform/log/common/logService';
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
 import { Disposable, IDisposable } from '../../../util/vs/base/common/lifecycle';
+import { NIKA_GITHUB_ENABLED_CONFIG_KEY } from '../../byok/vscode-node/nikaModels';
 import { GitHubMcpDefinitionProvider } from '../common/githubMcpDefinitionProvider';
 
 export class GitHubMcpContrib extends Disposable {
@@ -30,7 +31,7 @@ export class GitHubMcpContrib extends Disposable {
 
 	private _registerConfigurationListener() {
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration(ConfigKey.GitHubMcpEnabled.fullyQualifiedId)) {
+			if (e.affectsConfiguration(ConfigKey.GitHubMcpEnabled.fullyQualifiedId) || e.affectsConfiguration(NIKA_GITHUB_ENABLED_CONFIG_KEY)) {
 				if (this.enabled) {
 					void this._registerGitHubMcpDefinitionProvider();
 				} else {
@@ -53,6 +54,11 @@ export class GitHubMcpContrib extends Disposable {
 	}
 
 	private get enabled(): boolean {
+		// NikaCode: when GitHub integration is disabled (the default), the GitHub
+		// MCP server must never be registered, regardless of the experiment flag.
+		if (this.configurationService.getNonExtensionConfig<boolean>(NIKA_GITHUB_ENABLED_CONFIG_KEY) !== true) {
+			return false;
+		}
 		return this.configurationService.getExperimentBasedConfig(ConfigKey.GitHubMcpEnabled, this.experimentationService);
 	}
 }

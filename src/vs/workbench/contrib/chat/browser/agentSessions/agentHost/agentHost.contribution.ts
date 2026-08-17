@@ -21,6 +21,7 @@ import { AgentHostAllowSignedOutWhenUsableContribution } from './agentHostAllowS
 import { AgentHostByokLmHandler } from './agentHostByokLmHandler.js';
 import { AgentHostContribution } from './agentHostChatContribution.js';
 import { AgentHostCopilotCliSettingsContribution } from './agentHostCopilotCliSettingsContribution.js';
+import { AgentHostNikaGithubEnabledContribution } from './agentHostNikaGithubEnabledContribution.js';
 import { AgentHostOpenSessionLinkOpenerContribution } from './openSessionLinkOpener.contribution.js';
 import { AgentHostSessionListContribution } from './agentHostSessionListContribution.js';
 import { AgentHostTerminalContribution } from './agentHostTerminalContribution.js';
@@ -35,5 +36,6 @@ registerWorkbenchContribution2(AgentHostOpenSessionLinkOpenerContribution.ID, Ag
 registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTerminalContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostCopilotCliSettingsContribution.ID, AgentHostCopilotCliSettingsContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostAllowSignedOutWhenUsableContribution.ID, AgentHostAllowSignedOutWhenUsableContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(AgentHostNikaGithubEnabledContribution.ID, AgentHostNikaGithubEnabledContribution, WorkbenchPhase.AfterRestored);
 
 registerSingleton(IAgentHostByokLmHandler, AgentHostByokLmHandler, InstantiationType.Delayed);

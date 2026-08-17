@@ -41,6 +41,15 @@ export const enum AgentHostConfigKey {
 	 * `agent-host-config.json`.
 	 */
 	GithubEnterpriseUri = 'githubEnterpriseUri',
+	/**
+	 * NikaCode master switch for GitHub Copilot integration. When false (the
+	 * default), the agent host treats GitHub as an optional resource: no sign-in
+	 * is required and the Copilot agent stays usable with BYOK (Nika) models
+	 * alone. The workbench forwards it here from the `nika.github.enabled` VS
+	 * Code setting; remote operators can set it directly in the remote
+	 * `agent-host-config.json`.
+	 */
+	NikaGithubEnabled = 'nikaGithubEnabled',
 }
 
 export const SESSION_CUSTOMIZATION_DISCOVERY_MODES = ['scan', 'discover'] as const;
@@ -108,6 +117,12 @@ export const agentHostCustomizationConfigSchema = createSchema({
 		type: 'string',
 		title: localize('agentHost.config.githubEnterpriseUri.title', "GitHub Enterprise URI"),
 		description: localize('agentHost.config.githubEnterpriseUri.description', "Optional base URI of a GitHub Enterprise instance (for example \"https://ghe.example.com\" for GitHub Enterprise Server, or \"https://tenant.ghe.com\" for GitHub Enterprise Cloud). When set, the agent host authenticates and makes GitHub API calls against this instance instead of github.com. Normally pushed by the connected VS Code client from the `github-enterprise.uri` setting; remote agent host operators can set it directly in the remote `agent-host-config.json`."),
+	}),
+	[AgentHostConfigKey.NikaGithubEnabled]: schemaProperty<boolean>({
+		type: 'boolean',
+		title: localize('agentHost.config.nikaGithubEnabled.title', "GitHub Copilot Integration"),
+		description: localize('agentHost.config.nikaGithubEnabled.description', "NikaCode: master switch for GitHub Copilot integration. When false (the default), the Copilot agent requires no GitHub sign-in and stays fully usable with BYOK (Nika) models; GitHub becomes an optional resource. When true, GitHub sign-in is required again. Normally pushed by the connected VS Code client from the `nika.github.enabled` setting; remote agent host operators can set it directly in the remote `agent-host-config.json`."),
+		default: false,
 	}),
 });
 

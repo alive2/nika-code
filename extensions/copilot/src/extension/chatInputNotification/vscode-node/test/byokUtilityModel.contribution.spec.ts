@@ -112,7 +112,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 
 	test('shows notification when signed out + BYOK + both utility settings unset', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
-		const { configService } = createConfigService({ 'chat.agentHost.allowSignedOutWhenUsable': true });
+		const { configService } = createConfigService({ 'chat.agentHost.allowSignedOutWhenUsable': true, 'nika.github.enabled': true });
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
 		await flushAsync();
@@ -127,7 +127,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 
 	test('keeps the notification global when signed-out operation is disabled', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
-		const { configService } = createConfigService();
+		const { configService } = createConfigService({ 'nika.github.enabled': true });
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
 		await flushAsync();
@@ -150,7 +150,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 
 	test('shows notification with single action when only chat.utilityModel is unset', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
-		const { configService } = createConfigService({ 'chat.utilitySmallModel': 'ollama/llama3' });
+		const { configService } = createConfigService({ 'chat.utilitySmallModel': 'ollama/llama3', 'nika.github.enabled': true });
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
 		await flushAsync();
@@ -211,6 +211,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService } = createConfigService({
 			'chat.byokUtilityModelDefault': 'copilot',
+			'nika.github.enabled': true,
 		});
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
@@ -219,9 +220,33 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		expect(mockNotification.show).toHaveBeenCalled();
 	});
 
+	test('does not show notification when GitHub integration is disabled (default)', async () => {
+		const { authService } = createAuthService({ anyGitHubSession: undefined });
+		const { configService } = createConfigService();
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+
+		await flushAsync();
+
+		expect(mockNotification.show).not.toHaveBeenCalled();
+	});
+
+	test('hides notification when GitHub integration is toggled off', async () => {
+		const { authService } = createAuthService({ anyGitHubSession: undefined });
+		const { configService, set } = createConfigService({ 'nika.github.enabled': true });
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+
+		await flushAsync();
+		expect(mockNotification.show).toHaveBeenCalled();
+
+		set('nika.github.enabled', false);
+		await flushAsync();
+
+		expect(mockNotification.hide).toHaveBeenCalled();
+	});
+
 	test('hides notification once both utility settings are configured', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
-		const { configService, set } = createConfigService();
+		const { configService, set } = createConfigService({ 'nika.github.enabled': true });
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
 		await flushAsync();
@@ -238,7 +263,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 
 	test('hides notification when the main agent model is the BYOK utility default', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
-		const { configService, set } = createConfigService();
+		const { configService, set } = createConfigService({ 'nika.github.enabled': true });
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
 		await flushAsync();
@@ -252,7 +277,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 
 	test('hides notification when user signs in', async () => {
 		const { authService, emitter } = createAuthService({ anyGitHubSession: undefined });
-		const { configService } = createConfigService();
+		const { configService } = createConfigService({ 'nika.github.enabled': true });
 		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
 
 		await flushAsync();

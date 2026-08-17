@@ -12,6 +12,14 @@ export const NIKA_PROVIDER_NAME = 'Nika';
 export const NIKA_DEEPSEEK_SECRET = 'nika.deepseek.apiKey';
 export const NIKA_GEMINI_SECRET = 'nika.gemini.apiKey';
 
+/**
+ * Master switch for GitHub Copilot integration. Off (the default) makes
+ * NikaCode run entirely on BYOK models without a GitHub account: no sign-in
+ * prompts, no Copilot utility models, no GitHub MCP server. Turn it on to
+ * restore upstream Copilot behavior.
+ */
+export const NIKA_GITHUB_ENABLED_CONFIG_KEY = 'nika.github.enabled';
+
 export type NikaModelId =
 	| 'deepseek-v4-flash'
 	| 'deepseek-v4-pro'

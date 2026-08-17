@@ -34,9 +34,10 @@ import { NullTelemetryService, NullTelemetryServiceShape } from '../../../teleme
 import { AgentHostTelemetryService } from '../../node/agentHostTelemetryService.js';
 import { CopilotCliConfigKey } from '../../common/copilotCliConfig.js';
 import { AgentHostCopilotMultiRootEnabledConfigKey, AgentHostMigrateLegacyCopilotCliEnabledConfigKey, AgentHostPreferLongContextEnabledConfigKey, AgentHostSystemProxyEnabledConfigKey } from '../../common/agentHostSchema.js';
+import { AgentHostConfigKey } from '../../common/agentHostCustomizationConfig.js';
 import { IAgentPluginManager, ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { getTelemetryChatSessionId } from '../../common/agentTelemetryCorrelation.js';
-import { AgentSession, GITHUB_COPILOT_PROTECTED_RESOURCE, type AgentSignal, type IAgentCreateChatForkSource, type IAgentCreateSessionConfig, type IAgentCreateSessionResult, type IAgentSessionMetadata, type IAgentSpawnChatEvent } from '../../common/agentService.js';
+import { AgentSession, GITHUB_COPILOT_PROTECTED_RESOURCE, protectedResourcesRequireGitHubCopilotSignIn, type AgentSignal, type IAgentCreateChatForkSource, type IAgentCreateSessionConfig, type IAgentCreateSessionResult, type IAgentSessionMetadata, type IAgentSpawnChatEvent } from '../../common/agentService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { buildDefaultChatUri, buildChatUri, buildSubagentChatUri, parseRequiredSessionUriFromChatUri, CustomizationLoadStatus, MessageKind, readSessionEhcliAdoptable, ResponsePartKind, ROOT_STATE_URI, ToolResultContentType, TurnState, customizationId, type ClientPluginCustomization, type PluginCustomization, type ToolCallResult, type Turn, RuleCustomization } from '../../common/state/sessionState.js';
 import { CustomizationType, SessionStatus, ToolCallContributorKind, type AgentSelection, type ModelSelection, type ToolDefinition } from '../../common/state/protocol/state.js';
@@ -933,6 +934,53 @@ suite('CopilotAgent', () => {
 				whenEnabled: { immutablePrimary: true },
 				afterDisabling: undefined,
 			});
+		} finally {
+			await disposeAgent(agent);
+		}
+	});
+
+	test('getProtectedResources treats GitHub as optional when the NikaGitHubEnabled root key is absent (NikaCode default)', async () => {
+		const { agent } = createTestAgentContext(disposables);
+		try {
+			const resources = agent.getProtectedResources();
+			const copilot = resources.find(r => r.resource === GITHUB_COPILOT_PROTECTED_RESOURCE.resource);
+			assert.ok(copilot);
+			assert.strictEqual(copilot.required, false);
+			assert.strictEqual(protectedResourcesRequireGitHubCopilotSignIn(resources), false);
+		} finally {
+			await disposeAgent(agent);
+		}
+	});
+
+	test('getProtectedResources marks GitHub optional when NikaGitHubEnabled is off (NikaCode default)', async () => {
+		const { agent, stateManager } = createTestAgentContext(disposables);
+		try {
+			stateManager.dispatchServerAction(ROOT_STATE_URI, {
+				type: ActionType.RootConfigChanged,
+				config: { [AgentHostConfigKey.NikaGithubEnabled]: false },
+			});
+			const resources = agent.getProtectedResources();
+			const copilot = resources.find(r => r.resource === GITHUB_COPILOT_PROTECTED_RESOURCE.resource);
+			assert.ok(copilot);
+			assert.strictEqual(copilot.required, false);
+			assert.strictEqual(protectedResourcesRequireGitHubCopilotSignIn(resources), false);
+		} finally {
+			await disposeAgent(agent);
+		}
+	});
+
+	test('getProtectedResources requires GitHub sign-in again when NikaGitHubEnabled is on', async () => {
+		const { agent, stateManager } = createTestAgentContext(disposables);
+		try {
+			stateManager.dispatchServerAction(ROOT_STATE_URI, {
+				type: ActionType.RootConfigChanged,
+				config: { [AgentHostConfigKey.NikaGithubEnabled]: true },
+			});
+			const resources = agent.getProtectedResources();
+			const copilot = resources.find(r => r.resource === GITHUB_COPILOT_PROTECTED_RESOURCE.resource);
+			assert.ok(copilot);
+			assert.strictEqual(copilot.required, true);
+			assert.strictEqual(protectedResourcesRequireGitHubCopilotSignIn(resources), true);
 		} finally {
 			await disposeAgent(agent);
 		}
