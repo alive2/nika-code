@@ -1,0 +1,69 @@
+#!/bin/sh
+# ---------------------------------------------------------------------------
+# NikaCode pre-commit secret guard
+#
+# Blocks commits that stage:
+#   1. Files under a skill `.local/` config directory (webhook URLs, secrets)
+#   2. Discord webhook URLs (real 17-19 digit snowflake IDs)
+#   3. Common credential formats (GitHub PATs, private keys)
+#
+# Test fixtures that intentionally contain FAKE secret strings (e.g.
+# `secretFilter.spec.ts`, upstream `*.test.ts` with 'xxxxx' masked tokens)
+# are excluded from the content scan.
+#
+# This is the shared, versioned copy. The copy that actually runs lives at
+# `.git/hooks/pre-commit` (hooks are local). Reinstall after clone/pull with:
+#   cp .github/hooks/pre-commit .git/hooks/pre-commit
+#
+# Never bypass with `git commit --no-verify` — if this hook fires, the staged
+# content has a problem and must be fixed.
+# ---------------------------------------------------------------------------
+
+# Excluded from CONTENT scan only (path block below always applies)
+EXCLUDE_CONTENT='(^|/)(test|tests|__tests__|fixtures?)/|\.(spec|test)\.ts$|/testdata/'
+
+blocked_paths() {
+	git diff --cached --name-only -z | tr '\0' '\n' | grep -E '(^|/)\.local/(webhooks|config|secrets|credentials)' 
+}
+
+# --- 1. Block any staged path under a .local/ config dir -------------------
+if p=$(blocked_paths); then
+	echo ""
+	echo "ERROR: staged file(s) under a gitignored '.local/' config directory:" >&2
+	printf '%s\n' "$p" | sed 's/^/  /' >&2
+	echo "These hold webhook URLs / API secrets and must NEVER be committed." >&2
+	echo "Move the secret into a gitignored .local/ file or a secret store, then re-stage." >&2
+	exit 1
+fi
+
+# --- 2. Scan staged text content for secret patterns -----------------------
+git diff --cached --name-only -z | tr '\0' '\n' | while IFS= read -r file; do
+	[ -z "$file" ] && continue
+	case "$file" in
+		*.png|*.jpg|*.jpeg|*.gif|*.ico|*.woff*|*.ttf|*.eot|*.zip|*.vsix|*.exe|*.dll|*.pdb) continue ;;
+	esac
+
+	# Skip known fake-secret test fixtures
+	if printf '%s' "$file" | grep -qE "$EXCLUDE_CONTENT"; then
+		continue
+	fi
+
+	# grep the staged blob (index) — only what would actually be committed
+	if git show ":$file" 2>/dev/null | grep -aqE \
+		'discord\.com/api/webhooks/[0-9]{15,}/'
+	then
+		echo "ERROR: staged file '$file' contains a Discord webhook URL." >&2
+		echo "Webhook URLs are write-access secrets. Remove it and keep URLs only in gitignored .local/ config." >&2
+		exit 1
+	fi
+
+	if git show ":$file" 2>/dev/null | grep -aqE \
+		'ghp_[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}|ghu_[a-zA-Z0-9]{20,}|github_pat_[a-zA-Z0-9_]{20,}|-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}'
+	then
+		echo "ERROR: staged file '$file' contains what looks like a credential (token / private key)." >&2
+		echo "Remove it from the commit and store the secret outside the repo." >&2
+		exit 1
+	fi
+done || exit 1
+
+exit 0

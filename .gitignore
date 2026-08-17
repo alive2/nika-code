@@ -51,4 +51,6 @@ dist
 .agents/prompts/*.local.prompt.md
 .github/prompts/*.local.prompt.md
 .agents/skills/.local/
+.agents/skills/*/.local/
 .github/skills/.local/
+.github/skills/*/.local/
