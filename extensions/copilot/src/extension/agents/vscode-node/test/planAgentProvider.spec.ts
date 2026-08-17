@@ -267,6 +267,18 @@ suite('PlanAgentProvider', () => {
 		assert.ok(!actualTools.includes('apply_patch'));
 	});
 
+	test('plan agent body instructs presenting the plan via the reviewPlan tool', async () => {
+		const provider = createProvider();
+		const agents = await provider.provideCustomAgents({}, {} as any);
+
+		assert.equal(agents.length, 1);
+		const content = await getAgentContent(agents[0]);
+
+		assert.ok(content.includes('vscode_reviewPlan'), 'Body should instruct using the reviewPlan tool');
+		assert.ok(content.includes('canProvideFeedback'), 'Body should pass canProvideFeedback to the tool');
+		assert.ok(content.includes('Implement Plan'), 'Body should suggest an Implement Plan action');
+	});
+
 	test('has correct label property', () => {
 		const provider = createProvider();
 		assert.ok(provider.label.includes('Plan'));

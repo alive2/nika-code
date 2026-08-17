@@ -294,6 +294,16 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 	// The tool is registered in core as a built-in but needs explicit opt-in here.
 	allowTools['task_complete'] = request.permissionLevel === 'autopilot';
 
+	// The Plan agent presents its plan through the review-plan tool so the user
+	// gets the Review / View Plan widget (with an editable plan file) instead of
+	// a plain markdown dump. The tool cannot be referenced in prompts
+	// (`canBeReferencedInPrompt: false`), so it must be enabled explicitly for
+	// Plan-mode requests.
+	const planModeName = request.modeInstructions2?.name.toLowerCase();
+	if (planModeName === 'plan') {
+		allowTools[ToolName.CoreReviewPlan] = true;
+	}
+
 	allowTools[ToolName.EditFilesPlaceholder] = false;
 	// todo@connor4312: string check here is for back-compat for 1.109 Insiders
 	if (Iterable.some(request.tools, ([t, enabled]) => (typeof t === 'string' ? t : t.name) === ContributedToolName.EditFilesPlaceholder && enabled === false)) {
