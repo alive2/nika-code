@@ -32,16 +32,21 @@ things that upstream VS Code doesn't ship by default:
   `nika/deepseek-v4-flash-responses`) and **DeepSeek V4 Pro** via the
   OpenAI-compatible Responses API, with a stateless tool-call pairing fix so
   multi-turn tool use works reliably — including in agent-host sessions.
+  Optionally, paste an **OpenRouter API key** in Nika Settings to unlock the
+  full OpenRouter model catalog in the model picker with **live catalog
+  pricing**, web-search-capable models, and free (`:free`) models.
 - **Local semantic indexing (`#codebase`)** — fully offline workspace indexing
   with on-device embeddings (BAAI `bge-small-en-v1.5` via onnxruntime), local
   vector search, an indexing scheme manager (`local` / `off` / `github-remote`),
   auto-refresh on workspace changes, and animated status-bar progress
   (`Nika Indexing X/Y`). The `semantic_search` tool is exposed to BYOK
   endpoints whenever a local index is available.
-- **DeepSeek token usage tracking** — a persistent usage ledger (per day /
-  session / workspace) with **peak & off-peak pricing** (cost math built in),
-  a live status-bar item with a **PEAK/OFF-PEAK billing-period countdown**, and
-  a full **Usage dashboard** inside Nika Settings: KPIs, an SVG tokens-per-day
+- **Token usage tracking** — a persistent usage ledger (per day /
+  session / workspace) for DeepSeek with **peak & off-peak pricing** (cost
+  math built in) and for **OpenRouter at catalog prices** (no peak/off-peak),
+  a live status-bar item with a **PEAK/OFF-PEAK billing-period countdown**
+  (DeepSeek) or an **OpenRouter per-day cost** (catalog models), and a full
+  **Usage dashboard** inside Nika Settings: KPIs, an SVG tokens-per-day
   chart, and sessions / workspaces / requests tables. See
   [docs/TOKEN-USAGE.md](docs/TOKEN-USAGE.md).
 - **Nika Settings** — a dedicated settings editor opened from the title bar

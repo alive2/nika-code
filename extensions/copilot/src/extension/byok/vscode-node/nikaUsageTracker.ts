@@ -8,7 +8,13 @@ import { CustomDataPartMimeTypes } from '../../../platform/endpoint/common/endpo
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { APIUsage, isApiUsage } from '../../../platform/networking/common/openai';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getDeepSeekTokenCost } from './nikaPricing';
+import { getDeepSeekTokenCost, getOpenRouterTokenCost, isDeepSeekPeakHour, OpenRouterModelPricing } from './nikaPricing';
+
+/**
+ * Which Nika provider produced a usage event. Legacy events (recorded before
+ * provider tracking existed) default to `'deepseek'` when loaded.
+ */
+export type NikaUsageProvider = 'deepseek' | 'gemini' | 'ollama' | 'openrouter';
 
 /**
  * A single recorded DeepSeek request. Persisted in extension `globalState` so
@@ -35,10 +41,14 @@ export interface NikaUsageEvent {
 	readonly cachedTokens: number;
 	/** Reasoning tokens included in the completion total. */
 	readonly reasoningTokens: number;
+	/** Provider that served the request (`deepseek` for legacy events). */
+	readonly provider: NikaUsageProvider;
 	/** True when the request landed in a DeepSeek peak billing window. */
 	readonly peak: boolean;
 	/** USD cost (already off-peak adjusted); 0 when not computable. */
 	readonly cost: number;
+	/** OpenRouter catalog pricing snapshot at request time (OpenRouter events only). */
+	readonly pricing?: OpenRouterModelPricing;
 	/** True when the request failed before producing a usage report. */
 	readonly error?: boolean;
 }
@@ -55,17 +65,11 @@ export interface NikaUsageRecordOptions {
 	readonly totalTokens: number;
 	readonly cachedTokens: number;
 	readonly reasoningTokens: number;
+	/** Provider that served the request; defaults to `deepseek`. */
+	readonly provider?: NikaUsageProvider;
+	/** OpenRouter catalog pricing snapshot; drives cost for OpenRouter events. */
+	readonly pricing?: OpenRouterModelPricing;
 	readonly error?: boolean;
-}
-
-export interface NikaDailySummary {
-	/** UTC date as `YYYY-MM-DD`. */
-	date: string;
-	requests: number;
-	promptTokens: number;
-	completionTokens: number;
-	totalTokens: number;
-	cost: number;
 }
 
 export interface NikaSessionSummary {
@@ -236,11 +240,25 @@ export class NikaUsageTracker extends Disposable {
 		}
 		const t = Date.now();
 		const sessionId = this._resolveSessionId(options.sessionId, options.workspace, options.initiator, t);
-		const costBreakdown = getDeepSeekTokenCost(options.model, {
-			inputTokens: options.promptTokens,
-			outputTokens: options.completionTokens,
-			cachedTokens: options.cachedTokens,
-		}, new Date(t));
+		const provider = options.provider ?? 'deepseek';
+		const peak = provider === 'deepseek' ? isDeepSeekPeakHour(new Date(t)) : false;
+		const cost = provider === 'openrouter'
+			// OpenRouter has no peak/off-peak billing; the catalog price snapshot
+			// applies at all hours.
+			? options.pricing
+				? getOpenRouterTokenCost(options.pricing, {
+					cachedTokens: options.cachedTokens,
+					cacheMissTokens: Math.max(0, options.promptTokens - options.cachedTokens),
+					outputTokens: options.completionTokens,
+				})
+				: 0
+			: provider === 'deepseek'
+				? getDeepSeekTokenCost(options.model, {
+					inputTokens: options.promptTokens,
+					outputTokens: options.completionTokens,
+					cachedTokens: options.cachedTokens,
+				}, new Date(t))?.cost ?? 0
+				: 0;
 
 		const event: NikaUsageEvent = {
 			id: this._nextId++,
@@ -254,8 +272,10 @@ export class NikaUsageTracker extends Disposable {
 			totalTokens: options.totalTokens,
 			cachedTokens: options.cachedTokens,
 			reasoningTokens: options.reasoningTokens,
-			peak: costBreakdown?.peak ?? false,
-			cost: costBreakdown?.cost ?? 0,
+			provider,
+			peak,
+			cost,
+			pricing: options.pricing,
 			error: options.error,
 		};
 
@@ -384,10 +404,12 @@ export class NikaUsageTracker extends Disposable {
 	}
 
 	private _load(): void {
+		this._events = [];
 		try {
 			const stored = this._context.globalState.get<NikaUsageEvent[]>(NikaUsageTracker.EVENTS_KEY);
 			if (Array.isArray(stored)) {
-				this._events = stored;
+				// Legacy events predate provider tracking; they were all DeepSeek.
+				this._events = stored.map(event => event.provider === undefined ? { ...event, provider: 'deepseek' as const } : event);
 			}
 			const nextId = this._context.globalState.get<number>(NikaUsageTracker.NEXT_ID_KEY);
 			if (typeof nextId === 'number' && nextId > 0) {

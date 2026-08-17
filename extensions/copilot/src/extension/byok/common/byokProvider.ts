@@ -73,6 +73,18 @@ export interface BYOKModelCapabilities {
 	supportsReasoningEffort?: string[];
 	defaultReasoningEffort?: string;
 	/**
+	 * Display pricing for the model picker / management surfaces. `label` is
+	 * free-form (`Free`, `$0.44/M in · $1.32/M out · cache $0.02/M`); the
+	 * numeric fields are USD per 1M tokens as surfaced on
+	 * `LanguageModelChatInformation.inputCost` etc.
+	 */
+	pricing?: {
+		label: string;
+		inputCost: number;
+		outputCost: number;
+		cacheCost: number;
+	};
+	/**
 	 * Override the body shape used to forward the reasoning effort to the model.
 	 * - `'chat-completions'`: top-level `reasoning_effort` (default for `/chat/completions`).
 	 * - `'responses'`: nested `reasoning.effort` (default for `/responses`).
@@ -189,6 +201,7 @@ export function byokKnownModelsToAPIInfo(providerName: string, knownModels: BYOK
 
 export function byokKnownModelToAPIInfo(providerName: string, id: string, capabilities: BYOKModelCapabilities): LanguageModelChatInformation {
 	const limits = resolveModelTokenLimits(capabilities);
+	const pricing = capabilities.pricing;
 	return {
 		id,
 		name: capabilities.name,
@@ -204,6 +217,18 @@ export function byokKnownModelToAPIInfo(providerName: string, id: string, capabi
 		tooltip: `${capabilities.name} is contributed via the ${providerName} provider.`,
 		multiplierNumeric: undefined,
 		isUserSelectable: true,
+		// The free-form `pricing` label carries the currency clarity (e.g.
+		// `$0.44/M in · $1.32/M out`); the numeric costs are USD per 1M tokens.
+		// Free models only set the label so workbench surfaces render a clean
+		// `Pricing: Free` instead of a zero-filled credits table.
+		...(pricing ? {
+			pricing: pricing.label,
+			...(pricing.label !== 'Free' ? {
+				inputCost: pricing.inputCost,
+				outputCost: pricing.outputCost,
+				cacheCost: pricing.cacheCost,
+			} : {}),
+		} : {}),
 		capabilities: {
 			toolCalling: capabilities.toolCalling,
 			imageInput: capabilities.vision,

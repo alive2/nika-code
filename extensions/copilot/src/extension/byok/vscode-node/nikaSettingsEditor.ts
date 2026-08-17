@@ -9,27 +9,38 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_SECRET, NIKA_RESPONSES_MODEL } from './nikaModels';
-import { getDeepSeekRatePeriod, isDeepSeekPeakHour } from './nikaPricing';
+import { isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_SECRET, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL } from './nikaModels';
+import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour } from './nikaPricing';
+import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { NikaUsageTracker } from './nikaUsageTracker';
 
-type NikaConnection = 'deepseek' | 'gemini' | 'ollama';
+type NikaConnection = 'deepseek' | 'gemini' | 'ollama' | 'openrouter';
 type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf' | 'agents' | 'indexing' | 'usage' | 'diagnostics';
 type ConnectionResult = { readonly ok: boolean; readonly message: string; readonly checkedAt: string };
 
 const SETTINGS = new Set([
 	'defaultModel', 'outputTokens', 'contextWindow', 'temperature', 'thinkingEffort',
-	'visionModel', 'visionVSCodeModel', 'ollamaBaseUrl',
+	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'ollamaBaseUrl',
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
 	'logLevel', 'releaseCheckEnabled', 'safetyRules.enabled', 'github.enabled', 'indexing.scheme', 'usage.enabled',
 ]);
 
-const SECRET_KEYS: Record<'deepseek' | 'gemini', string> = {
+const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter', string> = {
 	deepseek: NIKA_DEEPSEEK_SECRET,
 	gemini: NIKA_GEMINI_SECRET,
+	openrouter: NIKA_OPENROUTER_SECRET,
 };
+
+function providerDisplayName(provider: NikaConnection): string {
+	switch (provider) {
+		case 'deepseek': return 'DeepSeek';
+		case 'gemini': return 'Gemini';
+		case 'ollama': return 'Ollama';
+		case 'openrouter': return 'OpenRouter';
+	}
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -71,6 +82,7 @@ export class NikaSettingsEditor extends Disposable {
 
 	constructor(
 		private readonly _usageTracker: NikaUsageTracker,
+		private readonly _openRouterProvider: NikaOpenRouterProvider,
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 		@ILogService private readonly _logService: ILogService,
@@ -95,7 +107,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET) {
 				void this._render(this._activeSection);
 			}
 		}));
@@ -109,13 +121,14 @@ export class NikaSettingsEditor extends Disposable {
 
 		if (!this._context.globalState.get<boolean>('nika.firstRunPromptShown')) {
 			await this._context.globalState.update('nika.firstRunPromptShown', true);
-			const [deepseekKey, geminiKey] = await Promise.all([
+			const [deepseekKey, geminiKey, openRouterKey] = await Promise.all([
 				this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 				this._context.secrets.get(NIKA_GEMINI_SECRET),
+				this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 			]);
-			if (!deepseekKey && !geminiKey) {
+			if (!deepseekKey && !geminiKey && !openRouterKey) {
 				this.open('providers');
-				void vscode.window.showInformationMessage(vscode.l10n.t('Welcome to NikaCode. Nika Settings is open: add and test a DeepSeek key to start chatting. A Gemini key is optional for Gemini and vision features.'));
+				void vscode.window.showInformationMessage(vscode.l10n.t('Welcome to NikaCode. Nika Settings is open: add and test a DeepSeek key to start chatting. Gemini and OpenRouter keys are optional for more models and vision features.'));
 			} else {
 				void vscode.window.showInformationMessage(vscode.l10n.t('Nika is ready to use. Open Nika Settings at any time to manage providers, models, vision, and PDF features.'));
 			}
@@ -229,14 +242,17 @@ export class NikaSettingsEditor extends Disposable {
 
 	private async _state(): Promise<Record<string, unknown>> {
 		const config = vscode.workspace.getConfiguration('nika');
-		const [deepseekKey, geminiKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
+			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 		]);
 		const value = <T>(key: string, fallback: T): T => config.get<T>(key, fallback);
 		return {
 			deepseekConfigured: !!deepseekKey,
 			geminiConfigured: !!geminiKey,
+			openrouterConfigured: !!openRouterKey,
+			openrouterModels: openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [],
 			appVersion: vscode.version,
 			extensionVersion: String((this._context.extension.packageJSON as { version?: string }).version ?? 'unknown'),
 			connections: Object.fromEntries(this._connections),
@@ -248,6 +264,7 @@ export class NikaSettingsEditor extends Disposable {
 				thinkingEffort: value('thinkingEffort', 'high'),
 				visionModel: value('visionModel', 'gemini-2.5-flash'),
 				visionVSCodeModel: value('visionVSCodeModel', ''),
+				visionOpenRouterModel: value('visionOpenRouterModel', ''),
 				ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 				pdfMaxFileSizeMB: value('pdfMaxFileSizeMB', 100),
 				pdfMaxPages: value('pdfMaxPages', 60),
@@ -279,10 +296,56 @@ export class NikaSettingsEditor extends Disposable {
 		};
 	}
 
+	/**
+	 * Serialized OpenRouter catalog for the Models section. The webview CSP
+	 * forbids fetch calls, so the catalog travels through state. A catalog
+	 * failure (e.g. offline) degrades to an empty list rather than breaking
+	 * the whole settings page.
+	 */
+	private async _openRouterCatalogState(apiKey: string): Promise<unknown[]> {
+		try {
+			const catalog = await this._openRouterProvider.getCatalog(apiKey);
+			return [...catalog.values()].map(model => ({
+				id: model.id,
+				name: model.name,
+				contextWindow: model.contextWindow,
+				vision: model.capabilities.vision,
+				toolCalling: model.capabilities.toolCalling,
+				reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+				priceLabel: model.pricing ? formatOpenRouterPriceLabel(model.pricing) : '',
+				free: !!model.pricing?.free,
+			}));
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('OpenRouter catalog unavailable: {0}', detail));
+			return [];
+		}
+	}
+
 	private _usageState(): Record<string, unknown> {
 		const daily = this._usageTracker.getDailySummary(14);
 		const today = daily.length > 0 ? daily[daily.length - 1] : undefined;
 		const rate = getDeepSeekRatePeriod();
+		const events = this._usageTracker.events;
+		// The last successful event decides which provider the rate card
+		// describes. Legacy events default to `deepseek`.
+		const lastEvent = [...events].reverse().find(event => !event.error);
+		const lastProvider = lastEvent?.provider ?? 'deepseek';
+		// OpenRouter used models with their pricing snapshots, most-used first.
+		const openRouterByModel = new Map<string, { model: string; requests: number; totalTokens: number; cost: number; priceLabel: string }>();
+		for (const event of events) {
+			if (event.provider !== 'openrouter' || !event.pricing) {
+				continue;
+			}
+			let summary = openRouterByModel.get(event.model);
+			if (!summary) {
+				summary = { model: event.model, requests: 0, totalTokens: 0, cost: 0, priceLabel: formatOpenRouterPriceLabel(event.pricing) };
+				openRouterByModel.set(event.model, summary);
+			}
+			summary.requests += 1;
+			summary.totalTokens += event.totalTokens;
+			summary.cost += event.cost;
+		}
 		return {
 			enabled: this._usageTracker.enabled,
 			peak: isDeepSeekPeakHour(),
@@ -296,6 +359,8 @@ export class NikaSettingsEditor extends Disposable {
 			todayCost: today?.cost ?? 0,
 			totalTokens: daily.reduce((sum, day) => sum + day.totalTokens, 0),
 			totalCost: daily.reduce((sum, day) => sum + day.cost, 0),
+			lastProvider,
+			openRouterModels: [...openRouterByModel.values()].sort((a, b) => b.totalTokens - a.totalTokens),
 		};
 	}
 
@@ -342,20 +407,28 @@ export class NikaSettingsEditor extends Disposable {
 					}
 					break;
 				case 'saveSecret':
-					if ((message.provider === 'deepseek' || message.provider === 'gemini') && typeof message.value === 'string') {
+					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter') && typeof message.value === 'string') {
 						await this._saveSecret(message.provider, message.value);
 					}
 					break;
 				case 'removeSecret':
-					if (message.provider === 'deepseek' || message.provider === 'gemini') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter') {
 						await this._context.secrets.delete(SECRET_KEYS[message.provider]);
 						this._connections.delete(message.provider);
-						void vscode.window.showInformationMessage(vscode.l10n.t('{0} key removed.', message.provider === 'deepseek' ? 'DeepSeek' : 'Gemini'));
+						void vscode.window.showInformationMessage(vscode.l10n.t('{0} key removed.', providerDisplayName(message.provider)));
 					}
 					break;
 				case 'testConnection':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter') {
 						await this.testConnection(message.provider);
+					}
+					break;
+				case 'setOpenRouterDefault':
+					if (typeof message.model === 'string' && message.model.includes('/')) {
+						const qualified = `nika/${nikaOpenRouterModelId(message.model)}`;
+						await vscode.workspace.getConfiguration('nika').update('defaultModel', qualified, vscode.ConfigurationTarget.Global);
+						await vscode.workspace.getConfiguration('chat').update('defaultModel', qualified, vscode.ConfigurationTarget.Global);
+						void vscode.window.showInformationMessage(vscode.l10n.t('OpenRouter model {0} set as the default chat model.', message.model));
 					}
 					break;
 				case 'recommendedAgents':
@@ -459,14 +532,14 @@ export class NikaSettingsEditor extends Disposable {
 		await this._indexingSchemeManager.clear();
 	}
 
-	private async _saveSecret(provider: 'deepseek' | 'gemini', value: string): Promise<void> {
+	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter', value: string): Promise<void> {
 		const trimmed = value.trim();
 		if (trimmed.length < 8) {
 			throw new Error(vscode.l10n.t('Enter a valid API key before saving.'));
 		}
 		await this._context.secrets.store(SECRET_KEYS[provider], trimmed);
 		this._connections.delete(provider);
-		void vscode.window.showInformationMessage(vscode.l10n.t('{0} key saved securely.', provider === 'deepseek' ? 'DeepSeek' : 'Gemini'));
+		void vscode.window.showInformationMessage(vscode.l10n.t('{0} key saved securely.', providerDisplayName(provider)));
 	}
 
 	async testConnection(provider: NikaConnection): Promise<boolean> {
@@ -481,6 +554,10 @@ export class NikaSettingsEditor extends Disposable {
 				const key = await this._context.secrets.get(NIKA_GEMINI_SECRET);
 				if (!key) { throw new Error(vscode.l10n.t('No Gemini key is configured.')); }
 				response = await this._fetcherService.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { method: 'GET', headers: { 'x-goog-api-key': key }, callSite: 'nika-gemini-test' });
+			} else if (provider === 'openrouter') {
+				const key = await this._context.secrets.get(NIKA_OPENROUTER_SECRET);
+				if (!key) { throw new Error(vscode.l10n.t('No OpenRouter key is configured.')); }
+				response = await this._fetcherService.fetch('https://openrouter.ai/api/v1/models', { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-openrouter-test' });
 			} else {
 				const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 				response = await this._fetcherService.fetch(`${url}/api/version`, { method: 'GET', callSite: 'nika-ollama-test' });
@@ -495,8 +572,8 @@ export class NikaSettingsEditor extends Disposable {
 		this._connections.set(provider, result);
 		this.log(result.ok ? 'INFO' : 'ERROR', `${provider}: ${result.message}`);
 		void vscode.window.showInformationMessage(result.ok
-			? vscode.l10n.t('{0} connection successful.', provider === 'ollama' ? 'Ollama' : provider === 'gemini' ? 'Gemini' : 'DeepSeek')
-			: vscode.l10n.t('{0} connection failed: {1}', provider === 'ollama' ? 'Ollama' : provider === 'gemini' ? 'Gemini' : 'DeepSeek', result.message));
+			? vscode.l10n.t('{0} connection successful.', providerDisplayName(provider))
+			: vscode.l10n.t('{0} connection failed: {1}', providerDisplayName(provider), result.message));
 		await this._render();
 		return result.ok;
 	}
@@ -598,6 +675,8 @@ export class NikaSettingsEditor extends Disposable {
 			extensionVersion: state.extensionVersion,
 			deepseekConfigured: state.deepseekConfigured,
 			geminiConfigured: state.geminiConfigured,
+			openrouterConfigured: state.openrouterConfigured,
+			openrouterModelCount: (state.openrouterModels as unknown[]).length,
 			connections: state.connections,
 			settings: state.settings,
 		};
@@ -638,20 +717,22 @@ input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input
 </style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>NikaCode</div><nav>
 ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['indexing', vscode.l10n.t('Indexing')], ['usage', vscode.l10n.t('Usage')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
 </nav></aside><main>
-<section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, vision, and PDF support for NikaCode.')}</p>
-<div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
-<div class="card"><div class="row"><label><strong>${vscode.l10n.t('DeepSeek')}</strong><span class="hint">${vscode.l10n.t('Flash, Pro, and experimental Responses')}</span></label><span data-provider-status="deepseek"></span></div><div class="row"><label><strong>${vscode.l10n.t('Gemini')}</strong><span class="hint">${vscode.l10n.t('Flash and Flash Lite')}</span></label><span data-provider-status="gemini"></span></div><div class="row"><label><strong>${vscode.l10n.t('Ollama')}</strong><span class="hint">${vscode.l10n.t('Gemma 4 31B at the configured host')}</span></label><span data-provider-status="ollama"></span></div></div>
+<section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, OpenRouter, vision, and PDF support for NikaCode.')}</p>
+<div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li><li><strong>${vscode.l10n.t('Optionally add your OpenRouter API key')}</strong> — ${vscode.l10n.t('Search the full OpenRouter catalog in the model picker with live pricing.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
+<div class="card"><div class="row"><label><strong>${vscode.l10n.t('DeepSeek')}</strong><span class="hint">${vscode.l10n.t('Flash, Pro, and experimental Responses')}</span></label><span data-provider-status="deepseek"></span></div><div class="row"><label><strong>${vscode.l10n.t('Gemini')}</strong><span class="hint">${vscode.l10n.t('Flash and Flash Lite')}</span></label><span data-provider-status="gemini"></span></div><div class="row"><label><strong>${vscode.l10n.t('OpenRouter')}</strong><span class="hint">${vscode.l10n.t('The full model catalog at OpenRouter prices')}</span></label><span data-provider-status="openrouter"></span></div><div class="row"><label><strong>${vscode.l10n.t('Ollama')}</strong><span class="hint">${vscode.l10n.t('Gemma 4 31B at the configured host')}</span></label><span data-provider-status="ollama"></span></div></div>
 <div class="card"><div class="row"><label><strong>${vscode.l10n.t('NikaCode version')}</strong></label><span id="app-version"></span></div><div class="row"><label><strong>${vscode.l10n.t('Bundled Copilot version')}</strong></label><span id="extension-version"></span></div></div>
 <div class="card"><h2>${vscode.l10n.t('Safety')}</h2><p class="hint">${vscode.l10n.t('Controls the guardrails added to prompts sent to Nika models.')}</p>${this._checkboxRow('safetyRules.enabled', vscode.l10n.t('Enable safety rules'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When on, prompts include Microsoft content policies, copyright, and harmful-content restrictions. Turn off to omit them — you are responsible for what the models produce.')}</span></label></div></div>
 <div class="card"><h2>${vscode.l10n.t('GitHub')}</h2><p class="hint">${vscode.l10n.t('NikaCode runs fully on your own models without a GitHub account. Turn GitHub on to restore Copilot integration.')}</p>${this._checkboxRow('github.enabled', vscode.l10n.t('Enable GitHub Copilot integration'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When off (default), no GitHub sign-in is required anywhere: chat, agent mode, inline chat, and the Agents window all use your Nika models. When on, GitHub sign-in prompts, Copilot utility models, and the GitHub MCP server are restored.')}</span></label></div></div></section>
-<section id="providers"><h1>${vscode.l10n.t('Set up Nika')}</h1><p class="lead">${vscode.l10n.t('Start with DeepSeek: paste the key, select Save, then select Test. Gemini is optional and enables native Gemini chat plus vision features. API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
-${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
+<section id="providers"><h1>${vscode.l10n.t('Set up Nika')}</h1><p class="lead">${vscode.l10n.t('Start with DeepSeek: paste the key, select Save, then select Test. Gemini and OpenRouter are optional: Gemini enables native chat plus vision features, and OpenRouter unlocks the full model catalog with catalog pricing. API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
+${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._secretRow('openrouter', vscode.l10n.t('3. OpenRouter API key (optional)'), vscode.l10n.t('Adds the full OpenRouter catalog to the model picker with live pricing, web search, and free models.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
 </div></section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
 ${this._selectRow('defaultModel', vscode.l10n.t('Default model for new chats'), [['nika/deepseek-v4-flash', 'DeepSeek V4 Flash'], ['nika/deepseek-v4-pro', 'DeepSeek V4 Pro'], ['nika/deepseek-v4-flash-responses', 'DeepSeek V4 Flash (Responses)'], ['nika/deepseek-v4-pro-responses', 'DeepSeek V4 Pro (Responses)'], ['nika/gemini-2.5-flash', 'Gemini 2.5 Flash'], ['nika/gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite'], ['nika/gemma4:31b', 'Gemma 4 31B']])}
-${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._selectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), [['none', vscode.l10n.t('None')], ['low', vscode.l10n.t('Low')], ['high', vscode.l10n.t('High')], ['max', vscode.l10n.t('Max')]])}</div></section>
+${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._selectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), [['none', vscode.l10n.t('None')], ['low', vscode.l10n.t('Low')], ['high', vscode.l10n.t('High')], ['max', vscode.l10n.t('Max')]])}</div>
+${(state.openrouterModels as unknown[]).length > 0 ? `<div class="card"><h2>${vscode.l10n.t('OpenRouter catalog')}</h2><p class="hint">${vscode.l10n.t('Search the full catalog and pick a default. The chat model picker always shows the complete list with live prices.')}</p><div class="controls"><input type="text" data-openrouter-filter placeholder="${vscode.l10n.t('Filter by model id or name…')}"></div><div data-openrouter-catalog></div></div>` : ''}</section>
 <section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only DeepSeek models. Provider credentials are managed on the Providers page.')}</p><div class="card">
-${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite'], ['gemma4:31b', 'Gemma 4 31B (Ollama)'], ['vscode', vscode.l10n.t('Another VS Code vision model')]])}${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}
+${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite'], ['gemma4:31b', 'Gemma 4 31B (Ollama)'], ['openrouter', 'OpenRouter'], ['vscode', vscode.l10n.t('Another VS Code vision model')]])}${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}
+<div class="row"><label for="visionOpenRouterModel"><strong>${vscode.l10n.t('OpenRouter vision model')}</strong><span class="hint">${vscode.l10n.t('A vision-capable OpenRouter model id, e.g. google/gemini-2.5-flash.')}</span></label><input id="visionOpenRouterModel" data-setting="visionOpenRouterModel" type="text" list="openrouter-vision-models"></div><datalist id="openrouter-vision-models"></datalist>
 </div></section>
 <section id="pdf"><h1>${vscode.l10n.t('PDF')}</h1><p class="lead">${vscode.l10n.t('PDF limits apply only to PDF reads. Page ranges can be requested in English or Hebrew.')}</p><div class="card">${this._numberRow('pdfMaxFileSizeMB', vscode.l10n.t('Maximum PDF size (MB)'), '1', '1024', '1')}${this._numberRow('pdfMaxPages', vscode.l10n.t('Pages without an explicit range'), '1', '1000', '1')}${this._checkboxRow('pdfPageNotice', vscode.l10n.t('Show truncation notice'))}${this._checkboxRow('pdfSparseFallback', vscode.l10n.t('Use Gemini for sparse or scanned PDFs'))}${this._numberRow('pdfSparseThreshold', vscode.l10n.t('Sparse-document character threshold'), '1', '100000', '100')}</div></section>
 <section id="agents"><h1>${vscode.l10n.t('Agents')}</h1><p class="lead">${vscode.l10n.t('Assign a model and thinking effort to each built-in role. The recommended profile uses DeepSeek V4 Flash Responses for every role.')}</p><div class="card">${(['plan', 'explore', 'utility', 'utilitySmall', 'inlineChat'] as const).map(id => this._agentRow(id, ({ plan: vscode.l10n.t('Plan'), explore: vscode.l10n.t('Explore'), utility: vscode.l10n.t('Utility'), utilitySmall: vscode.l10n.t('Utility Small'), inlineChat: vscode.l10n.t('Inline Chat') } as Record<string, string>)[id])).join('')}</div><div class="actions"><button class="action" data-action="recommendedAgents">${vscode.l10n.t('Apply recommended mappings')}</button></div></section>
@@ -659,9 +740,10 @@ ${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['
 ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', vscode.l10n.t('Off (ripgrep only)')], ['github-remote', vscode.l10n.t('GitHub remote')], ['local', vscode.l10n.t('Local (ONNX)')], ['cloud', vscode.l10n.t('Cloud')]])}
 <div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong><span class="hint">${vscode.l10n.t('Apply the scheme to every workspace or only this one.')}</span></label><div class="controls wrap"><button class="action secondary" data-action="setIndexingWorkspace">${vscode.l10n.t('Use for this workspace')}</button><button class="action secondary" data-action="clearIndexingWorkspace">${vscode.l10n.t('Clear workspace override')}</button></div></div>
 </div><div class="card"><h2>${vscode.l10n.t('Status')}</h2><div class="row"><label><strong>${vscode.l10n.t('State')}</strong></label><span data-indexing-status></span></div><div class="row"><label><strong>${vscode.l10n.t('Progress')}</strong></label><span data-indexing-progress></span></div><div class="row"><label><strong>${vscode.l10n.t('Activity')}</strong></label><span data-indexing-message></span></div><div class="row"><label><strong>${vscode.l10n.t('Last error')}</strong></label><span data-indexing-error></span></div><div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong></label><span data-indexing-scope></span></div><div class="actions"><button class="action" data-action="rebuildIndex">${vscode.l10n.t('Build / Rebuild index')}</button><button class="action danger" data-action="clearIndex">${vscode.l10n.t('Clear index')}</button><button class="action secondary" data-action="clearModelCache">${vscode.l10n.t('Clear model cache')}</button></div></div></section>
-<section id="usage"><h1>${vscode.l10n.t('Usage')}</h1><p class="lead">${vscode.l10n.t('DeepSeek token usage, cost, and rate periods on this machine. Exact token counts come from the DeepSeek API; costs use the current peak / off-peak pricing.')}</p>
-<div class="card">${this._checkboxRow('usage.enabled', vscode.l10n.t('Track token usage'))}<div class="row"><label><strong>${vscode.l10n.t('Current rate period')}</strong><span class="hint">${vscode.l10n.t('Peak hours {0}; all other hours are off-peak at half price.', '01:00–04:00 & 06:00–10:00 UTC')}</span></label><span id="usage-peak-badge"></span></div><div class="row"><label><strong>${vscode.l10n.t('Next rate change')}</strong><span class="hint">${vscode.l10n.t('Counts down live until the billing rate flips.')}</span></label><span id="usage-rate-countdown"></span></div></div>
+<section id="usage"><h1>${vscode.l10n.t('Usage')}</h1><p class="lead">${vscode.l10n.t('Token usage and cost on this machine. DeepSeek requests use the current peak / off-peak pricing; OpenRouter requests use the OpenRouter catalog price — there is no peak / off-peak split.')}</p>
+<div class="card">${this._checkboxRow('usage.enabled', vscode.l10n.t('Track token usage'))}<div class="row"><label><strong>${vscode.l10n.t('Rate period')}</strong><span class="hint">${vscode.l10n.t('DeepSeek bills peak hours {0} and off-peak at half price. OpenRouter and other providers bill at their own catalog rates at all hours.', '01:00–04:00 & 06:00–10:00 UTC')}</span></label><span id="usage-peak-badge"></span></div><div class="row"><label><strong>${vscode.l10n.t('Next rate change')}</strong><span class="hint">${vscode.l10n.t('Counts down live until the DeepSeek billing rate flips.')}</span></label><span id="usage-rate-countdown"></span></div></div>
 <div class="card"><div class="kpi"><div><div class="k">${vscode.l10n.t('Today')}</div><div class="v" id="usage-today-tokens"></div></div><div><div class="k">${vscode.l10n.t('Today cost')}</div><div class="v" id="usage-today-cost"></div></div><div><div class="k">${vscode.l10n.t('Last 14 days')}</div><div class="v" id="usage-total-tokens"></div></div><div><div class="k">${vscode.l10n.t('Cost')}</div><div class="v" id="usage-total-cost"></div></div></div></div>
+<div class="card"><h2>${vscode.l10n.t('OpenRouter pricing')}</h2><p class="hint">${vscode.l10n.t('OpenRouter bills at catalog rates — no peak or off-peak windows. Per-1M-token prices come from the catalog at request time.')}</p><div data-usage-openrouter></div></div>
 <div class="card"><h2>${vscode.l10n.t('Tokens per day')}</h2><div class="chart" data-usage-chart></div></div>
 <div class="card"><h2>${vscode.l10n.t('Sessions')}</h2><div data-usage-sessions></div></div>
 <div class="card"><h2>${vscode.l10n.t('Workspaces')}</h2><div data-usage-workspaces></div></div>
@@ -670,7 +752,7 @@ ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', 
 <section id="diagnostics"><h1>${vscode.l10n.t('Diagnostics')}</h1><p class="lead">${vscode.l10n.t('Nika writes to a native output channel and never creates an automatic log file.')}</p><div class="card">${this._selectRow('logLevel', vscode.l10n.t('Log level'), ['DEBUG', 'INFO', 'WARN', 'ERROR'].map(v => [v, v]))}${this._checkboxRow('releaseCheckEnabled', vscode.l10n.t('Check for releases on startup'))}</div><div class="actions"><button class="action" data-action="openLogs">${vscode.l10n.t('Open Nika Output')}</button><button class="action secondary" data-action="exportDiagnostics">${vscode.l10n.t('Export Diagnostics')}</button><button class="action secondary" data-action="checkUpdates">${vscode.l10n.t('Check for Updates')}</button></div></section>
 </main></div><script nonce="${token}">const vscode=acquireVsCodeApi();const state=${encoded};
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
-function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('ollama',true);
+function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('openrouter',state.openrouterConfigured);status('ollama',true);
 function renderIndexing(){const i=state.indexing||{};const labels={idle:'Idle',building:'Building',indexing:'Indexing',synced:'Synced',error:'Error'};const s=i.status||'idle';document.querySelectorAll('[data-indexing-status]').forEach(el=>el.textContent=labels[s]||s);document.querySelectorAll('[data-indexing-progress]').forEach(el=>{el.textContent=(typeof i.indexedFileCount==='number'&&typeof i.totalFileCount==='number')?i.indexedFileCount+' / '+i.totalFileCount:'';});document.querySelectorAll('[data-indexing-error]').forEach(el=>{el.textContent=i.lastError||'';});document.querySelectorAll('[data-indexing-message]').forEach(el=>{el.textContent=i.message||'';});document.querySelectorAll('[data-indexing-scope]').forEach(el=>{el.textContent=i.workspaceOverride?'Workspace':'Default';});}renderIndexing();
 document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);post({type:'saveSetting',key,value});});});
 function activateSection(id){const button=document.querySelector('nav button[data-section="'+id+'"]');const section=document.getElementById(id);if(!button||!section)return;document.querySelectorAll('nav button,section').forEach(el=>el.classList.remove('active'));button.classList.add('active');section.classList.add('active');activeSection=id;const saved=vscode.getState()||{};vscode.setState({...saved,activeSection:id});}
@@ -683,17 +765,22 @@ document.querySelectorAll('[data-secret-remove]').forEach(button=>button.addEven
 function fmtTok(n){if(n>=1e6)return (n/1e6).toFixed(1).replace(/\.0$/,'')+'M';if(n>=1e3)return (n/1e3).toFixed(1).replace(/\.0$/,'')+'k';return String(n||0);}
 function fmtCost(c){if(!c||c<=0)return '$0';if(c<0.01)return '$'+c.toFixed(4).replace(/0+$/,'');if(c<100)return '$'+c.toFixed(2);return '$'+c.toFixed(0);}
 function fmtDuration(ms){ms=Math.max(0,ms);const s=Math.floor(ms/1000);const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);if(h>0)return m>0?h+'h '+m+'m':h+'h';if(m>0)return m+'m';return '<1m';}
-function renderRateCountdown(){const r=(state.usage&&state.usage.rate)||{};const el=document.getElementById('usage-rate-countdown');if(!el||typeof r.endsAt!=='number'){if(el)el.textContent='—';return;}const left=r.endsAt-Date.now();el.textContent=(r.nextIsPeak?'PEAK in ':'OFF-PEAK in ')+fmtDuration(left);}
+function renderRateCountdown(){const el=document.getElementById('usage-rate-countdown');if(!el)return;const u=state.usage||{};if((u.lastProvider||'deepseek')!=='deepseek'){el.textContent='—';return;}const r=u.rate||{};if(typeof r.endsAt!=='number'){el.textContent='—';return;}const left=r.endsAt-Date.now();el.textContent=(r.nextIsPeak?'PEAK in ':'OFF-PEAK in ')+fmtDuration(left);}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function renderUsage(){
   const u=state.usage||{};const daily=u.daily||[];
   const peakEl=document.getElementById('usage-peak-badge');
-  if(peakEl){const peak=u.peak;peakEl.innerHTML='<span class="peak-badge'+(peak?' peak':'')+'"><span class="dot"></span>'+(peak?'PEAK':'OFF-PEAK')+'</span>';}
+  const lastProvider=u.lastProvider||'deepseek';
+  if(peakEl){
+    if(lastProvider==='deepseek'){const peak=u.peak;peakEl.innerHTML='<span class="peak-badge'+(peak?' peak':'')+'"><span class="dot"></span>'+(peak?'PEAK':'OFF-PEAK')+'</span>';}
+    else{const label=lastProvider==='openrouter'?'OpenRouter':lastProvider==='gemini'?'Gemini':'Ollama';peakEl.innerHTML='<span class="peak-badge"><span class="dot"></span>'+label+'</span>';}
+  }
   renderRateCountdown();
   document.getElementById('usage-today-tokens').textContent=fmtTok(u.todayTokens);
   document.getElementById('usage-today-cost').textContent=fmtCost(u.todayCost);
   document.getElementById('usage-total-tokens').textContent=fmtTok(u.totalTokens);
   document.getElementById('usage-total-cost').textContent=fmtCost(u.totalCost);
+  document.querySelectorAll('[data-usage-openrouter]').forEach(el=>{const rows=(u.openRouterModels||[]).map(m=>'<tr><td>'+esc(m.model)+'</td><td>'+esc(m.priceLabel)+'</td><td class="num">'+m.requests+'</td><td class="num">'+fmtTok(m.totalTokens)+'</td><td class="num">'+fmtCost(m.cost)+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Model</th><th>Catalog price</th><th>Req</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No OpenRouter usage yet.</div>';});
   const now=new Date();const days=[];
   for(let i=13;i>=0;i--){const d=new Date(now.getTime()-i*86400000);const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');const rec=daily.find(x=>x.date===key);days.push({key,label:key.slice(5),total:rec?rec.totalTokens:0,cost:rec?rec.cost:0});}
   const max=Math.max(1,...days.map(d=>d.total));const W=640,H=180,P=26,bw=W/days.length,inner=H-P*2;
@@ -703,9 +790,23 @@ function renderUsage(){
   document.querySelectorAll('[data-usage-chart]').forEach(el=>{el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Nika tokens per day (last 14 days)">'+bars+labels+'</svg>';});
   document.querySelectorAll('[data-usage-sessions]').forEach(el=>{const rows=(u.sessions||[]).map(s=>'<tr><td>'+(s.title?esc(s.title):'<span class="empty">Untitled session</span>')+'</td><td>'+(s.workspace?esc(s.workspace):'—')+'</td><td class="num">'+s.requests+'</td><td class="num">'+fmtTok(s.totalTokens)+'</td><td class="num">'+fmtCost(s.cost)+'</td><td class="num">'+new Date(s.end).toLocaleDateString()+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Session</th><th>Workspace</th><th>Req</th><th>Tokens</th><th>Cost</th><th>Last</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No sessions recorded yet.</div>';});
   document.querySelectorAll('[data-usage-workspaces]').forEach(el=>{const rows=(u.workspaces||[]).map(w=>'<tr><td>'+esc(w.workspace)+'</td><td class="num">'+w.sessions+'</td><td class="num">'+w.requests+'</td><td class="num">'+fmtTok(w.totalTokens)+'</td><td class="num">'+fmtCost(w.cost)+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Workspace</th><th>Sessions</th><th>Requests</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No workspace usage yet.</div>';});
-  document.querySelectorAll('[data-usage-messages]').forEach(el=>{const rows=(u.messages||[]).map(m=>'<tr><td>'+new Date(m.t).toLocaleString()+'</td><td>'+esc(m.model)+'</td><td class="num">'+fmtTok(m.totalTokens)+'</td><td class="num">'+fmtCost(m.cost)+'</td><td>'+(m.peak?'<span class="pill">PEAK</span>':'<span class="pill">off</span>')+'</td><td>'+(m.error?'<span style="color:var(--vscode-errorForeground)">error</span>':'')+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Time</th><th>Model</th><th>Tokens</th><th>Cost</th><th>Rate</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No requests yet.</div>';});
+  document.querySelectorAll('[data-usage-messages]').forEach(el=>{const rows=(u.messages||[]).map(m=>'<tr><td>'+new Date(m.t).toLocaleString()+'</td><td>'+esc(m.model)+'</td><td class="num">'+fmtTok(m.totalTokens)+'</td><td class="num">'+fmtCost(m.cost)+'</td><td>'+(m.provider==='openrouter'?'<span class="pill">catalog</span>':(m.peak?'<span class="pill">PEAK</span>':'<span class="pill">off</span>'))+'</td><td>'+(m.error?'<span style="color:var(--vscode-errorForeground)">error</span>':'')+'</td></tr>').join('');el.innerHTML=rows?'<table class="usage"><thead><tr><th>Time</th><th>Model</th><th>Tokens</th><th>Cost</th><th>Rate</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">No requests yet.</div>';});
 }
 renderUsage();
+const openRouterFilter=document.querySelector('[data-openrouter-filter]');
+function renderOpenRouterCatalog(){
+  const hosts=document.querySelectorAll('[data-openrouter-catalog]');if(!hosts.length)return;
+  const q=((openRouterFilter&&openRouterFilter.value)||'').toLowerCase();
+  const list=(state.openrouterModels||[]).filter(m=>!q||m.id.toLowerCase().includes(q)||m.name.toLowerCase().includes(q));
+  const shown=list.slice(0,100);
+  const chips=m=>{const c=[];if(m.free)c.push('<span class="pill">free</span>');if(m.vision)c.push('<span class="pill">vision</span>');if(m.toolCalling)c.push('<span class="pill">tools</span>');if(m.reasoning)c.push('<span class="pill">reasoning</span>');return c.join(' ');};
+  const rows=shown.map(m=>'<tr><td><button class="action secondary" data-openrouter-default="'+esc(m.id)+'">'+esc(m.id)+'</button></td><td>'+esc(m.name)+'</td><td class="num">'+fmtTok(m.contextWindow)+'</td><td>'+esc(m.priceLabel||'—')+'</td><td>'+chips(m)+'</td></tr>').join('');
+  hosts.forEach(el=>{el.innerHTML=rows?'<table class="usage"><thead><tr><th>Model id</th><th>Name</th><th>Context</th><th>Price (per 1M)</th><th>Caps</th></tr></thead><tbody>'+rows+'</tbody></table>'+(list.length>100?'<p class="hint">Showing the first 100 matches — refine the filter.</p>':''):'<div class="empty">No models match the filter.</div>';});
+}
+if(openRouterFilter){openRouterFilter.addEventListener('input',renderOpenRouterCatalog);renderOpenRouterCatalog();}
+document.addEventListener('click',e=>{const btn=e.target.closest('[data-openrouter-default]');if(btn){post({type:'setOpenRouterDefault',model:btn.dataset.openrouterDefault});}});
+const visionOptions=(state.openrouterModels||[]).filter(m=>m.vision).map(m=>'<option value="'+esc(m.id)+'">').join('');
+document.querySelectorAll('#openrouter-vision-models').forEach(el=>{el.innerHTML=visionOptions;});
 if(window.__rateTimer)clearInterval(window.__rateTimer);
 window.__rateTimer=setInterval(renderRateCountdown,1000);
 </script></body></html>`;
@@ -727,7 +828,7 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 		return `<div class="row"><label for="${key}"><strong>${label}</strong></label><input id="${key}" data-setting="${key}" type="checkbox"></div>`;
 	}
 
-	private _secretRow(provider: 'deepseek' | 'gemini', label: string, hint: string): string {
+	private _secretRow(provider: 'deepseek' | 'gemini' | 'openrouter', label: string, hint: string): string {
 		return `<div class="row"><label><strong>${label}</strong><span class="hint">${hint} ${vscode.l10n.t('Stored securely; the saved value is never read back into this page.')}</span><span data-provider-status="${provider}"></span></label><div class="controls"><input type="password" autocomplete="off" data-secret="${provider}" placeholder="${vscode.l10n.t('Paste your API key')}"><button data-secret-save="${provider}">${vscode.l10n.t('Save')}</button><button class="secondary" data-secret-test="${provider}">${vscode.l10n.t('Test')}</button><button class="danger" data-secret-remove="${provider}">${vscode.l10n.t('Remove')}</button></div></div>`;
 	}
 

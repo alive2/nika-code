@@ -6,17 +6,17 @@
 import * as vscode from 'vscode';
 import { ILogService } from '../../../platform/log/common/logService';
 import { Disposable, toDisposable } from '../../../util/vs/base/common/lifecycle';
-import { formatCost, formatDuration, formatTokenCount, getDeepSeekRatePeriod } from './nikaPricing';
+import { formatCost, formatDuration, formatOpenRouterPriceLabel, formatTokenCount, getDeepSeekRatePeriod } from './nikaPricing';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaUsageTracker } from './nikaUsageTracker';
 
 const usageStatusBarItemId = 'nika.usageStatus';
 
 /**
- * Status bar item for Nika DeepSeek token usage. While a response streams it
- * shows a live token counter; when idle it shows today's totals plus the
- * current DeepSeek rate period (PEAK / OFF-PEAK). Clicking opens Nika Settings
- * on the `usage` section.
+ * Status bar item for Nika token usage. While a response streams it shows a
+ * live token counter; when idle it shows today's totals plus a provider-aware
+ * billing label (DeepSeek PEAK / OFF-PEAK countdown, OpenRouter catalog price,
+ * or the provider name). Clicking opens Nika Settings on the `usage` section.
  */
 export class NikaUsageStatus extends Disposable {
 	/**
@@ -97,13 +97,27 @@ export class NikaUsageStatus extends Disposable {
 
 			this._statusItem.showProgress = false;
 			const totals = todayTotals(this._usageTracker);
-			const rate = getDeepSeekRatePeriod();
-			const countdown = formatDuration(rate.endsAt - Date.now());
-			const rateLabel = rate.peak
-				? `PEAK · ${countdown} left`
-				: `OFF-PEAK · ${countdown} to PEAK`;
-			this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · ${rateLabel}`);
-			this._statusItem.tooltip = vscode.l10n.t('Nika DeepSeek token usage today. Click to open the usage dashboard.');
+			// The provider of the most recent successful request decides how the
+			// idle label describes billing. Legacy events default to DeepSeek.
+			const lastEvent = [...this._usageTracker.events].reverse().find(event => !event.error);
+			const provider = lastEvent?.provider ?? 'deepseek';
+			if (provider === 'deepseek') {
+				const rate = getDeepSeekRatePeriod();
+				const countdown = formatDuration(rate.endsAt - Date.now());
+				const rateLabel = rate.peak
+					? `PEAK · ${countdown} left`
+					: `OFF-PEAK · ${countdown} to PEAK`;
+				this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · ${rateLabel}`);
+				this._statusItem.tooltip = vscode.l10n.t('Nika DeepSeek token usage today. Click to open the usage dashboard.');
+			} else if (provider === 'openrouter' && lastEvent?.pricing) {
+				const price = formatOpenRouterPriceLabel(lastEvent.pricing);
+				this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · OpenRouter ${price}`);
+				this._statusItem.tooltip = vscode.l10n.t('Nika OpenRouter token usage today at catalog prices. Click to open the usage dashboard.');
+			} else {
+				const label = provider === 'gemini' ? 'Gemini' : 'Ollama';
+				this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · ${label}`);
+				this._statusItem.tooltip = vscode.l10n.t('Nika {0} token usage today. Click to open the usage dashboard.', label);
+			}
 			this._statusItem.show();
 		} catch (error) {
 			this._logService.trace(`NikaUsageStatus: failed to update status item: ${String(error)}`);

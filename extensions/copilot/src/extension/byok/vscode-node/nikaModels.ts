@@ -11,6 +11,15 @@ export const NIKA_PROVIDER_NAME = 'Nika';
 
 export const NIKA_DEEPSEEK_SECRET = 'nika.deepseek.apiKey';
 export const NIKA_GEMINI_SECRET = 'nika.gemini.apiKey';
+export const NIKA_OPENROUTER_SECRET = 'nika.openrouter.apiKey';
+
+/**
+ * Provider-group prefix for OpenRouter catalog models contributed through the
+ * Nika provider. A model with raw catalog id `anthropic/claude-sonnet-4` is
+ * exposed to the workbench as `openrouter/anthropic/claude-sonnet-4` (and
+ * `nika/openrouter/anthropic/claude-sonnet-4` once vendor-qualified).
+ */
+export const NIKA_OPENROUTER_MODEL_PREFIX = 'openrouter/';
 
 /**
  * Master switch for GitHub Copilot integration. Off (the default) makes
@@ -94,10 +103,20 @@ export function resolveNikaTokenLimits(contextPreset: string | undefined, output
 	return { contextWindow: maxInputTokens + maxOutputTokens, maxInputTokens, maxOutputTokens };
 }
 
-export function isNikaModelId(value: string): value is NikaModelId {
+export function isNikaModelId(value: string): boolean {
 	return NIKA_DEEPSEEK_MODEL_IDS.includes(value as NikaModelId)
 		|| NIKA_GEMINI_MODEL_IDS.includes(value as NikaModelId)
-		|| value === NIKA_GEMMA_MODEL_ID;
+		|| value === NIKA_GEMMA_MODEL_ID
+		|| isNikaOpenRouterModel(value);
+}
+
+/**
+ * True for OpenRouter catalog model ids exposed through the Nika provider
+ * (`openrouter/<vendor>/<model>`). The raw catalog id follows the prefix, e.g.
+ * `openrouter/anthropic/claude-sonnet-4`.
+ */
+export function isNikaOpenRouterModel(value: string): boolean {
+	return value.startsWith(NIKA_OPENROUTER_MODEL_PREFIX);
 }
 
 export function isNikaDeepSeekModel(value: string): value is NikaModelId {

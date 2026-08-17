@@ -8,7 +8,7 @@ import { IVSCodeExtensionContext } from '../../../platform/extContext/common/ext
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
-import { NIKA_GEMINI_SECRET } from './nikaModels';
+import { NIKA_GEMINI_SECRET, NIKA_OPENROUTER_SECRET } from './nikaModels';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 
 const NIKA_VISION_REPLAY_MIME = 'application/vnd.nika.vision-replay+json';
@@ -179,7 +179,45 @@ export class NikaAttachmentProcessor {
 		if (backend === 'gemma4:31b') {
 			return this._describeWithOllama(data, prompt, token);
 		}
+		if (backend === 'openrouter') {
+			const model = config.get<string>('visionOpenRouterModel', '').trim();
+			if (!model) { throw new Error(vscode.l10n.t('Choose an OpenRouter vision model in Nika Settings.')); }
+			const key = await this._context.secrets.get(NIKA_OPENROUTER_SECRET);
+			if (!key) { throw new Error(vscode.l10n.t('Configure an OpenRouter key for the selected vision backend.')); }
+			return this._describeWithOpenRouter(data, mimeType, prompt, model, key, token);
+		}
 		return this._describeWithVSCodeModel(data, mimeType, prompt, token);
+	}
+
+	private async _describeWithOpenRouter(data: Uint8Array, mimeType: string, prompt: string, model: string, key: string, token: vscode.CancellationToken): Promise<string> {
+		const abort = this._fetcherService.makeAbortController();
+		const subscription = token.onCancellationRequested(() => abort.abort());
+		try {
+			const response = await this._fetcherService.fetch('https://openrouter.ai/api/v1/chat/completions', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+				body: JSON.stringify({
+					model,
+					max_tokens: 512,
+					messages: [{
+						role: 'user',
+						content: [
+							{ type: 'text', text: prompt },
+							{ type: 'image_url', image_url: { url: `data:${mimeType};base64,${Buffer.from(data).toString('base64')}` } },
+						],
+					}],
+				}),
+				signal: abort.signal,
+				callSite: 'nika-openrouter-vision',
+			});
+			if (!response.ok) { throw new Error(vscode.l10n.t('OpenRouter vision returned HTTP {0}.', response.status)); }
+			const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+			const text = json.choices?.[0]?.message?.content?.trim();
+			if (!text) { throw new Error(vscode.l10n.t('OpenRouter vision returned no description.')); }
+			return text;
+		} finally {
+			subscription.dispose();
+		}
 	}
 
 	private async _describeWithGemini(data: Uint8Array, mimeType: string, prompt: string, model: string, key: string, token: vscode.CancellationToken): Promise<string> {

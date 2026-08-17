@@ -187,6 +187,43 @@ describe('NikaUsageTracker', () => {
 		expect(tracker.events).toHaveLength(0);
 		expect(tracker.getDailySummary(30)).toHaveLength(0);
 	});
+
+	it('records openrouter events with a pricing snapshot and catalog cost', () => {
+		const { tracker } = createTracker();
+		tracker.record({
+			model: 'openrouter/anthropic/claude-sonnet-4',
+			sessionId: 's1',
+			provider: 'openrouter',
+			pricing: { promptPerMTok: 3, completionPerMTok: 15, cacheReadPerMTok: 0.3, requestFee: 0.005, free: false },
+			promptTokens: 500_000,
+			completionTokens: 200_000,
+			totalTokens: 700_000,
+			cachedTokens: 100_000,
+			reasoningTokens: 0,
+		});
+		const event = tracker.events[0];
+		expect(event.provider).toBe('openrouter');
+		expect(event.peak).toBe(false); // no peak/off-peak for OpenRouter
+		// 0.4M*3 + 0.1M*0.3 + 0.2M*15 + 0.005 = 4.235
+		expect(event.cost).toBeCloseTo(4.235, 6);
+		expect(event.pricing).toEqual(expect.objectContaining({ promptPerMTok: 3 }));
+	});
+
+	it('does not cost gemini or ollama events', () => {
+		const { tracker } = createTracker();
+		tracker.record({ model: 'gemini-2.5-flash', sessionId: 's1', provider: 'gemini', promptTokens: 100, completionTokens: 100, totalTokens: 200, cachedTokens: 0, reasoningTokens: 0 });
+		tracker.record({ model: 'gemma4:31b', sessionId: 's2', provider: 'ollama', promptTokens: 100, completionTokens: 100, totalTokens: 200, cachedTokens: 0, reasoningTokens: 0 });
+		expect(tracker.events[0].cost).toBe(0);
+		expect(tracker.events[1].cost).toBe(0);
+		expect(tracker.events[0].provider).toBe('gemini');
+	});
+
+	it('defaults legacy persisted events to the deepseek provider', () => {
+		const { tracker, globalState } = createTracker();
+		tracker.record({ model: 'deepseek-v4-flash', sessionId: 's1', promptTokens: 100, completionTokens: 100, totalTokens: 200, cachedTokens: 0, reasoningTokens: 0 });
+		const reloaded = new NikaUsageTracker(createContext(globalState));
+		expect(reloaded.events[0].provider).toBe('deepseek');
+	});
 });
 
 describe('TokenTrackingProgress', () => {

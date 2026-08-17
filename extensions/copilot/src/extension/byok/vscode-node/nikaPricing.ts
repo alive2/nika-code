@@ -194,3 +194,144 @@ export function formatTokenCount(tokens: number): string {
 export function isNikaDeepSeekModelId(id: NikaModelId | string): boolean {
 	return deepSeekPricingKey(id) !== undefined;
 }
+
+/**
+ * Raw OpenRouter catalog pricing as served by `GET /api/v1/models`. All fields
+ * are USD strings; token prices are per 1M tokens and `request` is a flat fee
+ * per request. Fields that a model does not charge for are omitted by the API.
+ *
+ * @see https://openrouter.ai/docs/api-reference/models
+ */
+export interface OpenRouterPricingRaw {
+	/** USD per 1M prompt (input) tokens. */
+	readonly prompt?: string;
+	/** USD per 1M completion (output) tokens. */
+	readonly completion?: string;
+	/** Flat USD fee charged per request. */
+	readonly request?: string;
+	/** USD per image (used by vision preprocessing / direct image input). */
+	readonly image?: string;
+	/** USD per web search call. */
+	readonly web_search?: string;
+	/** USD per 1M prompt tokens served from the prompt cache. */
+	readonly cache_read?: string;
+	/** USD per 1M prompt tokens written to the prompt cache. */
+	readonly cache_write?: string;
+}
+
+/**
+ * Parsed OpenRouter pricing. Unlike DeepSeek, OpenRouter has no peak/off-peak
+ * billing — the catalog price applies at all hours.
+ */
+export interface OpenRouterModelPricing {
+	/** USD per 1M prompt (input) tokens. */
+	readonly promptPerMTok: number;
+	/** USD per 1M completion (output) tokens. */
+	readonly completionPerMTok: number;
+	/** USD per 1M prompt tokens served from the prompt cache. */
+	readonly cacheReadPerMTok: number;
+	/** Flat USD fee charged per request. */
+	readonly requestFee: number;
+	/** USD per image, when the model charges per image. */
+	readonly imagePerUnit?: number;
+	/** USD per web search call, when the model supports web search. */
+	readonly webSearchPerUnit?: number;
+	/** True when every price line is zero (a `:free` catalog variant). */
+	readonly free: boolean;
+}
+
+function parsePriceField(value: unknown): number {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return Math.max(0, value);
+	}
+	if (typeof value === 'string') {
+		const parsed = Number.parseFloat(value);
+		return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+	}
+	return 0;
+}
+
+/**
+ * Parse an OpenRouter catalog `pricing` object. Returns `undefined` when the
+ * payload is not an object (catalog entries without pricing). All-zero lines
+ * are preserved and flagged via {@link OpenRouterModelPricing.free} so callers
+ * can render a `Free` label instead of `$0`.
+ */
+export function parseOpenRouterPricing(raw: unknown): OpenRouterModelPricing | undefined {
+	if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+		return undefined;
+	}
+	const record = raw as Record<string, unknown>;
+	const promptPerMTok = parsePriceField(record.prompt);
+	const completionPerMTok = parsePriceField(record.completion);
+	const cacheReadPerMTok = parsePriceField(record.cache_read);
+	const requestFee = parsePriceField(record.request);
+	const imagePerUnit = parsePriceField(record.image);
+	const webSearchPerUnit = parsePriceField(record.web_search);
+	return {
+		promptPerMTok,
+		completionPerMTok,
+		cacheReadPerMTok,
+		requestFee,
+		...(imagePerUnit > 0 ? { imagePerUnit } : {}),
+		...(webSearchPerUnit > 0 ? { webSearchPerUnit } : {}),
+		free: promptPerMTok === 0 && completionPerMTok === 0 && cacheReadPerMTok === 0 && requestFee === 0 && imagePerUnit === 0 && webSearchPerUnit === 0,
+	};
+}
+
+/**
+ * Format a USD amount, e.g. `$0.44`, `$1.32`, `$12.5`, `$0.0002`.
+ */
+export function formatUsdAmount(amount: number): string {
+	if (!Number.isFinite(amount) || amount <= 0) {
+		return '$0';
+	}
+	if (amount >= 100) {
+		return `$${amount.toFixed(0)}`;
+	}
+	if (amount >= 0.01) {
+		return `$${amount.toFixed(2).replace(/\.?0+$/, '')}`;
+	}
+	return `$${amount.toFixed(4).replace(/0+$/, '')}`;
+}
+
+/**
+ * Compact human-readable OpenRouter price label for the model picker, hover,
+ * status bar, and Usage dashboard. Free models render as `Free`; everything
+ * else as e.g. `$0.44/M in · $1.32/M out · cache $0.02/M · $0.05/req`.
+ */
+export function formatOpenRouterPriceLabel(pricing: OpenRouterModelPricing): string {
+	if (pricing.free) {
+		return 'Free';
+	}
+	const parts: string[] = [
+		`${formatUsdAmount(pricing.promptPerMTok)}/M in`,
+		`${formatUsdAmount(pricing.completionPerMTok)}/M out`,
+	];
+	if (pricing.cacheReadPerMTok > 0) {
+		parts.push(`cache ${formatUsdAmount(pricing.cacheReadPerMTok)}/M`);
+	}
+	if (pricing.requestFee > 0) {
+		parts.push(`${formatUsdAmount(pricing.requestFee)}/req`);
+	}
+	return parts.join(' · ');
+}
+
+/**
+ * Compute the USD cost of an OpenRouter request from catalog pricing. There is
+ * no peak/off-peak split: the catalog price applies at all hours. Input tokens
+ * split into cache reads and cache misses; the flat per-request fee (when the
+ * model charges one) is added once.
+ */
+export function getOpenRouterTokenCost(
+	pricing: OpenRouterModelPricing,
+	options: { cachedTokens: number; cacheMissTokens: number; outputTokens: number },
+): number {
+	const cost = (
+		(options.cacheMissTokens / 1_000_000) * pricing.promptPerMTok
+		+ (options.cachedTokens / 1_000_000) * pricing.cacheReadPerMTok
+		+ (options.outputTokens / 1_000_000) * pricing.completionPerMTok
+		+ pricing.requestFee
+	);
+	return Math.max(0, cost);
+}

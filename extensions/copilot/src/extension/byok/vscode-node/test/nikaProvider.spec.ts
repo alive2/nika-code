@@ -9,9 +9,11 @@ import { CopilotLanguageModelWrapper } from '../../../conversation/vscode-node/l
 import { DeepSeekEndpoint } from '../../node/deepSeekEndpoint';
 import { NikaAttachmentProcessor } from '../nikaAttachments';
 import { NikaIndexingStatus } from '../nikaIndexingStatus';
+import { NikaOpenRouterProvider } from '../nikaOpenRouterProvider';
 import { NikaSettingsEditor } from '../nikaSettingsEditor';
 import { NikaUsageStatus } from '../nikaUsageStatus';
 import { NikaUsageTracker } from '../nikaUsageTracker';
+import { CustomDataPartMimeTypes } from '../../../../platform/endpoint/common/endpointTypes';
 import { GeminiNativeBYOKLMProvider } from '../geminiNativeProvider';
 import { NikaLMProvider, type NikaLanguageModelChatInformation } from '../nikaProvider';
 import { OllamaLMProvider } from '../ollamaProvider';
@@ -64,10 +66,10 @@ function createByokStorage() {
 	};
 }
 
-function createContext() {
+function createContext(keys?: Record<string, string | undefined>) {
 	return {
 		secrets: {
-			get: vi.fn().mockResolvedValue('test-key'),
+			get: vi.fn((key: string) => Promise.resolve(keys ? keys[key] : 'test-key')),
 			onDidChange: vi.fn(() => ({ dispose: () => { } })),
 		},
 	} as never;
@@ -79,6 +81,7 @@ function createInstantiationService(overrides: {
 	ollamaProvider: { provideLanguageModelChatResponse: ReturnType<typeof vi.fn>; provideTokenCount: ReturnType<typeof vi.fn>; updateKnownModels: ReturnType<typeof vi.fn> };
 	usageTracker: { notifyLiveChange: ReturnType<typeof vi.fn>; trackStream: ReturnType<typeof vi.fn>; record: ReturnType<typeof vi.fn> };
 	attachmentProcessor: { process: ReturnType<typeof vi.fn> };
+	openRouterProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 }) {
 	const deepSeekEndpointUrls: string[] = [];
 	const createInstance = vi.fn((Ctor: unknown, ...args: unknown[]) => {
@@ -96,6 +99,9 @@ function createInstantiationService(overrides: {
 		}
 		if (Ctor === NikaSettingsEditor) {
 			return { dispose: () => { } };
+		}
+		if (Ctor === NikaOpenRouterProvider) {
+			return overrides.openRouterProvider;
 		}
 		if (Ctor === NikaAttachmentProcessor) {
 			return overrides.attachmentProcessor;
@@ -137,15 +143,26 @@ function createFakes() {
 	const attachmentProcessor = {
 		process: vi.fn().mockResolvedValue({ replayMarkers: [], messages: [] }),
 	};
-	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, attachmentProcessor };
+	const openRouterProvider = {
+		getCatalog: vi.fn().mockResolvedValue(new Map()),
+		createEndpoint: vi.fn(() => ({ dispose: () => { } })),
+		invalidateCache: vi.fn(),
+	};
+	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, attachmentProcessor, openRouterProvider };
 }
 
-function createProvider() {
+function createProvider(overrides?: {
+	keys?: Record<string, string | undefined>;
+	catalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[]; pricing?: { label: string; inputCost: number; outputCost: number; cacheCost: number } }; pricing?: { promptPerMTok: number; completionPerMTok: number; cacheReadPerMTok: number; requestFee: number; free: boolean } }>;
+}) {
 	const fakes = createFakes();
 	const instantiation = createInstantiationService(fakes);
+	if (overrides?.catalog) {
+		vi.mocked(fakes.openRouterProvider.getCatalog).mockResolvedValue(overrides.catalog as never);
+	}
 	const provider = new NikaLMProvider(
 		createByokStorage() as never,
-		createContext(),
+		createContext(overrides?.keys),
 		{} as never,
 		instantiation as never,
 	);
@@ -196,5 +213,95 @@ describe('NikaLMProvider', () => {
 
 		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
 			.rejects.toThrow('Unknown Nika model');
+	});
+});
+
+describe('Nika OpenRouter support', () => {
+	it('routes openrouter models through the OpenRouter endpoint with raw id', async () => {
+		const { provider, fakes } = createProvider();
+		const model = { id: 'openrouter/anthropic/claude-sonnet-4', vendor: 'openrouter' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+		expect(fakes.openRouterProvider.createEndpoint).toHaveBeenCalledWith('anthropic/claude-sonnet-4', 'test-key');
+		expect(fakes.lmWrapper.provideLanguageModelResponse).toHaveBeenCalledTimes(1);
+		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
+	});
+
+	it('rejects openrouter models when the API key is missing', async () => {
+		const { provider } = createProvider({ keys: { 'nika.openrouter.apiKey': undefined } });
+		const model = { id: 'openrouter/anthropic/claude-sonnet-4' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
+			.rejects.toThrow('Configure an OpenRouter API key in Nika Settings');
+		expect(provider.usageTracker.record).not.toHaveBeenCalled();
+	});
+
+	it('records usage with the openrouter provider and pricing snapshot', async () => {
+		const pricing = { promptPerMTok: 3, completionPerMTok: 15, cacheReadPerMTok: 0.3, requestFee: 0.005, free: false };
+		const { provider, fakes } = createProvider({
+			catalog: new Map([[
+				'anthropic/claude-sonnet-4',
+				{ id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', capabilities: { name: 'Claude Sonnet 4', toolCalling: true, vision: false, maxInputTokens: 200_000, maxOutputTokens: 64_000 }, pricing },
+			]]),
+		});
+		fakes.lmWrapper.provideLanguageModelResponse.mockImplementation(async (_endpoint, _messages, _options, _initiator, progress) => {
+			progress.report(new vscode.LanguageModelDataPart(new TextEncoder().encode(JSON.stringify({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 })), CustomDataPartMimeTypes.Usage));
+		});
+		const model = { id: 'openrouter/anthropic/claude-sonnet-4' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+		expect(fakes.openRouterProvider.getCatalog).toHaveBeenCalledWith('test-key');
+		expect(provider.usageTracker.record).toHaveBeenCalledWith(expect.objectContaining({
+			model: 'openrouter/anthropic/claude-sonnet-4',
+			provider: 'openrouter',
+			promptTokens: 10,
+			completionTokens: 5,
+			pricing,
+		}));
+	});
+
+	it('appends the OpenRouter catalog to the model list when the key is present', async () => {
+		const { provider, fakes } = createProvider({
+			keys: { 'nika.deepseek.apiKey': 'ds', 'nika.openrouter.apiKey': 'or-1', 'nika.gemini.apiKey': undefined },
+			catalog: new Map([[
+				'deepseek/deepseek-chat-v4-0324',
+				{ id: 'deepseek/deepseek-chat-v4-0324', name: 'DeepSeek Chat V4', capabilities: { name: 'DeepSeek Chat V4', toolCalling: true, vision: false, maxInputTokens: 128_000, maxOutputTokens: 8_192 } },
+			]]),
+		});
+
+		const models = await provider.provideLanguageModelChatInformation();
+
+		expect(fakes.openRouterProvider.getCatalog).toHaveBeenCalledWith('or-1');
+		const openRouterIds = models.filter(m => m.id.startsWith('openrouter/'));
+		expect(openRouterIds.length).toBe(1);
+		expect(openRouterIds[0].id).toBe('openrouter/deepseek/deepseek-chat-v4-0324');
+		expect(openRouterIds[0].name).toBe('DeepSeek Chat V4');
+		expect(openRouterIds[0].detail).toBe('Nika');
+		expect(openRouterIds[0].isBYOK).toBe(true);
+		expect(openRouterIds[0].capabilities.toolCalling).toBe(true);
+	});
+
+	it('omits the OpenRouter catalog when the key is missing', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.openrouter.apiKey': undefined } });
+
+		const models = await provider.provideLanguageModelChatInformation();
+
+		expect(fakes.openRouterProvider.getCatalog).not.toHaveBeenCalled();
+		expect(models.filter(m => m.vendor === 'openrouter')).toHaveLength(0);
+	});
+
+	it('still lists models when the catalog fetch fails', async () => {
+		const { provider, fakes } = createProvider();
+		vi.mocked(fakes.openRouterProvider.getCatalog).mockRejectedValueOnce(new Error('HTTP 500'));
+
+		const models = await provider.provideLanguageModelChatInformation();
+
+		expect(models.length).toBeGreaterThan(0);
+		expect(models.filter(m => m.vendor === 'openrouter')).toHaveLength(0);
 	});
 });

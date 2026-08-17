@@ -5,7 +5,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { BYOKModelCapabilities } from '../../common/byokProvider';
-import { OpenRouterLMProvider } from '../openRouterProvider';
+import { ModelSupportedEndpoint } from '../../../../platform/endpoint/common/endpointProvider';
+import { createOpenRouterEndpoint, isAnthropicModelId, OpenRouterLMProvider } from '../openRouterProvider';
 
 /**
  * Tests for issue #324671:
@@ -16,10 +17,14 @@ import { OpenRouterLMProvider } from '../openRouterProvider';
  * used only as a fallback.
  */
 
-/** Exposes the protected `resolveModelCapabilities` for focused testing. */
+/** Exposes the protected members for focused testing. */
 class TestableOpenRouterLMProvider extends OpenRouterLMProvider {
 	public resolveCapabilities(modelData: unknown): BYOKModelCapabilities | undefined {
 		return this.resolveModelCapabilities(modelData);
+	}
+
+	public discoveryUrl(baseUrl: string): string {
+		return this.getModelsDiscoveryUrl(baseUrl);
 	}
 }
 
@@ -105,5 +110,118 @@ describe('OpenRouterLMProvider context window (issue #324671)', () => {
 		// Reserve is capped at half the window, so the prompt budget stays positive.
 		expect(caps?.maxOutputTokens).toBe(4000);
 		expect(caps?.maxInputTokens).toBe(4000);
+	});
+});
+
+describe('OpenRouter pricing into capabilities', () => {
+	it('maps catalog pricing strings onto the picker pricing fields', () => {
+		const provider = createProvider();
+
+		const caps = provider.resolveCapabilities({
+			id: 'anthropic/claude-sonnet-4',
+			name: 'Claude Sonnet 4',
+			supported_parameters: ['tools', 'reasoning', 'vision'],
+			architecture: { input_modalities: ['text', 'image'] },
+			context_length: 200000,
+			top_provider: { context_length: 200000, max_completion_tokens: 64000 },
+			pricing: { prompt: '3', completion: '15', request: '0.005', image: '0.0045', web_search: '0.03', cache_read: '0.3', cache_write: '0.3' },
+		});
+
+		expect(caps?.pricing).toEqual({
+			label: '$3/M in · $15/M out · cache $0.3/M · $0.005/req',
+			inputCost: 3,
+			outputCost: 15,
+			cacheCost: 0.3,
+		});
+	});
+
+	it('marks zero-priced models as Free', () => {
+		const provider = createProvider();
+
+		const caps = provider.resolveCapabilities({
+			id: 'meta-llama/llama-3.3-70b-instruct:free',
+			name: 'Llama 3.3 70B Instruct (free)',
+			supported_parameters: ['tools'],
+			context_length: 131072,
+			top_provider: { context_length: 131072 },
+			pricing: { prompt: '0', completion: '0', request: '0', image: '0', web_search: '0', cache_read: '0', cache_write: '0' },
+		});
+
+		expect(caps?.pricing?.label).toBe('Free');
+		expect(caps?.pricing?.inputCost).toBe(0);
+		expect(caps?.pricing?.outputCost).toBe(0);
+	});
+
+	it('omits pricing for catalog entries without a pricing block', () => {
+		const provider = createProvider();
+
+		const caps = provider.resolveCapabilities({
+			id: 'legacy/model',
+			name: 'Legacy Model',
+			supported_parameters: ['tools'],
+			context_length: 128000,
+			top_provider: { context_length: 128000 },
+		});
+
+		expect(caps?.pricing).toBeUndefined();
+	});
+
+	it('derives vision, tool calling, and reasoning effort flags', () => {
+		const provider = createProvider();
+
+		const caps = provider.resolveCapabilities({
+			id: 'google/gemini-2.5-flash',
+			name: 'Gemini 2.5 Flash',
+			supported_parameters: ['tools', 'reasoning_effort'],
+			architecture: { input_modalities: ['text', 'image'] },
+			context_length: 1048576,
+			top_provider: { context_length: 1048576, max_completion_tokens: 65536 },
+		});
+
+		expect(caps?.toolCalling).toBe(true);
+		expect(caps?.vision).toBe(true);
+		expect(caps?.supportsReasoningEffort).toEqual(['low', 'medium', 'high']);
+	});
+});
+
+describe('OpenRouter discovery and endpoint routing', () => {
+	it('uses the full catalog URL without a supported_parameters filter', () => {
+		const provider = createProvider();
+		expect(provider.discoveryUrl('https://openrouter.ai/api/v1')).toBe('https://openrouter.ai/api/v1/models');
+	});
+
+	it('routes Anthropic models through the native Messages API', () => {
+		const instantiationService = { createInstance: vi.fn(() => ({})) } as never;
+		const modelInfo = { id: 'openrouter/anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' } as never;
+
+		createOpenRouterEndpoint(instantiationService, modelInfo, 'key', 'anthropic/claude-sonnet-4', 'https://openrouter.ai/api/v1');
+
+		expect(instantiationService.createInstance).toHaveBeenCalledWith(
+			expect.any(Function),
+			expect.objectContaining({ supported_endpoints: [ModelSupportedEndpoint.Messages] }),
+			'key',
+			'https://openrouter.ai/api/v1/messages',
+		);
+	});
+
+	it('routes non-Anthropic models through chat/completions', () => {
+		const instantiationService = { createInstance: vi.fn(() => ({})) } as never;
+		const modelInfo = { id: 'openrouter/deepseek/deepseek-chat', name: 'DeepSeek Chat' } as never;
+
+		createOpenRouterEndpoint(instantiationService, modelInfo, 'key', 'deepseek/deepseek-chat', 'https://openrouter.ai/api/v1');
+
+		expect(instantiationService.createInstance).toHaveBeenCalledWith(
+			expect.any(Function),
+			expect.not.objectContaining({ supported_endpoints: [ModelSupportedEndpoint.Messages] }),
+			'key',
+			'https://openrouter.ai/api/v1/chat/completions',
+		);
+	});
+
+	it('recognizes Anthropic model ids by provider prefix', () => {
+		expect(isAnthropicModelId('anthropic/claude-opus-4')).toBe(true);
+		expect(isAnthropicModelId('anthropic/claude-sonnet-4')).toBe(true);
+		expect(isAnthropicModelId('deepseek/deepseek-chat')).toBe(false);
+		expect(isAnthropicModelId('openai/gpt-5')).toBe(false);
 	});
 });

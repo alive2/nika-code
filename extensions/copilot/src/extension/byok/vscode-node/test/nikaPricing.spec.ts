@@ -8,11 +8,15 @@ import {
 	deepSeekPricingKey,
 	formatCost,
 	formatDuration,
+	formatOpenRouterPriceLabel,
 	formatTokenCount,
+	formatUsdAmount,
 	getDeepSeekRatePeriod,
 	getDeepSeekTokenCost,
+	getOpenRouterTokenCost,
 	isDeepSeekPeakHour,
 	NIKA_DEEPSEEK_PEAK_PRICES,
+	parseOpenRouterPricing,
 } from '../nikaPricing';
 
 /** Build a UTC Date at the given hour for peak-hour boundary tests. */
@@ -138,5 +142,67 @@ describe('Nika DeepSeek pricing', () => {
 		expect(formatDuration(60 * 60_000)).toBe('1h');
 		expect(formatDuration(83 * 60_000)).toBe('1h 23m');
 		expect(formatDuration(-5000)).toBe('<1m');
+	});
+
+	describe('Nika OpenRouter pricing', () => {
+		it('parses catalog pricing strings into USD numbers', () => {
+			const pricing = parseOpenRouterPricing({ prompt: '3', completion: '15', request: '0.005', image: '0.0113', web_search: '0.005', cache_read: '0.3', cache_write: '3' });
+			expect(pricing).toEqual({
+				promptPerMTok: 3,
+				completionPerMTok: 15,
+				cacheReadPerMTok: 0.3,
+				requestFee: 0.005,
+				imagePerUnit: 0.0113,
+				webSearchPerUnit: 0.005,
+				free: false,
+			});
+		});
+
+		it('flags all-zero pricing as free', () => {
+			const pricing = parseOpenRouterPricing({ prompt: '0', completion: '0', request: '0' });
+			expect(pricing?.free).toBe(true);
+			expect(pricing?.requestFee).toBe(0);
+		});
+
+		it('tolerates numeric fields and missing lines', () => {
+			const pricing = parseOpenRouterPricing({ prompt: 1.5, completion: 'not-a-number' });
+			expect(pricing?.promptPerMTok).toBe(1.5);
+			expect(pricing?.completionPerMTok).toBe(0);
+			expect(pricing?.imagePerUnit).toBeUndefined();
+		});
+
+		it('returns undefined for non-object pricing', () => {
+			expect(parseOpenRouterPricing(undefined)).toBeUndefined();
+			expect(parseOpenRouterPricing('0.5')).toBeUndefined();
+			expect(parseOpenRouterPricing([])).toBeUndefined();
+		});
+
+		it('computes cost from cache reads, misses, output, and the request fee', () => {
+			const pricing = parseOpenRouterPricing({ prompt: '3', completion: '15', cache_read: '0.3', request: '0.005' })!;
+			// 0.4M miss * 3 + 0.1M cache * 0.3 + 0.2M out * 15 + 0.005 = 1.2 + 0.03 + 3 + 0.005
+			const cost = getOpenRouterTokenCost(pricing, { cachedTokens: 100_000, cacheMissTokens: 400_000, outputTokens: 200_000 });
+			expect(cost).toBeCloseTo(4.235, 6);
+		});
+
+		it('never returns a negative cost', () => {
+			const pricing = parseOpenRouterPricing({ prompt: '0', completion: '0' })!;
+			expect(getOpenRouterTokenCost(pricing, { cachedTokens: 0, cacheMissTokens: 0, outputTokens: 0 })).toBe(0);
+		});
+
+		it('formats compact labels with currency clarity', () => {
+			const pricing = parseOpenRouterPricing({ prompt: '3', completion: '15', cache_read: '0.3', request: '0.005' })!;
+			expect(formatOpenRouterPriceLabel(pricing)).toBe('$3/M in · $15/M out · cache $0.3/M · $0.005/req');
+			expect(formatOpenRouterPriceLabel({ ...pricing, requestFee: 0 })).toBe('$3/M in · $15/M out · cache $0.3/M');
+			expect(formatOpenRouterPriceLabel({ ...pricing, free: true })).toBe('Free');
+		});
+
+		it('formats per-1M USD amounts', () => {
+			expect(formatUsdAmount(0)).toBe('$0');
+			expect(formatUsdAmount(0.44)).toBe('$0.44');
+			expect(formatUsdAmount(1.32)).toBe('$1.32');
+			expect(formatUsdAmount(12.5)).toBe('$12.5');
+			expect(formatUsdAmount(0.0002)).toBe('$0.0002');
+			expect(formatUsdAmount(250)).toBe('$250');
+		});
 	});
 });

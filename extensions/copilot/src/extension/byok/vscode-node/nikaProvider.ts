@@ -23,17 +23,22 @@ import {
 	isNikaDeepSeekModel,
 	isNikaGeminiModel,
 	isNikaModelId,
+	isNikaOpenRouterModel,
 	isNikaThinkingEffort,
 	NIKA_DEEPSEEK_SECRET,
 	NIKA_GEMINI_MODEL_IDS,
 	NIKA_GEMINI_SECRET,
 	NIKA_GEMMA_MODEL_ID,
+	NIKA_OPENROUTER_MODEL_PREFIX,
+	NIKA_OPENROUTER_SECRET,
 	NIKA_PROVIDER_ID,
 	NIKA_PROVIDER_NAME,
 	NIKA_RESPONSES_MODEL,
 	NikaModelId,
 	resolveNikaTokenLimits,
 } from './nikaModels';
+import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
+import { OpenRouterModelPricing } from './nikaPricing';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaAttachmentProcessor } from './nikaAttachments';
 import { NikaUsageTracker, TokenTrackingProgress } from './nikaUsageTracker';
@@ -54,6 +59,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private readonly _geminiProvider: GeminiNativeBYOKLMProvider;
 	private readonly _ollamaProvider: OllamaLMProvider;
 	private readonly _attachmentProcessor: NikaAttachmentProcessor;
+	private readonly _openRouterProvider: NikaOpenRouterProvider;
 	readonly settingsEditor: NikaSettingsEditor;
 	readonly usageTracker: NikaUsageTracker;
 
@@ -68,14 +74,19 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._geminiProvider = this._instantiationService.createInstance(GeminiNativeBYOKLMProvider, this._geminiKnownModels(), byokStorageService);
 		this._ollamaProvider = this._instantiationService.createInstance(OllamaLMProvider, byokStorageService);
 		this._ollamaProvider.updateKnownModels(this._gemmaKnownModels());
+		this._openRouterProvider = this._register(this._instantiationService.createInstance(NikaOpenRouterProvider));
 		this.usageTracker = this._register(this._instantiationService.createInstance(NikaUsageTracker));
-		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker));
+		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider));
 		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor);
 		this._register(this._instantiationService.createInstance(NikaIndexingStatus, this.settingsEditor));
 		this._register(this._instantiationService.createInstance(NikaUsageStatus, this.settingsEditor, this.usageTracker));
 
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET) {
+				if (event.key === NIKA_OPENROUTER_SECRET) {
+					// A changed key must never reuse a stale catalog fetch.
+					this._openRouterProvider.invalidateCache();
+				}
 				this._onDidChange.fire();
 			}
 		}));
@@ -88,15 +99,16 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	async provideLanguageModelChatInformation(_options: vscode.PrepareLanguageModelChatModelOptions, _token: vscode.CancellationToken): Promise<NikaLanguageModelChatInformation[]> {
-		const [deepseekKey, geminiKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
+			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 		]);
 		const limits = this._limits();
 		const modelIds = getVisibleNikaModelIds(!!deepseekKey, !!geminiKey);
 		const defaultModel = vscode.workspace.getConfiguration('nika').get<string>('defaultModel', NIKA_RESPONSES_MODEL).replace(/^nika\//, '');
 
-		return modelIds.map(id => {
+		const entries = modelIds.map(id => {
 			const capabilities = getNikaModelCapabilities(id, limits);
 			if (isNikaDeepSeekModel(id)) {
 				const configuredEffort = vscode.workspace.getConfiguration('nika').get<string>('thinkingEffort', 'high');
@@ -115,6 +127,41 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				statusIcon: id === NIKA_GEMMA_MODEL_ID ? new vscode.ThemeIcon('server') : undefined,
 			};
 		});
+
+		if (openRouterKey) {
+			try {
+				const catalog = await this._openRouterProvider.getCatalog(openRouterKey);
+				for (const [rawId, model] of catalog) {
+					const id = nikaOpenRouterModelId(rawId);
+					const base = byokKnownModelToAPIInfoWithEffort(NIKA_PROVIDER_NAME, id, model.capabilities);
+					entries.push({
+						...base,
+						name: model.name,
+						detail: vscode.l10n.t('Nika'),
+						tooltip: this._openRouterTooltip(rawId, model.capabilities.vision),
+						isBYOK: true,
+						isDefault: id === defaultModel,
+					});
+				}
+			} catch (error) {
+				// A catalog failure must not hide the DeepSeek/Gemini/Gemma
+				// models: log it and continue with what we have.
+				this.logOpenRouterError(error);
+			}
+		}
+
+		return entries;
+	}
+
+	private _openRouterTooltip(rawId: string, vision: boolean): string {
+		return vision
+			? vscode.l10n.t('{0} via OpenRouter with catalog pricing and image input.', rawId)
+			: vscode.l10n.t('{0} via OpenRouter with catalog pricing.', rawId);
+	}
+
+	private logOpenRouterError(error: unknown): void {
+		const detail = error instanceof Error ? error.message : String(error);
+		console.warn(`[Nika] OpenRouter catalog failed: ${detail}`);
 	}
 
 	async provideLanguageModelChatResponse(model: NikaLanguageModelChatInformation, messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, options: vscode.ProvideLanguageModelChatResponseOptions, progress: vscode.Progress<vscode.LanguageModelResponsePart2>, token: vscode.CancellationToken): Promise<void> {
@@ -194,6 +241,60 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return this._geminiProvider.provideLanguageModelChatResponse(delegate, messages, options, progress, token);
 		}
 
+		if (isNikaOpenRouterModel(model.id)) {
+			const key = await this._context.secrets.get(NIKA_OPENROUTER_SECRET);
+			if (!key) {
+				throw new Error(vscode.l10n.t('Configure an OpenRouter API key in Nika Settings before using this model.'));
+			}
+			// Refresh the catalog first so endpoint capabilities and the pricing
+			// snapshot (used for cost accounting) are warm.
+			const catalog = await this._openRouterProvider.getCatalog(key);
+			const rawId = model.id.slice(NIKA_OPENROUTER_MODEL_PREFIX.length);
+			const entry = catalog.get(rawId);
+			const pricing = entry?.pricing;
+			const supportsReasoningEffort = entry?.capabilities.supportsReasoningEffort;
+
+			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
+			const disposeStream = this.usageTracker.trackStream(trackedProgress);
+			const sessionId = typeof options.modelOptions?._nikaSessionId === 'string' ? options.modelOptions._nikaSessionId : undefined;
+			const title = extractPromptTitle(messages);
+			const workspace = currentWorkspaceName();
+			try {
+				const endpoint = this._openRouterProvider.createEndpoint(rawId, key);
+				const processed = await this._attachmentProcessor.process(messages, token);
+				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
+				// OpenRouter models accept `low`/`medium`/`high` effort only; drop
+				// agent-requested efforts the model does not support instead of
+				// letting the request fail at the API.
+				const effectiveOptions = isNikaThinkingEffort(requestedEffort) && supportsReasoningEffort?.includes(requestedEffort)
+					? { ...options, modelConfiguration: { ...options.modelConfiguration, reasoningEffort: requestedEffort } }
+					: options;
+				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
+				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, effectiveOptions, options.requestInitiator, trackedProgress, token);
+				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator }, pricing);
+			} catch (error) {
+				this.usageTracker.record({
+					model: model.id,
+					sessionId,
+					initiator: options.requestInitiator,
+					title,
+					workspace,
+					promptTokens: 0,
+					completionTokens: 0,
+					totalTokens: 0,
+					cachedTokens: 0,
+					reasoningTokens: 0,
+					provider: 'openrouter',
+					pricing,
+					error: true,
+				});
+				throw error;
+			} finally {
+				disposeStream();
+			}
+			return;
+		}
+
 		const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 		const delegate: OpenAICompatibleLanguageModelChatInformation<OllamaConfig> = {
 			...model,
@@ -218,11 +319,15 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			};
 			return this._geminiProvider.provideTokenCount(delegate, text, token);
 		}
+		if (isNikaOpenRouterModel(model.id)) {
+			const endpoint = this._openRouterProvider.createEndpoint(model.id.slice(NIKA_OPENROUTER_MODEL_PREFIX.length), await this._context.secrets.get(NIKA_OPENROUTER_SECRET) ?? '');
+			return this._lmWrapper.provideTokenCount(endpoint, text);
+		}
 		const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 		return this._ollamaProvider.provideTokenCount({ ...model, url, configuration: { url } }, text, token);
 	}
 
-	private _createDeepSeekEndpoint(id: NikaModelId, apiKey: string): DeepSeekEndpoint {
+	private _createDeepSeekEndpoint(id: string, apiKey: string): DeepSeekEndpoint {
 		// Normalize defensively: the provider is normally handed the bare model
 		// id, but a provider-qualified id (`nika/...`) would break capabilities
 		// resolution and leak the `-responses` suffix to the wire if it reached
@@ -236,7 +341,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return this._instantiationService.createInstance(DeepSeekEndpoint, modelInfo, apiKey, url);
 	}
 
-	private _recordUsage(modelId: string, tracked: TokenTrackingProgress, meta: { sessionId?: string; title?: string; workspace?: string; initiator?: string }): void {
+	private _recordUsage(modelId: string, tracked: TokenTrackingProgress, meta: { sessionId?: string; title?: string; workspace?: string; initiator?: string }, pricing?: OpenRouterModelPricing): void {
+		const provider = isNikaOpenRouterModel(modelId) ? 'openrouter' as const : 'deepseek' as const;
 		const usage = tracked.exactUsage;
 		if (usage) {
 			this.usageTracker.record({
@@ -250,6 +356,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				totalTokens: usage.total_tokens,
 				cachedTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
 				reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? 0,
+				provider,
+				pricing,
 			});
 			return;
 		}
@@ -268,6 +376,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				totalTokens: estimate,
 				cachedTokens: 0,
 				reasoningTokens: 0,
+				provider,
+				pricing,
 			});
 		}
 	}
@@ -289,7 +399,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return { [NIKA_GEMMA_MODEL_ID]: getNikaModelCapabilities(NIKA_GEMMA_MODEL_ID, this._limits()) };
 	}
 
-	private _tooltipFor(id: NikaModelId): string {
+	private _tooltipFor(id: string): string {
 		if (id.endsWith('-responses')) {
 			return vscode.l10n.t('Experimental DeepSeek Responses API model. It never falls back silently to Chat Completions.');
 		}
@@ -298,6 +408,9 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		}
 		if (isNikaGeminiModel(id)) {
 			return vscode.l10n.t('Native Gemini model with image and document input.');
+		}
+		if (isNikaOpenRouterModel(id)) {
+			return vscode.l10n.t('OpenRouter model with catalog pricing.');
 		}
 		return vscode.l10n.t('Gemma 4 31B through the configured Ollama host.');
 	}
