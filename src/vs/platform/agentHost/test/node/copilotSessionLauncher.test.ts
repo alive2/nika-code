@@ -215,7 +215,7 @@ suite('resolveByokSessionConfig', () => {
 		const config = await resolveByokSessionConfig(sessionId, registry, proxy.startProxy, log);
 		registration.dispose();
 
-		assert.deepStrictEqual(config.models.map(({ id, wireModel }) => ({ id, wireModel })), [
+		assert.deepStrictEqual(config.models!.map(({ id, wireModel }) => ({ id, wireModel })), [
 			{ id: 'deepseek-v4-flash', wireModel: 'deepseek-v4-flash' },
 			{ id: 'deepseek-v4-flash-responses', wireModel: 'deepseek-v4-flash' },
 		]);

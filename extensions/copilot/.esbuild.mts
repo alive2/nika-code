@@ -311,9 +311,17 @@ async function moveSourceMapsToSeparateDir(): Promise<void> {
 }
 
 async function main() {
-	if (process.env['BUILD_SOURCEVERSION']) {
-		console.log('Running in CI environment, applying package.json patch for correct versioning and pre-release status...');
+	if (process.env['BUILD_SOURCEVERSION'] || !isDev) {
+		// In CI (BUILD_SOURCEVERSION set) or any production build (non --dev,
+		// e.g. the local gulp release pipeline), stamp the real build type and
+		// version so the packaged extension does not run in dev mode.
+		console.log('Applying package.json patch for correct versioning and pre-release status...');
 		applyPackageJsonPatch();
+	} else {
+		// Dev builds restore the committed 'dev' build type after a local
+		// production build stamped it (e.g. release packaging), so dev mode
+		// keeps loading .env / dev-only packages.
+		restoreDevPackageJson();
 	}
 
 	await typeScriptServerPluginPackageJsonInstall();
@@ -416,10 +424,18 @@ async function main() {
 }
 
 function applyPackageJsonPatch() {
-	const quality = process.env['VSCODE_QUALITY'];
+	// Local builds (no CI pipeline) don't set VSCODE_QUALITY; default to stable
+	// so `npm run build` still stamps buildType: 'prod' for release packaging.
+	// CI (BUILD_SOURCEVERSION set) still requires it to be set explicitly.
+	const isCi = !!process.env['BUILD_SOURCEVERSION'];
+	const quality = process.env['VSCODE_QUALITY'] ?? (isCi ? undefined : 'stable');
 
 	if (!quality) {
 		throw new Error('VSCODE_QUALITY environment variable is not set. This should be set by the build pipeline to ensure correct versioning and pre-release status in package.json.');
+	}
+
+	if (!isCi) {
+		console.warn('VSCODE_QUALITY environment variable is not set; defaulting to "stable".');
 	}
 
 	const packageJsonPath = path.join(import.meta.dirname, './package.json');
@@ -455,6 +471,15 @@ function applyPackageJsonPatch() {
 	};
 
 	fs.writeFileSync(packageJsonPath, JSON.stringify({ ...packageJson, ...newProps }, null, '\t'));
+}
+
+function restoreDevPackageJson() {
+	const packageJsonPath = path.join(import.meta.dirname, './package.json');
+	const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+	if (packageJson.buildType === 'dev') {
+		return;
+	}
+	fs.writeFileSync(packageJsonPath, JSON.stringify({ ...packageJson, buildType: 'dev' }, null, '\t'));
 }
 
 function getDateBasedPatch(counter: number): string {

@@ -43,6 +43,11 @@ npm run gulp vscode-win32-x64-user-setup
 
 **Output**: `.build\win32-x64\user-setup\NikaCodeSetup-<version>.exe`
 
+> The build stamps `extensions/copilot/package.json` with `buildType: "prod"`
+> (and reformats it). Revert it before committing:
+> `git checkout -- extensions/copilot/package.json`. A subsequent dev build
+> (`npm run compile` in `extensions/copilot`) restores `buildType: "dev"`.
+
 Compute the SHA-256 (needed for release notes):
 
 ```powershell
