@@ -16,6 +16,7 @@ import { InMemoryStorageService, IStorageService, StorageScope, StorageTarget } 
 import { ChatEntitlementContextKeys } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IExtensionService } from '../../../../services/extensions/common/extensions.js';
 import { TestExtensionService } from '../../../../test/common/workbenchTestServices.js';
+import { NikaGithubEnabledSettingId } from '../../browser/agentSessions/agentHost/agentHostNikaGithubEnabledContribution.js';
 import { HasByokModelsContribution } from '../../browser/hasByokModelsContribution.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { ChatAIDisabledSettingId } from '../../common/constants.js';
@@ -36,6 +37,7 @@ suite('HasByokModelsContribution', () => {
 		};
 		readonly configuration?: {
 			readonly aiDisabled?: boolean;
+			readonly githubEnabled?: boolean;
 		};
 		readonly storage?: {
 			readonly lastKnown?: boolean;
@@ -84,6 +86,7 @@ suite('HasByokModelsContribution', () => {
 
 	interface IScenario {
 		readonly storage: InMemoryStorageService;
+		readonly configurationService: TestConfigurationService;
 		readonly configService: FakeLanguageModelsConfigurationService;
 		readonly hasByokModels: IContextKey<boolean>;
 		readonly nonCopilotUserSelectable: IContextKey<boolean>;
@@ -93,6 +96,9 @@ suite('HasByokModelsContribution', () => {
 	function createScenario(store: DisposableStore, options: IScenarioOptions = {}): IScenario {
 		const configurationService = new TestConfigurationService();
 		configurationService.setUserConfiguration(ChatAIDisabledSettingId, options.configuration?.aiDisabled ?? false);
+		if (options.configuration?.githubEnabled !== undefined) {
+			configurationService.setUserConfiguration(NikaGithubEnabledSettingId, options.configuration.githubEnabled);
+		}
 
 		const contextKeyService = store.add(new ContextKeyService(configurationService));
 
@@ -122,7 +128,7 @@ suite('HasByokModelsContribution', () => {
 		const hasByokModels = ChatEntitlementContextKeys.hasByokModels.bindTo(contextKeyService);
 		store.add(instantiation.createInstance(HasByokModelsContribution));
 
-		return { storage, configService, hasByokModels, nonCopilotUserSelectable, clientByokEnabled };
+		return { storage, configurationService, configService, hasByokModels, nonCopilotUserSelectable, clientByokEnabled };
 	}
 
 	/** Allow the `whenInstalledExtensionsRegistered()` continuation to run. */
@@ -144,6 +150,7 @@ suite('HasByokModelsContribution', () => {
 		const scenario = createScenario(store, {
 			groups: [{ vendor: 'ollama', name: 'Ollama' }],
 			contextKeys: { clientByokEnabled: false },
+			configuration: { githubEnabled: true },
 			storage: { lastKnown: true },
 		});
 		await flush();
@@ -168,6 +175,7 @@ suite('HasByokModelsContribution', () => {
 		const scenario = createScenario(store, {
 			groups: [{ vendor: 'ollama', name: 'Ollama' }],
 			contextKeys: { nonCopilotUserSelectable: true },
+			configuration: { githubEnabled: true },
 		});
 		await flush();
 
@@ -178,6 +186,7 @@ suite('HasByokModelsContribution', () => {
 		const store = disposables.add(new DisposableStore());
 		const scenario = createScenario(store, {
 			groups: [{ vendor: 'ollama', name: 'Ollama' }],
+			configuration: { githubEnabled: true },
 			storage: { lastKnown: true },
 		});
 
@@ -190,6 +199,7 @@ suite('HasByokModelsContribution', () => {
 		const store = disposables.add(new DisposableStore());
 		const scenario = createScenario(store, {
 			groups: [{ vendor: 'ollama', name: 'Ollama' }],
+			configuration: { githubEnabled: true },
 			storage: { lastKnown: true },
 		});
 		await flush();
@@ -201,6 +211,7 @@ suite('HasByokModelsContribution', () => {
 		const store = disposables.add(new DisposableStore());
 		const scenario = createScenario(store, {
 			groups: [{ vendor: COPILOT_VENDOR_ID, name: 'Copilot' }],
+			configuration: { githubEnabled: true },
 			storage: { lastKnown: true },
 		});
 		await flush();
@@ -212,6 +223,7 @@ suite('HasByokModelsContribution', () => {
 		const store = disposables.add(new DisposableStore());
 		const scenario = createScenario(store, {
 			groups: [{ vendor: 'ollama', name: 'Ollama' }],
+			configuration: { githubEnabled: true },
 		});
 		await flush();
 
@@ -220,7 +232,7 @@ suite('HasByokModelsContribution', () => {
 
 	test('pre-registration: signal flipping on optimistically updates the persisted value', () => {
 		const store = disposables.add(new DisposableStore());
-		const scenario = createScenario(store, {});
+		const scenario = createScenario(store, { configuration: { githubEnabled: true } });
 		// No flush — extensions are not yet registered.
 		assert.deepStrictEqual(snapshot(scenario), { hasByokModels: false, persistedLastKnown: false });
 
@@ -235,6 +247,7 @@ suite('HasByokModelsContribution', () => {
 			// The signal is on (e.g. the language-model cache still has a model whose underlying
 			// BYOK group was just removed) but no non-Copilot vendor group is configured anymore.
 			contextKeys: { nonCopilotUserSelectable: true },
+			configuration: { githubEnabled: true },
 			storage: { lastKnown: true },
 		});
 		await flush();
@@ -246,6 +259,7 @@ suite('HasByokModelsContribution', () => {
 		const store = disposables.add(new DisposableStore());
 		const scenario = createScenario(store, {
 			groups: [{ vendor: 'ollama', name: 'Ollama' }],
+			configuration: { githubEnabled: true },
 			storage: { lastKnown: true },
 		});
 		await flush();
@@ -262,6 +276,7 @@ suite('HasByokModelsContribution', () => {
 		const scenario = createScenario(store, {
 			groups: [{ vendor: 'ollama', name: 'Ollama' }],
 			contextKeys: { nonCopilotUserSelectable: true },
+			configuration: { githubEnabled: true },
 		});
 		await flush();
 		assert.strictEqual(scenario.hasByokModels.get(), true);
@@ -282,6 +297,7 @@ suite('HasByokModelsContribution', () => {
 		const store = disposables.add(new DisposableStore());
 		const scenario = createScenario(store, {
 			storage: { lastKnown: true },
+			configuration: { githubEnabled: true },
 			deferConfigReady: true,
 		});
 		await flush();
@@ -301,12 +317,35 @@ suite('HasByokModelsContribution', () => {
 		const store = disposables.add(new DisposableStore());
 		const scenario = createScenario(store, {
 			storage: { lastKnown: true },
+			configuration: { githubEnabled: true },
 			deferConfigReady: true,
 		});
 		await flush();
 		assert.strictEqual(scenario.hasByokModels.get(), true);
 
 		scenario.configService.resolveReady();
+		await flush();
+
+		assert.deepStrictEqual(snapshot(scenario, true), { hasByokModels: false, persistedLastKnown: false });
+	});
+
+	test('NikaCode: GitHub off (default) → forced true even without groups or clientByokEnabled', async () => {
+		const store = disposables.add(new DisposableStore());
+		const scenario = createScenario(store, {
+			contextKeys: { clientByokEnabled: false },
+			storage: { lastKnown: false },
+		});
+		await flush();
+
+		assert.deepStrictEqual(snapshot(scenario), { hasByokModels: true, persistedLastKnown: true });
+	});
+
+	test('NikaCode: aiDisabled still wins over GitHub-off forcing', async () => {
+		const store = disposables.add(new DisposableStore());
+		const scenario = createScenario(store, {
+			configuration: { aiDisabled: true },
+			storage: { lastKnown: true },
+		});
 		await flush();
 
 		assert.deepStrictEqual(snapshot(scenario, true), { hasByokModels: false, persistedLastKnown: false });

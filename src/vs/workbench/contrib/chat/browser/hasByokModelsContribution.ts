@@ -15,6 +15,7 @@ import { ChatContextKeys } from '../common/actions/chatContextKeys.js';
 import { ChatAIDisabledSettingId } from '../common/constants.js';
 import { COPILOT_VENDOR_ID } from '../common/languageModels.js';
 import { ILanguageModelsConfigurationService } from '../common/languageModelsConfiguration.js';
+import { NikaGithubEnabledSettingId } from './agentSessions/agentHost/agentHostNikaGithubEnabledContribution.js';
 
 /**
  * Owns the `github.copilot.hasByokModels` context key. The key is true iff:
@@ -23,12 +24,18 @@ import { ILanguageModelsConfigurationService } from '../common/languageModelsCon
  *  - the language-models configuration has at least one non-Copilot vendor group (at any time),
  *    or — pre extension scan — the `chatNonCopilotModelsAreUserSelectable` signal is on.
  *
+ * NikaCode: when the GitHub integration is off (`nika.github.enabled` !== true, the default),
+ * the extension-registered `nika` provider is the chat runtime. Config-file vendor groups
+ * cannot see extension-registered providers, so the key is forced true in that case — signed-out
+ * users must never hit the GitHub sign-in/setup gate.
+ *
  * Strategy (avoids activating BYOK extensions just to gate UI):
  *  1. Restore the last persisted answer for correct warm-reload UI.
- *  2. Configured non-Copilot vendor groups are a positive signal at any time.
- *  3. Pre-registration only, also trust the `chatNonCopilotModelsAreUserSelectable` signal
+ *  2. GitHub off → always true (NikaCode).
+ *  3. Configured non-Copilot vendor groups are a positive signal at any time.
+ *  4. Pre-registration only, also trust the `chatNonCopilotModelsAreUserSelectable` signal
  *     (post-registration it can be stale — model cache lags behind group removal).
- *  4. Only persist `false` after both extension scan and first config load complete, so startup
+ *  5. Only persist `false` after both extension scan and first config load complete, so startup
  *     latency doesn't clobber a previously-true answer.
  *
  * Eager so the key is bound before any sign-in UI renders.
@@ -77,15 +84,23 @@ export class HasByokModelsContribution extends Disposable implements IWorkbenchC
 		});
 
 		this._register(Event.any(
-			Event.filter(this._configurationService.onDidChangeConfiguration, e => e.affectsConfiguration(ChatAIDisabledSettingId)),
+			Event.filter(this._configurationService.onDidChangeConfiguration, e => e.affectsConfiguration(ChatAIDisabledSettingId) || e.affectsConfiguration(NikaGithubEnabledSettingId)),
 			Event.filter(this._contextKeyService.onDidChangeContext, e => e.affectsSome(HasByokModelsContribution.TRACKED_KEYS)),
 			this._languageModelsConfigurationService.onDidChangeLanguageModelGroups,
 		)(() => this._update()));
 	}
 
 	private _isFeatureEnabled(): boolean {
-		return !this._configurationService.getValue<boolean>(ChatAIDisabledSettingId)
-			&& !!this._contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.clientByokEnabled.key);
+		if (this._configurationService.getValue<boolean>(ChatAIDisabledSettingId)) {
+			return false;
+		}
+		// NikaCode: with the GitHub integration off (the default), the nika
+		// provider is the chat runtime — treat BYOK models as available so
+		// signed-out users never hit the GitHub sign-in/setup gate.
+		if (this._configurationService.getValue<boolean>(NikaGithubEnabledSettingId) !== true) {
+			return true;
+		}
+		return !!this._contextKeyService.getContextKeyValue<boolean>(ChatEntitlementContextKeys.clientByokEnabled.key);
 	}
 
 	private _restore(): void {
@@ -104,6 +119,14 @@ export class HasByokModelsContribution extends Disposable implements IWorkbenchC
 	private _update(): void {
 		if (!this._isFeatureEnabled()) {
 			this._setResult(false);
+			return;
+		}
+
+		// NikaCode: GitHub off (default) → the nika provider is the chat runtime.
+		// The config-file vendor-group check below cannot see extension-registered
+		// providers like `nika`, so force the key instead of relying on it.
+		if (this._configurationService.getValue<boolean>(NikaGithubEnabledSettingId) !== true) {
+			this._setResult(true);
 			return;
 		}
 
