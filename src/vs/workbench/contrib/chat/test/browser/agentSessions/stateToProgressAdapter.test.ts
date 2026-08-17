@@ -1178,6 +1178,62 @@ suite('stateToProgressAdapter', () => {
 			});
 		});
 
+		test('bridges Copilot SDK update_todo calls into todoList tool data', () => {
+			const completed = createCompletedToolCall({
+				toolName: 'update_todo',
+				toolInput: JSON.stringify({
+					todos: '- [ ] Set up tokens\n- [>] Build the viewer\n- [x] Wire live updates',
+				}),
+			});
+			const serialized = completedToolCallToSerialized(completed, undefined, URI.file('/'), 'local');
+			assert.deepStrictEqual(serialized.toolSpecificData, {
+				kind: 'todoList',
+				todoList: [
+					{ id: '1', title: 'Set up tokens', status: 'not-started' },
+					{ id: '2', title: 'Build the viewer', status: 'in-progress' },
+					{ id: '3', title: 'Wire live updates', status: 'completed' },
+				],
+			});
+		});
+
+		test('bridges Claude TodoWrite calls into todoList tool data', () => {
+			const completed = createCompletedToolCall({
+				toolName: 'TodoWrite',
+				toolInput: JSON.stringify({
+					todos: [
+						{ content: 'Research', status: 'completed' },
+						{ content: 'Implement', status: 'in_progress' },
+						{ content: 'Polish', status: 'pending' },
+					],
+				}),
+			});
+			const serialized = completedToolCallToSerialized(completed, undefined, URI.file('/'), 'local');
+			assert.deepStrictEqual(serialized.toolSpecificData, {
+				kind: 'todoList',
+				todoList: [
+					{ id: '1', title: 'Research', status: 'completed' },
+					{ id: '2', title: 'Implement', status: 'in-progress' },
+					{ id: '3', title: 'Polish', status: 'not-started' },
+				],
+			});
+		});
+
+		test('does not bridge failed or unrelated todo tool calls', () => {
+			const failed = completedToolCallToSerialized(
+				createCompletedToolCall({ toolName: 'update_todo', success: false, toolInput: JSON.stringify({ todos: '- [ ] a' }) }),
+				undefined, URI.file('/'), 'local');
+			const unrelated = completedToolCallToSerialized(
+				createCompletedToolCall({ toolName: 'read_file', toolInput: JSON.stringify({ path: '/a' }) }),
+				undefined, URI.file('/'), 'local');
+			const empty = completedToolCallToSerialized(
+				createCompletedToolCall({ toolName: 'update_todo', toolInput: JSON.stringify({ todos: '' }) }),
+				undefined, URI.file('/'), 'local');
+
+			assert.strictEqual(failed.toolSpecificData, undefined);
+			assert.strictEqual(unrelated.toolSpecificData, undefined);
+			assert.strictEqual(empty.toolSpecificData, undefined);
+		});
+
 		test('creates authentication-required invocation for an MCP tool call', () => {
 			const invocation = rawToolCallStateToInvocation({
 				...createToolCallState(),

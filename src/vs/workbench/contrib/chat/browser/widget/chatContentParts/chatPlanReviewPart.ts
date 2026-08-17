@@ -27,6 +27,7 @@ import { IContextMenuService } from '../../../../../../platform/contextview/brow
 import { IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
 import { FileChangeType, IFileService } from '../../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
+import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
 import { IEditorService } from '../../../../../services/editor/common/editorService.js';
@@ -39,6 +40,10 @@ import { IChatRendererContent, isResponseVM } from '../../../common/model/chatVi
 import { ChatTreeItem } from '../../chat.js';
 import { IChatContentPart, IChatContentPartRenderContext } from './chatContentParts.js';
 import { ChatCollapsibleContentPart } from './chatCollapsibleContentPart.js';
+import { IPlanViewService } from '../../../common/planView/planViewService.js';
+import { IChatOutputRendererService } from '../../chatOutputItemRenderer.js';
+import { PlanViewEditorInput } from '../../planView/planViewEditorInput.js';
+import { createPlanCodeBlockRenderer } from '../../planView/planCodeBlockRenderer.js';
 import './media/chatPlanReview.css';
 
 const MARKDOWN_EDITOR_ID = 'vscode.markdown.editor';
@@ -80,6 +85,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 	private _isFeedbackMode = false;
 	private readonly _planReviewRegistration = this._register(new MutableDisposable());
 	private readonly _commentRowDisposables = this._register(new DisposableStore());
+	private readonly _planViewSessionResource: URI;
 
 	constructor(
 		public readonly review: IChatPlanReview,
@@ -95,10 +101,20 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		@ITextFileService private readonly _textFileService: ITextFileService,
 		@IModelService private readonly _modelService: IModelService,
 		@IFileService private readonly _fileService: IFileService,
+		@IPlanViewService private readonly _planViewService: IPlanViewService,
+		@IChatOutputRendererService private readonly _chatOutputRendererService: IChatOutputRendererService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 	) {
 		super();
 
+		this._planViewSessionResource = context.element.sessionResource;
 		this._selectedAction = review.actions.find(a => a.default) ?? review.actions[0];
+
+		// Bind the plan file to this chat session so the Plan Viewer can
+		// subscribe to the session's live todo updates.
+		if (review.planUri) {
+			this._register(this._planViewService.registerPlan(URI.revive(review.planUri), context.element.sessionResource));
+		}
 
 		if (review instanceof ChatPlanReviewData && typeof review.draftCollapsed === 'boolean') {
 			this._isCollapsed = review.draftCollapsed;
@@ -192,6 +208,13 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 			reviewButton.element.classList.add('chat-plan-review-title-button', 'chat-plan-review-review-button');
 			this._reviewButton = reviewButton;
 			this._register(reviewButton.onDidClick(() => void this.enterReviewMode()));
+
+			// View Plan button — opens the rich Plan Viewer editor for this file.
+			const viewPlanTooltip = localize('chat.planReview.viewPlanTooltip', 'View Plan');
+			const viewPlanButton = this._register(new Button(this._titleActionsEl, { ...defaultButtonStyles, secondary: true, supportIcons: true, title: viewPlanTooltip, ariaLabel: viewPlanTooltip }));
+			viewPlanButton.element.classList.add('chat-plan-review-title-button', 'chat-plan-review-title-icon-button', 'chat-plan-review-view-plan-button');
+			viewPlanButton.label = `$(${Codicon.checklist.id})`;
+			this._register(viewPlanButton.onDidClick(() => void this.openPlanView()));
 		}
 
 		// Chevron collapse toggle.
@@ -317,7 +340,17 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		this._messageContentDisposables.value = store;
 		const rendered = store.add(this._markdownRendererService.render(
 			new MarkdownString(this.review.content, { supportThemeIcons: true, isTrusted: false }),
-			{ asyncRenderCallback: () => this._messageScrollable.scanDomNode() }
+			{
+				asyncRenderCallback: () => this._messageScrollable.scanDomNode(),
+				// Render mermaid (and other chat output renderer) code fences
+				// inline; everything else keeps the default code block.
+				codeBlockRendererSync: createPlanCodeBlockRenderer(
+					this._chatOutputRendererService,
+					() => this._planViewSessionResource,
+					store,
+					() => this._messageScrollable.scanDomNode(),
+				),
+			}
 		));
 		this._messageEl.append(rendered.element);
 		this._messageScrollable.scanDomNode();
@@ -721,6 +754,18 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		// Move action buttons between footer (expanded) and inline title
 		// slot (collapsed). Reject is omitted when collapsed.
 		this.renderCurrentActionButtons();
+	}
+
+	/** Opens the plan file in the rich Plan Viewer editor. */
+	private async openPlanView(): Promise<void> {
+		if (!this.review.planUri) {
+			return;
+		}
+		const planUri = URI.revive(this.review.planUri);
+		await this._editorService.openEditor(
+			this._instantiationService.createInstance(PlanViewEditorInput, planUri, this._planViewSessionResource),
+			{ pinned: true }
+		);
 	}
 
 	private async enterReviewMode(): Promise<void> {

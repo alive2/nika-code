@@ -26,6 +26,8 @@ import { ITextFileContent, ITextFileService } from '../../../../../../services/t
 import { DeferredPromise } from '../../../../../../../base/common/async.js';
 import { AgentEditorCommentsBridge, IAgentEditorComment, IAgentEditorCommentsBridge } from '../../../../../../services/agentEditorComments/common/agentEditorComments.js';
 import { Emitter, Event as VSCodeEvent } from '../../../../../../../base/common/event.js';
+import { IPlanViewService } from '../../../../common/planView/planViewService.js';
+import { IChatOutputRendererService } from '../../../../browser/chatOutputItemRenderer.js';
 
 function createMockReview(overrides?: Partial<IChatPlanReview>): IChatPlanReview {
 	return {
@@ -95,6 +97,19 @@ suite('ChatPlanReviewPart', () => {
 		const feedbackService = store.add(new PlanReviewFeedbackService(commentsBridge));
 		instantiationService.stub(IAgentEditorCommentsBridge, commentsBridge);
 		instantiationService.stub(IPlanReviewFeedbackService, feedbackService); instantiationService.stub(IUserInteractionService, new MockUserInteractionService());
+		instantiationService.stub(IPlanViewService, {
+			_serviceBrand: undefined,
+			onDidRegisterPlan: VSCodeEvent.None,
+			registerPlan: () => ({ dispose: () => { } }),
+			getSessionResource: () => undefined,
+		});
+		instantiationService.stub(IChatOutputRendererService, {
+			_serviceBrand: undefined,
+			registerRenderer: () => ({ dispose: () => { } }),
+			hasCodeBlockRenderer: () => false,
+			renderOutputPart: async () => { throw new Error('not implemented in test'); },
+			renderCodeBlock: async () => { throw new Error('not implemented in test'); },
+		});
 
 		lastFeedbackService = feedbackService;
 		lastEditorService = instantiationService.get(IEditorService);

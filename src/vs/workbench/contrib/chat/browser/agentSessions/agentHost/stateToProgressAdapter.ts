@@ -26,13 +26,15 @@ import { getBrowserViewAttachmentMetadata, isBrowserViewAttachment } from '../..
 import { AgentSystemNotificationKind, AgentSystemNotificationSeverity, readAgentSystemNotificationMeta } from '../../../../../../platform/agentHost/common/meta/agentSystemNotificationMeta.js';
 import { isViewUnreviewedCommentsTool, isAddCommentTool } from '../../../../../../platform/agentHost/common/meta/agentFeedbackAnnotations.js';
 import { isCreateChatTool, isCreateSessionTool, isSendMessageTool, parseOpenSessionLinkChatId, parseOpenSessionLinkUri } from '../../../../../../platform/agentHost/common/openSessionLink.js';
-import { parsePartialToolInputForDisplay } from '../../../../../../platform/agentHost/common/partialToolInput.js';
+import { parsePartialToolInput, parsePartialToolInputForDisplay } from '../../../../../../platform/agentHost/common/partialToolInput.js';
 import { MessageAttachmentKind, type FileEdit, type MessageAttachment, type StringOrMarkdown, type TextRange } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { normalizeFileEdit } from '../../../../../../platform/agentHost/common/fileEditDiff.js';
 import product from '../../../../../../platform/product/common/product.js';
 import { ConfigureAutomationToolReferenceName } from '../../../common/automations/automationService.js';
-import { formatCopilotCredits, ElicitationState, type ChatExternalEditKind, type ChatMcpAppData, type IChatAgentFeedbackReviewConfirmationData, type IChatAutomationConfiguredData, type IChatAutoModeResolutionPart, type IChatExternalEdit, type IChatMcpAuthenticationRequiredServer, type IChatModifiedFilesConfirmationData, type IChatPlanReviewResult, type IChatProgress, type IChatQuestion, type IChatQuestionAnswerValue, type IChatQuestionAnswers, type IChatResponseErrorDetails, type IChatSearchToolInvocationData, type IChatSessionCreatedData, type IChatTerminalToolInvocationData, type IChatToolInputInvocationData, type IChatToolInvocationSerialized, type IChatUsage, type IChatUsagePromptTokenDetail, ToolConfirmKind, AgentFeedbackReviewCommandId } from '../../../common/chatService/chatService.js';
+import { formatCopilotCredits, ElicitationState, type ChatExternalEditKind, type ChatMcpAppData, type IChatAgentFeedbackReviewConfirmationData, type IChatAutomationConfiguredData, type IChatAutoModeResolutionPart, type IChatExternalEdit, type IChatMcpAuthenticationRequiredServer, type IChatModifiedFilesConfirmationData, type IChatPlanReviewResult, type IChatProgress, type IChatQuestion, type IChatQuestionAnswerValue, type IChatQuestionAnswers, type IChatResponseErrorDetails, type IChatSearchToolInvocationData, type IChatSessionCreatedData, type IChatTerminalToolInvocationData, type IChatTodoListContent, type IChatToolInputInvocationData, type IChatToolInvocationSerialized, type IChatUsage, type IChatUsagePromptTokenDetail, ToolConfirmKind, AgentFeedbackReviewCommandId } from '../../../common/chatService/chatService.js';
 import { isTerminalCommandPrompt, type IChatSessionHistoryItem } from '../../../common/chatSessionsService.js';
+import { parseTodosFromMarkdown } from '../../../common/planView/planChecklist.js';
+import { IChatTodo } from '../../../common/tools/chatTodoListService.js';
 import { type IQuotaSnapshot } from '../../../../../services/chat/common/chatEntitlementService.js';
 import { ChatToolInvocation } from '../../../common/model/chatProgressTypes/chatToolInvocation.js';
 import { ChatPlanReviewData } from '../../../common/model/chatProgressTypes/chatPlanReviewData.js';
@@ -55,6 +57,63 @@ const agentHostAskUserToolNames = new Set(['ask_user', 'AskUserQuestion', 'reque
 
 function isAgentHostAskUserTool(toolName: string): boolean {
 	return agentHostAskUserToolNames.has(toolName);
+}
+
+/** Copilot SDK tool that updates the plan's todo list (args: `{ todos: <markdown> }`). */
+const UPDATE_TODO_TOOL_NAME = 'update_todo';
+/** Claude tool that writes the todo list (args: `{ todos: [{ content, status }] }`). */
+const TODO_WRITE_TOOL_NAME = 'TodoWrite';
+
+/**
+ * Extracts a live todo list from a completed agent-host todo tool call
+ * (Copilot SDK `update_todo` or Claude `TodoWrite`), or returns `undefined`
+ * when the call does not carry one. The result is emitted as
+ * `{ kind: 'todoList' }` tool-specific data, which the chat UI turns into
+ * `IChatTodoListService` updates — making the todo widget and the Plan
+ * Viewer live for agent-host sessions.
+ */
+function todoListFromAgentHostToolCall(tc: ICompletedToolCall): IChatTodo[] | undefined {
+	if (tc.status !== ToolCallStatus.Completed || !tc.success) {
+		return undefined;
+	}
+	const rawInput = getInlineToolInput(tc.toolInput);
+	if (rawInput === undefined) {
+		return undefined;
+	}
+	const args = parsePartialToolInput(rawInput);
+	if (!args) {
+		return undefined;
+	}
+	if (tc.toolName === UPDATE_TODO_TOOL_NAME && typeof args.todos === 'string') {
+		const todos = parseTodosFromMarkdown(args.todos);
+		return todos.length > 0 ? todos : undefined;
+	}
+	if (tc.toolName === TODO_WRITE_TOOL_NAME && Array.isArray(args.todos)) {
+		const todos: IChatTodo[] = [];
+		for (const entry of args.todos) {
+			if (typeof entry !== 'object' || entry === null) {
+				continue;
+			}
+			const content = (entry as { content?: unknown }).content;
+			if (typeof content !== 'string') {
+				continue;
+			}
+			let status: IChatTodo['status'];
+			switch ((entry as { status?: unknown }).status) {
+				case 'completed':
+					status = 'completed';
+					break;
+				case 'in_progress':
+					status = 'in-progress';
+					break;
+				default:
+					status = 'not-started';
+			}
+			todos.push({ id: todos.length + 1, title: content.trim(), status });
+		}
+		return todos.length > 0 ? todos : undefined;
+	}
+	return undefined;
 }
 
 function shouldHideCompletedAgentHostAskUserTool(toolCall: ToolCallState): boolean {
@@ -1674,7 +1733,7 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 		};
 	}
 
-	let toolSpecificData: IChatTerminalToolInvocationData | IChatSearchToolInvocationData | IChatToolInputInvocationData | IChatSessionCreatedData | IChatAutomationConfiguredData | undefined;
+	let toolSpecificData: IChatTerminalToolInvocationData | IChatSearchToolInvocationData | IChatToolInputInvocationData | IChatSessionCreatedData | IChatAutomationConfiguredData | IChatTodoListContent | undefined;
 	if (isTerminal) {
 		toolSpecificData = {
 			...buildTerminalToolSpecificData(tc, sessionResource),
@@ -1686,6 +1745,19 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 		toolSpecificData = buildSessionCreatedToolData(tc) ?? buildAutomationConfiguredToolData(tc);
 		if (!toolSpecificData) {
 			toolSpecificData = buildMcpAppToolInputData(tc, sessionResource);
+		}
+	}
+
+	// Bridge agent-host todo tools (Copilot SDK `update_todo`, Claude
+	// `TodoWrite`) into the workbench todo-list pipeline so the chat todo
+	// widget and Plan Viewer track plan execution live.
+	if (!toolSpecificData) {
+		const todoList = todoListFromAgentHostToolCall(tc);
+		if (todoList) {
+			toolSpecificData = {
+				kind: 'todoList',
+				todoList: todoList.map(todo => ({ id: String(todo.id), title: todo.title, status: todo.status })),
+			};
 		}
 	}
 
