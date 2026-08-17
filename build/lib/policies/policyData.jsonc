@@ -880,7 +880,7 @@
                 }
             },
             "type": "boolean",
-            "default": true,
+            "default": false,
             "included": true
         },
         {
@@ -913,7 +913,7 @@
                 ]
             },
             "type": "string",
-            "default": "all",
+            "default": "off",
             "enum": [
                 "all",
                 "error",
