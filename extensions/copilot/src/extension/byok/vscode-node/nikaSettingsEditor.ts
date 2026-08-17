@@ -23,7 +23,7 @@ const SETTINGS = new Set([
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
-	'logLevel', 'releaseCheckEnabled', 'indexing.scheme', 'usage.enabled',
+	'logLevel', 'releaseCheckEnabled', 'safetyRules.enabled', 'indexing.scheme', 'usage.enabled',
 ]);
 
 const SECRET_KEYS: Record<'deepseek' | 'gemini', string> = {
@@ -266,6 +266,7 @@ export class NikaSettingsEditor extends Disposable {
 				'agent.inlineChatThinkingEffort': value('agent.inlineChatThinkingEffort', NIKA_AGENT_DEFAULTS.inlineChat.effort),
 				logLevel: value('logLevel', 'INFO'),
 				releaseCheckEnabled: value('releaseCheckEnabled', true),
+				'safetyRules.enabled': value('safetyRules.enabled', true),
 				'indexing.scheme': value('indexing.scheme', 'off'),
 				'usage.enabled': value('usage.enabled', true),
 			},
@@ -639,7 +640,8 @@ ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Provide
 <section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, vision, and PDF support for NikaCode.')}</p>
 <div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
 <div class="card"><div class="row"><label><strong>${vscode.l10n.t('DeepSeek')}</strong><span class="hint">${vscode.l10n.t('Flash, Pro, and experimental Responses')}</span></label><span data-provider-status="deepseek"></span></div><div class="row"><label><strong>${vscode.l10n.t('Gemini')}</strong><span class="hint">${vscode.l10n.t('Flash and Flash Lite')}</span></label><span data-provider-status="gemini"></span></div><div class="row"><label><strong>${vscode.l10n.t('Ollama')}</strong><span class="hint">${vscode.l10n.t('Gemma 4 31B at the configured host')}</span></label><span data-provider-status="ollama"></span></div></div>
-<div class="card"><div class="row"><label><strong>${vscode.l10n.t('NikaCode version')}</strong></label><span id="app-version"></span></div><div class="row"><label><strong>${vscode.l10n.t('Bundled Copilot version')}</strong></label><span id="extension-version"></span></div></div></section>
+<div class="card"><div class="row"><label><strong>${vscode.l10n.t('NikaCode version')}</strong></label><span id="app-version"></span></div><div class="row"><label><strong>${vscode.l10n.t('Bundled Copilot version')}</strong></label><span id="extension-version"></span></div></div>
+<div class="card"><h2>${vscode.l10n.t('Safety')}</h2><p class="hint">${vscode.l10n.t('Controls the guardrails added to prompts sent to Nika models.')}</p>${this._checkboxRow('safetyRules.enabled', vscode.l10n.t('Enable safety rules'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When on, prompts include Microsoft content policies, copyright, and harmful-content restrictions. Turn off to omit them — you are responsible for what the models produce.')}</span></label></div></div></section>
 <section id="providers"><h1>${vscode.l10n.t('Set up Nika')}</h1><p class="lead">${vscode.l10n.t('Start with DeepSeek: paste the key, select Save, then select Test. Gemini is optional and enables native Gemini chat plus vision features. API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
 ${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
 </div></section>

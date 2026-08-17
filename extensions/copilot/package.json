@@ -3401,6 +3401,11 @@
             "default": true,
             "markdownDescription": "%nika.config.releaseCheckEnabled%"
           },
+          "nika.safetyRules.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%nika.config.safetyRules.enabled%"
+          },
           "nika.indexing.scheme": {
             "type": "string",
             "enum": [

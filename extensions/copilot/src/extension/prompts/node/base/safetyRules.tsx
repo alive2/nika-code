@@ -4,9 +4,30 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { PromptElement } from '@vscode/prompt-tsx';
+import { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
+
+/**
+ * NikaCode: opt-out switch for the safety rules block. On by default.
+ * When turned off, the safety rules are omitted from every prompt.
+ */
+const SAFETY_RULES_CONFIG_KEY = 'nika.safetyRules.enabled';
+
+function safetyRulesEnabled(configurationService: IConfigurationService): boolean {
+	return configurationService.getNonExtensionConfig<boolean>(SAFETY_RULES_CONFIG_KEY) ?? true;
+}
 
 export class SafetyRules extends PromptElement {
+	constructor(
+		props: {},
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
+	) {
+		super(props);
+	}
+
 	render() {
+		if (!safetyRulesEnabled(this._configurationService)) {
+			return undefined;
+		}
 		return (
 			<>
 				Follow Microsoft content policies.<br />
@@ -19,7 +40,17 @@ export class SafetyRules extends PromptElement {
 }
 
 export class Gpt5SafetyRule extends PromptElement {
+	constructor(
+		props: {},
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
+	) {
+		super(props);
+	}
+
 	render() {
+		if (!safetyRulesEnabled(this._configurationService)) {
+			return undefined;
+		}
 		return (
 			<>
 				Follow Microsoft content policies.<br />
@@ -31,7 +62,17 @@ export class Gpt5SafetyRule extends PromptElement {
 }
 
 export class LegacySafetyRules extends PromptElement {
+	constructor(
+		props: {},
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
+	) {
+		super(props);
+	}
+
 	render() {
+		if (!safetyRulesEnabled(this._configurationService)) {
+			return undefined;
+		}
 		return (
 			<>
 				Follow Microsoft content policies.<br />

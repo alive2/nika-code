@@ -31,6 +31,7 @@
 	"nika.config.agent.inlineChatThinkingEffort": "The thinking effort used by the Nika model for Inline Chat.",
 	"nika.config.logLevel": "The minimum level written to the native Nika output channel.",
 	"nika.config.releaseCheckEnabled": "Check GitHub for published NikaCode releases when the bundled provider starts. Updates are never installed automatically.",
+	"nika.config.safetyRules.enabled": "Add Copilot safety rules (Microsoft content policies, copyright, and harmful-content restrictions) to prompts sent to Nika models. Turn off to omit them from all prompts.",
 	"nika.config.indexing.scheme": "How Nika semantic indexing runs for the current workspace. Choose per workspace, or leave the default.",
 	"nika.config.indexing.scheme.off": "No semantic index. Ripgrep search only (NikaCode default).",
 	"nika.config.indexing.scheme.githubRemote": "Reuse GitHub Copilot's existing remote index for GitHub-hosted repos. Requires a GitHub sign-in.",
