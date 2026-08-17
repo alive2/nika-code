@@ -14,6 +14,7 @@ import { DisposableStore, MutableDisposable } from '../../../../../base/common/l
 import { isEqual, basename } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
+import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { FileChangeType, IFileService } from '../../../../../platform/files/common/files.js';
@@ -28,6 +29,8 @@ import { ITelemetryService } from '../../../../../platform/telemetry/common/tele
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { ITextFileService } from '../../../../services/textfile/common/textfiles.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { ExecuteHandoffActionId } from '../actions/chatExecuteActions.js';
 import { IChatOutputRendererService } from '../chatOutputItemRenderer.js';
 import { IChatTodo, IChatTodoListService } from '../../common/tools/chatTodoListService.js';
 import { IPlanViewService } from '../../common/planView/planViewService.js';
@@ -43,7 +46,7 @@ function statusIconClass(status: IChatTodo['status']): string {
 		case 'completed':
 			return 'codicon-pass';
 		case 'in-progress':
-			return 'codicon-record';
+			return 'codicon-loading codicon-modifier-spin';
 		default:
 			return 'codicon-circle-outline';
 	}
@@ -87,6 +90,7 @@ export class PlanViewEditor extends EditorPane {
 	private _sessionResource: URI | undefined;
 	private _checklistItems: IPlanChecklistItem[] = [];
 	private _serviceTodos: IChatTodo[] = [];
+	private _buildButton: Button | undefined;
 
 	private readonly _contentDisposables = this._register(new DisposableStore());
 	private readonly _markdownDisposables = this._register(new MutableDisposable<DisposableStore>());
@@ -107,6 +111,8 @@ export class PlanViewEditor extends EditorPane {
 		@ITextFileService private readonly _textFileService: ITextFileService,
 		@IEditorService private readonly _editorService: IEditorService,
 		@IQuickInputService private readonly _quickInputService: IQuickInputService,
+		@ICommandService private readonly _commandService: ICommandService,
+		@INotificationService private readonly _notificationService: INotificationService,
 	) {
 		super(PlanViewEditor.ID, group, telemetryService, themeService, storageService);
 	}
@@ -131,6 +137,14 @@ export class PlanViewEditor extends EditorPane {
 		this._statusBadgeEl.setAttribute('aria-live', 'polite');
 
 		const headerActions = dom.append(header, dom.$('.plan-view-editor-header-actions'));
+		const buildButtonLabel = localize('chat.planView.build', 'Build');
+		const buildButton = this._register(new Button(headerActions, { ...defaultButtonStyles, supportIcons: true, title: buildButtonLabel, ariaLabel: buildButtonLabel }));
+		buildButton.element.classList.add('plan-view-editor-header-button', 'plan-view-editor-build-button');
+		buildButton.label = `$(${Codicon.rocket.id}) ${buildButtonLabel}`;
+		buildButton.enabled = false;
+		this._register(buildButton.onDidClick(() => void this.startImplementation()));
+		this._buildButton = buildButton;
+
 		const editButtonLabel = localize('chat.planView.editInMarkdown', 'Edit in Markdown');
 		const editButton = this._register(new Button(headerActions, { ...defaultButtonStyles, secondary: true, supportIcons: true, title: editButtonLabel, ariaLabel: editButtonLabel }));
 		editButton.element.classList.add('plan-view-editor-header-button');
@@ -175,6 +189,9 @@ export class PlanViewEditor extends EditorPane {
 		if (this._titleEl) {
 			this._titleEl.textContent = basename(input.planUri);
 		}
+		if (this._buildButton) {
+			this._buildButton.enabled = !!this._sessionResource;
+		}
 
 		let content: string;
 		try {
@@ -211,6 +228,9 @@ export class PlanViewEditor extends EditorPane {
 					this._serviceTodos = this._chatTodoListService.getTodos(this._sessionResource);
 					this.renderTodoList();
 					this.updateStatusBadge();
+					if (this._buildButton) {
+						this._buildButton.enabled = true;
+					}
 				}
 			}));
 		}
@@ -461,6 +481,25 @@ export class PlanViewEditor extends EditorPane {
 			updated.push({ id: updated.length + 1, title, status });
 		}
 		this._chatTodoListService.setTodos(this._sessionResource, updated);
+	}
+
+	/**
+	 * Hands the plan over to the implementation agent via the chat handoff
+	 * command, which switches to the default agent and submits the
+	 * "Start Implementation" prompt in the bound chat session.
+	 */
+	private async startImplementation(): Promise<void> {
+		if (!this._sessionResource) {
+			return;
+		}
+		const result = await this._commandService.executeCommand<{ success: boolean; error?: string } | undefined>(ExecuteHandoffActionId, {
+			label: 'Start Implementation',
+			sourceCustomAgent: 'Plan',
+			sessionResource: this._sessionResource.toString(),
+		});
+		if (result && !result.success) {
+			this._notificationService.error(localize('chat.planView.buildFailed', 'Could not start implementation: {0}', result.error ?? 'unknown error'));
+		}
 	}
 
 	private async openInMarkdownEditor(): Promise<void> {

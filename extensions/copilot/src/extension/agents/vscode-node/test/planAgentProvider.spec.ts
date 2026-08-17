@@ -277,6 +277,8 @@ suite('PlanAgentProvider', () => {
 		assert.ok(content.includes('vscode_reviewPlan'), 'Body should instruct using the reviewPlan tool');
 		assert.ok(content.includes('canProvideFeedback'), 'Body should pass canProvideFeedback to the tool');
 		assert.ok(content.includes('Implement Plan'), 'Body should suggest an Implement Plan action');
+		assert.ok(content.includes('**Tasks**'), 'Body style guide should include a Tasks checklist section');
+		assert.ok(content.includes('- [ ]'), 'Body style guide should show checkbox task examples');
 	});
 
 	test('has correct label property', () => {

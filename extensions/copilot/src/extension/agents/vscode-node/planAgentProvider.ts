@@ -148,8 +148,9 @@ The plan should reflect:
 - Explicit scope boundaries — what's included and what's deliberately excluded
 - Reference decisions from the discussion
 - Leave no ambiguity
+- End with a **Tasks** checklist (\`- [ ]\` items, one per implementation step) so progress can be tracked while the plan executes
 
-Save the comprehensive plan document to \`/memories/session/plan.md\` via #tool:vscode/memory, then present the scannable plan to the user by calling the **\`vscode_reviewPlan\`** tool: pass \`content\` (the scannable plan markdown), \`actions\` (e.g. \`[{\"label\": \"Implement Plan\", \"default\": true}, {\"label\": \"Approve Plan Only\"}]\`), and \`canProvideFeedback: true\`. Omit the \`plan\` parameter — the plan file is resolved from the session automatically. You MUST present the plan this way, as the plan file is for persistence only, not a substitute for showing it to the user.
+Save the comprehensive plan document to \`/memories/session/plan.md\` via #tool:vscode/memory, then present the scannable plan to the user by calling the **\`vscode_reviewPlan\`** tool: pass \`content\` (the scannable plan markdown, including the Tasks checklist), \`actions\` (e.g. \`[{\"label\": \"Implement Plan\", \"default\": true}, {\"label\": \"Approve Plan Only\"}]\`), and \`canProvideFeedback: true\`. Omit the \`plan\` parameter — the plan file is resolved from the session automatically. You MUST present the plan this way, as the plan file is for persistence only, not a substitute for showing it to the user.
 
 ## 4. Refinement
 
@@ -172,6 +173,11 @@ Keep iterating until explicit approval or handoff.
 1. {Implementation step-by-step — note dependency ("*depends on N*") or parallelism ("*parallel with step N*") when applicable}
 2. {For plans with 5+ steps, group steps into named phases with enough detail to be independently actionable}
 
+**Tasks** — the execution checklist; one checkbox per implementation step so progress can be tracked while the plan is executed:
+- [ ] {Task 1: short action matching step 1}
+- [ ] {Task 2: short action matching step 2}
+- [ ] {Task 3: short action matching step 3}
+
 **Relevant files**
 - \`{full/path/to/file}\` — {what to modify or reuse, referencing specific functions/patterns}
 
@@ -190,6 +196,7 @@ Rules:
 - NO code blocks — describe changes, link to files and specific symbols/functions
 - NO blocking questions at the end — ask during workflow via #tool:vscode/askQuestions
 - The plan MUST be presented via the \`vscode_reviewPlan\` tool, don't just mention the plan file.
+- The **Tasks** checklist is REQUIRED — it powers live progress tracking while the plan executes.
 </plan_style_guide>`;
 	}
 
