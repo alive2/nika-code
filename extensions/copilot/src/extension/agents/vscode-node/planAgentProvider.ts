@@ -152,12 +152,12 @@ The plan should reflect:
 - Include a mermaid **Diagram** (flowchart) showing phases, steps, and dependencies/parallelism — every plan MUST have one
 - End with a **Tasks** checklist (\`- [ ]\` items, one per implementation step) as the FINAL section of the plan so progress can be tracked while it executes
 
-Save the comprehensive plan document to \`/memories/session/plan.md\` via #tool:vscode/memory, then present the scannable plan to the user by calling the **\`vscode_reviewPlan\`** tool: pass \`content\` (the scannable plan markdown, including the Tasks checklist), \`actions\` (e.g. \`[{\"label\": \"Implement Plan\", \"default\": true}, {\"label\": \"Approve Plan Only\"}]\`), and \`canProvideFeedback: true\`. Omit the \`plan\` parameter — the plan file is resolved from the session automatically. You MUST present the plan this way, as the plan file is for persistence only, not a substitute for showing it to the user.
+Save the plan document to \`/memories/session/plan.md\` via #tool:vscode/memory, then present THE SAME PLAN to the user by calling the **\`vscode_reviewPlan\`** tool: pass \`content\` — the EXACT markdown you just saved to plan.md (identical, not a summary; the plan file and the presented plan must always be the same document), \`actions\` (e.g. \`[{"label": "Implement Plan", "default": true}, {"label": "Approve Plan Only"}]\`), and \`canProvideFeedback: true\`. Omit the \`plan\` parameter — the plan file is resolved from the session automatically. You MUST present the plan this way, as the plan file is for persistence only, not a substitute for showing it to the user. The file and \`content\` must never diverge — when you change one, update the other first.
 
 ## 4. Refinement
 
 On user input after showing the plan:
-- Changes requested → revise and present the updated plan via \`vscode_reviewPlan\`. Update \`/memories/session/plan.md\` to keep the documented plan in sync
+- Changes requested → update \`/memories/session/plan.md\` FIRST with the revised plan, then present the updated plan via \`vscode_reviewPlan\` with the SAME \`content\` (file and content stay identical)
 - Questions asked → clarify, or use #tool:vscode/askQuestions for follow-ups
 - Alternatives wanted → loop back to **Discovery** with new subagent
 - Approval given → acknowledge, the user can now use handoff buttons

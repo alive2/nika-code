@@ -11,7 +11,7 @@ import { IModelService } from '../../../../../../../editor/common/services/model
 import { IDialogService } from '../../../../../../../platform/dialogs/common/dialogs.js';
 import { TestDialogService } from '../../../../../../../platform/dialogs/test/common/testDialogService.js';
 import { FileChangesEvent, FileChangeType, IFileService } from '../../../../../../../platform/files/common/files.js';
-import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
+import { TestFileService, workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
 import { IPlanReviewFeedbackService, PlanReviewFeedbackService } from '../../../../browser/planReviewFeedback/planReviewFeedbackService.js';
 import { ChatPlanReviewPart, IChatPlanReviewPartOptions } from '../../../../browser/widget/chatContentParts/chatPlanReviewPart.js';
 import { IChatContentPartRenderContext } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
@@ -87,6 +87,7 @@ suite('ChatPlanReviewPart', () => {
 	let lastFeedbackService: IPlanReviewFeedbackService | undefined;
 	let lastEditorService: IEditorService | undefined;
 	let lastTextFileService: ITextFileService | undefined;
+	let lastFileService: TestFileService | undefined;
 	let lastModelService: IModelService | undefined;
 	let lastCommentsBridge: AgentEditorCommentsBridge | undefined;
 	let fileChangesEmitter: Emitter<FileChangesEvent> | undefined;
@@ -115,6 +116,7 @@ suite('ChatPlanReviewPart', () => {
 		lastFeedbackService = feedbackService;
 		lastEditorService = instantiationService.get(IEditorService);
 		lastTextFileService = instantiationService.get(ITextFileService);
+		lastFileService = instantiationService.get(IFileService) as TestFileService;
 		lastModelService = instantiationService.get(IModelService);
 		lastCommentsBridge = commentsBridge;
 		if (fileChangesEmitter) {
@@ -147,6 +149,7 @@ suite('ChatPlanReviewPart', () => {
 		lastFeedbackService = undefined;
 		lastEditorService = undefined;
 		lastTextFileService = undefined;
+		lastFileService = undefined;
 		lastModelService = undefined;
 		lastCommentsBridge = undefined;
 		fileChangesEmitter = undefined;
@@ -1179,6 +1182,139 @@ suite('ChatPlanReviewPart', () => {
 			createWidget(createMockReview({ isUsed: false }));
 			const other = createMockReview({ isUsed: true });
 			assert.strictEqual(widget.hasSameContent(other, [], {} as never), false);
+		});
+	});
+
+	suite('Plan file sync', () => {
+		test('opening the plan writes the reviewed content to the plan file when the file is older', async () => {
+			const planUri = URI.parse('file:///older-plan.md');
+			const review = new ChatPlanReviewData(
+				'Review Plan',
+				'# New plan\n\n```mermaid\nflowchart LR\nA\n```',
+				[{ label: 'Go', default: true }],
+				true,
+				planUri.toJSON(),
+			);
+			createWidget(review);
+			lastFileService!.setContent('# Old plan');
+			const reviewedContent = review.content;
+
+			getReviewButton(widget)!.click();
+			await tick();
+			await tick();
+
+			assert.deepStrictEqual(
+				lastFileService!.writeOperations.map(op => ({ resource: op.resource.toString(), content: op.content })),
+				[{ resource: planUri.toString(), content: reviewedContent }],
+				'the reviewed content should be written to the plan file',
+			);
+			assert.ok(!review.isOutdated, 'syncing the file must not mark the card outdated');
+		});
+
+		test('opening the plan does not rewrite the file when it already matches', async () => {
+			const planUri = URI.parse('file:///same-plan.md');
+			const review = new ChatPlanReviewData(
+				'Review Plan',
+				'# Same plan',
+				[{ label: 'Go', default: true }],
+				true,
+				planUri.toJSON(),
+			);
+			createWidget(review);
+			lastFileService!.setContent('# Same plan');
+
+			getReviewButton(widget)!.click();
+			await tick();
+			await tick();
+
+			assert.deepStrictEqual(lastFileService!.writeOperations, [], 'a matching file should not be rewritten');
+		});
+
+		test('approving syncs the plan file before submitting', async () => {
+			const planUri = URI.parse('file:///approve-sync-plan.md');
+			const review = new ChatPlanReviewData(
+				'Review Plan',
+				'# New plan content',
+				[{ id: 'approve', label: 'Approve', default: true }],
+				false,
+				planUri.toJSON(),
+			);
+			createWidget(review);
+			lastFileService!.setContent('# Old plan content');
+			const reviewedContent = review.content;
+
+			const approveButton = getFooterButtons(widget).find(b => b.textContent?.includes('Approve'))!;
+			approveButton.click();
+			await tick();
+			await tick();
+
+			assert.deepStrictEqual(
+				lastFileService!.writeOperations.map(op => ({ resource: op.resource.toString(), content: op.content })),
+				[{ resource: planUri.toString(), content: reviewedContent }],
+				'the reviewed content should be written to the plan file before submitting',
+			);
+			assert.deepStrictEqual(lastSubmitResult, { action: 'Approve', actionId: 'approve', rejected: false });
+		});
+
+		test('a dirty plan file is saved and its edits win over the reviewed content', async () => {
+			const planUri = URI.parse('file:///dirty-plan.md');
+			const review = new ChatPlanReviewData(
+				'Review Plan',
+				'# Reviewed content',
+				[{ label: 'Go', default: true }],
+				true,
+				planUri.toJSON(),
+			);
+			createWidget(review);
+			lastFileService!.setContent('# User edit');
+			const isDirtyStub = sinon.stub(lastTextFileService!, 'isDirty').returns(true);
+			const saveStub = sinon.stub(lastTextFileService!, 'save').resolves(planUri);
+
+			getReviewButton(widget)!.click();
+			await tick();
+			await tick();
+
+			assert.strictEqual(saveStub.calledOnce, true, 'the dirty plan file should be saved');
+			assert.strictEqual(review.content, '# User edit', 'the saved user edits should win over the reviewed content');
+			assert.ok(isDirtyStub.called);
+		});
+
+		test('file changes matching the reviewed content do not mark the card outdated', async () => {
+			fileChangesEmitter = store.add(new Emitter<FileChangesEvent>());
+			const planUri = URI.parse('file:///watcher-sync-plan.md');
+			const review = new ChatPlanReviewData(
+				'Review Plan',
+				'# New plan',
+				[{ label: 'Go', default: true }],
+				true,
+				planUri.toJSON(),
+			);
+			createWidget(review);
+			lastFileService!.setContent('# New plan');
+
+			fileChangesEmitter.fire(new FileChangesEvent([{ resource: planUri, type: FileChangeType.UPDATED }], false));
+			await tick();
+
+			assert.ok(!review.isOutdated, 'a write that matches the card must not mark it outdated');
+		});
+
+		test('file changes diverging from the reviewed content mark the card outdated', async () => {
+			fileChangesEmitter = store.add(new Emitter<FileChangesEvent>());
+			const planUri = URI.parse('file:///watcher-diverge-plan.md');
+			const review = new ChatPlanReviewData(
+				'Review Plan',
+				'# New plan',
+				[{ label: 'Go', default: true }],
+				true,
+				planUri.toJSON(),
+			);
+			createWidget(review);
+			lastFileService!.setContent('# Changed externally');
+
+			fileChangesEmitter.fire(new FileChangesEvent([{ resource: planUri, type: FileChangeType.UPDATED }], false));
+			await tick();
+
+			assert.strictEqual(review.isOutdated, true, 'a divergent write must mark the card outdated');
 		});
 	});
 });

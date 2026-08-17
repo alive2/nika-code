@@ -9,6 +9,7 @@ import { status } from '../../../../../../base/browser/ui/aria/aria.js';
 import { Button, ButtonWithDropdown, IButton } from '../../../../../../base/browser/ui/button/button.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { Action, Separator } from '../../../../../../base/common/actions.js';
+import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
@@ -292,7 +293,14 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		const modelListener = this._planChangeListeners.add(new MutableDisposable());
 		const watchModel = (model: ITextModel) => {
 			if (isEqual(model.uri, planUri)) {
-				modelListener.value = model.onDidChangeContent(() => this.markOutdated());
+				modelListener.value = model.onDidChangeContent(() => {
+					// Our own sync writes update the open model too — only mark
+					// outdated when the model actually diverged from the reviewed
+					// content (e.g. the user edited the plan in the editor).
+					if (model.getValue() !== this.review.content) {
+						this.markOutdated();
+					}
+				});
 			}
 		};
 
@@ -303,10 +311,27 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		this._planChangeListeners.add(this._modelService.onModelAdded(watchModel));
 		const watcher = this._planChangeListeners.add(this._fileService.createWatcher(planUri, { recursive: false, excludes: [] }));
 		this._planChangeListeners.add(watcher.onDidChange(event => {
-			if (event.contains(planUri, FileChangeType.DELETED) || (!this._modelService.getModel(planUri) && event.contains(planUri, FileChangeType.ADDED, FileChangeType.UPDATED))) {
+			if (event.contains(planUri, FileChangeType.DELETED)) {
 				this.markOutdated();
+			} else if (!this._modelService.getModel(planUri) && event.contains(planUri, FileChangeType.ADDED, FileChangeType.UPDATED)) {
+				// Only mark outdated if the file actually diverged from the reviewed
+				// content — syncing the reviewed content to the file must not mark
+				// the card as outdated.
+				void this.markOutdatedIfFileDiverged();
 			}
 		}));
+	}
+
+	private async markOutdatedIfFileDiverged(): Promise<void> {
+		try {
+			const current = (await this._textFileService.read(URI.revive(this.review.planUri!))).value;
+			if (current === this.review.content) {
+				return;
+			}
+		} catch {
+			// Unreadable file — treat as a change.
+		}
+		this.markOutdated();
 	}
 
 	private markOutdated(): void {
@@ -756,11 +781,48 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		this.renderCurrentActionButtons();
 	}
 
+	/**
+	 * Makes the plan file and the reviewed plan identical before the user acts on them:
+	 *
+	 * 1. If the plan file was not modified by the user, the reviewed content wins — the
+	 *    file is updated to match `review.content`. This is what keeps "Open Full Plan"
+	 *    (which opens the plan FILE) showing the plan the user sees in the chat card,
+	 *    even when the agent refined the plan without re-writing the file.
+	 * 2. If the file was modified (dirty editor), the user's edits win: they are saved and
+	 *    re-read into the card via `savePlanFile`.
+	 */
+	private async ensurePlanFileSynced(): Promise<boolean> {
+		if (!this.review.planUri) {
+			return true;
+		}
+		const planUri = URI.revive(this.review.planUri);
+		if (this.review instanceof ChatPlanReviewData && !this._textFileService.isDirty(planUri)) {
+			try {
+				const current = (await this._textFileService.read(planUri)).value;
+				if (current !== this.review.content) {
+					await this._textFileService.write(planUri, this.review.content);
+				}
+			} catch {
+				// The plan file is missing (e.g. the agent never wrote it) — create it
+				// with the reviewed content so the opened file always shows the plan.
+				try {
+					await this._fileService.createFile(planUri, VSBuffer.fromString(this.review.content));
+				} catch {
+					// File system error — nothing to sync; keep the card as-is.
+					return true;
+				}
+			}
+		}
+		// Save any dirty editor state (user edits win) and re-read the file into the card.
+		return this.savePlanFile();
+	}
+
 	/** Opens the plan file in the rich Plan Viewer editor. */
 	private async openPlanView(): Promise<void> {
 		if (!this.review.planUri) {
 			return;
 		}
+		await this.ensurePlanFileSynced();
 		const planUri = URI.revive(this.review.planUri);
 		await this._editorService.openEditor(
 			this._instantiationService.createInstance(PlanViewEditorInput, planUri, this._planViewSessionResource),
@@ -769,6 +831,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 	}
 
 	private async enterReviewMode(): Promise<void> {
+		await this.ensurePlanFileSynced();
 		// Read-only / submitted plans: fall back to opening the file in an editor.
 		if (!this.review.canProvideFeedback || this._isSubmitted) {
 			if (this.review.planUri) {
@@ -801,7 +864,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 					return;
 				}
 			}
-			if (this.review.planUri && !await this.savePlanFile()) {
+			if (this.review.planUri && !await this.ensurePlanFileSynced()) {
 				return;
 			}
 			this._isSubmitted = true;
@@ -828,7 +891,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		}
 		this._isSubmitting = true;
 		try {
-			if (this.review.planUri && !await this.savePlanFile()) {
+			if (this.review.planUri && !await this.ensurePlanFileSynced()) {
 				return;
 			}
 			this._isSubmitted = true;
@@ -942,7 +1005,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		}
 		this._isSubmitting = true;
 		try {
-			if (!await this.savePlanFile()) {
+			if (!await this.ensurePlanFileSynced()) {
 				return false;
 			}
 

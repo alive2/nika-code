@@ -277,6 +277,8 @@ suite('PlanAgentProvider', () => {
 		assert.ok(content.includes('vscode_reviewPlan'), 'Body should instruct using the reviewPlan tool');
 		assert.ok(content.includes('canProvideFeedback'), 'Body should pass canProvideFeedback to the tool');
 		assert.ok(content.includes('Implement Plan'), 'Body should suggest an Implement Plan action');
+		assert.ok(content.includes('EXACT markdown'), 'Body should require content to be identical to the saved plan file');
+		assert.ok(content.includes('never diverge'), 'Body should forbid the plan file and content from diverging');
 		assert.ok(content.includes('**Tasks**'), 'Body style guide should include a Tasks checklist section');
 		assert.ok(content.includes('- [ ]'), 'Body style guide should show checkbox task examples');
 	});
