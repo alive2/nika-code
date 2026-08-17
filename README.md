@@ -12,11 +12,12 @@ updater.
 
 | | |
 | --- | --- |
-| Nika version | `1.0.2` (`product.json` → `productVersion`) |
+| Nika version | `1.3.3` (`product.json` → `productVersion`) |
 | VS Code base | `1.134.0` (`package.json` → `version`) |
 | Quality | `stable` (user install, Windows) |
 | Releases | [github.com/alive2/nika-code/releases](https://github.com/alive2/nika-code/releases) |
 | Update feed | `https://nika-code-update.173david173.workers.dev` (Cloudflare Worker) |
+| Discord | [discord.gg/Z6rS3TmQZ](https://discord.gg/Z6rS3TmQZ) |
 | License | [MIT](LICENSE.txt) |
 
 ---
@@ -27,14 +28,37 @@ NikaCode is a single-maintainer fork. It exists to bundle a few opinionated
 things that upstream VS Code doesn't ship by default:
 
 - **BYOK chat provider (`nika`)** — bring your own API key and use it from the
-  built-in Copilot-style chat. The default model is `nika/deepseek-v4-flash-responses`,
-  wired through the OpenAI-compatible Responses API with a stateless tool-call
-  pairing fix so multi-turn tool use works reliably.
+  built-in Copilot-style chat. Ships **DeepSeek V4 Flash** (default:
+  `nika/deepseek-v4-flash-responses`) and **DeepSeek V4 Pro** via the
+  OpenAI-compatible Responses API, with a stateless tool-call pairing fix so
+  multi-turn tool use works reliably — including in agent-host sessions.
+- **Local semantic indexing (`#codebase`)** — fully offline workspace indexing
+  with on-device embeddings (BAAI `bge-small-en-v1.5` via onnxruntime), local
+  vector search, an indexing scheme manager (`local` / `off` / `github-remote`),
+  auto-refresh on workspace changes, and animated status-bar progress
+  (`Nika Indexing X/Y`). The `semantic_search` tool is exposed to BYOK
+  endpoints whenever a local index is available.
+- **DeepSeek token usage tracking** — a persistent usage ledger (per day /
+  session / workspace) with **peak & off-peak pricing** (cost math built in),
+  a live status-bar item with a **PEAK/OFF-PEAK billing-period countdown**, and
+  a full **Usage dashboard** inside Nika Settings: KPIs, an SVG tokens-per-day
+  chart, and sessions / workspaces / requests tables. See
+  [docs/TOKEN-USAGE.md](docs/TOKEN-USAGE.md).
+- **Nika Settings** — a dedicated settings editor opened from the title bar
+  button or the account menu, with provider setup guidance, model pickers, and
+  the usage dashboard.
 - **Agents window** — the agents-first UI layer (`src/vs/sessions`) alongside
-  the classic workbench.
+  the classic workbench. Nika models are surfaced in agent-host sessions
+  through the BYOK bridge, and a `sessions.list.showOnlyNikaAndCurrentWorkspace`
+  setting filters both the Agents window and the Copilot Chat sessions view to
+  Nika + current-workspace sessions.
 - **Automatic updates** — a Cloudflare Worker serves the update manifest; the
   client polls it hourly and installs new `NikaCodeSetup-<version>.exe` builds
   in-place (Windows user install), with no manual "update server" to maintain.
+- **A polished default experience** — Dark High Contrast default theme,
+  Open VSX extension support with bundled Material Icons, PDF attachments
+  preserved in BYOK chat, a first-run provider setup guide, and a version
+  badge on the Welcome page.
 - **A distinct identity** — separate app name, data folders (`.nika-code`),
   Windows mutexes, and branding so it can coexist with a regular VS Code
   install.
@@ -57,6 +81,25 @@ takes to push an update to installed clients (see
 
 ---
 
+## Community
+
+Join the **Nika Code Discord server**: [**discord.gg/Z6rS3TmQZ**](https://discord.gg/Z6rS3TmQZ)
+
+It's the official community hub for everything NikaCode:
+
+- **`#announcements`** — official announcements and release highlights
+- **`#github-feed`** — every commit, PR, issue, and review mirrored automatically
+- **`#releases`** — new releases and version notes
+- **`#dev-chat`**, **`#code-review`**, **`#bug-reports`** — development discussion, review summaries, and bug reports (issues filed on GitHub land here automatically)
+- **`#help`**, **`#showcase`**, **`#general`**, **`#off-topic`** — support, community showcases, and general chat
+
+The server is moderated and runs on a strict-but-welcoming code of conduct:
+treat others with respect, keep discussions on topic, and read `#rules` on
+arrival. Development happens openly — every commit, pull request, and release
+is mirrored to the server in real time.
+
+---
+
 ## Documentation
 
 The `docs/` folder is the reference for everything from building to shipping:
@@ -68,6 +111,7 @@ The `docs/` folder is the reference for everything from building to shipping:
 | [**DEPLOYMENT.md**](docs/DEPLOYMENT.md) | Building the app and the Windows installer from source |
 | [**RELEASING.md**](docs/RELEASING.md) | Cutting and publishing a release |
 | [**AUTO-UPDATE.md**](docs/AUTO-UPDATE.md) | How auto-updates work, the Cloudflare Worker, and how to verify updates |
+| [**TOKEN-USAGE.md**](docs/TOKEN-USAGE.md) | How DeepSeek token usage & cost tracking works (pricing, ledger, dashboard) |
 | [**SEMANTIC-INDEXING.md**](docs/SEMANTIC-INDEXING.md) | How `#codebase` indexing works vs. Cursor's indexing |
 | [**CURSOR-INDEXING-REVERSE-ENGINEERING.md**](docs/CURSOR-INDEXING-REVERSE-ENGINEERING.md) | Raw reverse-engineering evidence for Cursor's indexing (protocol, encryption, crepe, endpoints) |
 | [**VSCODE-CORE-VS-CURSOR-INDEXING.md**](docs/VSCODE-CORE-VS-CURSOR-INDEXING.md) | Deep comparison: how stock VS Code search/indexing works vs. Cursor's |
