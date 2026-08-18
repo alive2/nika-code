@@ -11,6 +11,7 @@ import {
 	formatOpenRouterPriceLabel,
 	formatTokenCount,
 	formatUsdAmount,
+	getDeepSeekRateCountdowns,
 	getDeepSeekRatePeriod,
 	getDeepSeekTokenCost,
 	getOpenRouterTokenCost,
@@ -131,6 +132,42 @@ describe('Nika DeepSeek pricing', () => {
 			expect(midnight.peak).toBe(false);
 			expect(midnight.nextIsPeak).toBe(true);
 			expect(midnight.endsAt).toBe(Date.UTC(2026, 7, 16, 1, 0, 0));
+		});
+	});
+
+		describe('getDeepSeekRateCountdowns', () => {
+		it('reports both deadlines inside a peak window', () => {
+			// 02:30 UTC → peak ends 04:00, off-peak ends at next peak start 06:00.
+			const mid = getDeepSeekRateCountdowns(new Date(Date.UTC(2026, 7, 16, 2, 30, 0)));
+			expect(mid.peak).toBe(true);
+			expect(mid.peakEndsAt).toBe(Date.UTC(2026, 7, 16, 4, 0, 0));
+			expect(mid.offPeakEndsAt).toBe(Date.UTC(2026, 7, 16, 6, 0, 0));
+
+			// 08:00 UTC → peak ends 10:00, off-peak ends at next peak start 01:00 tomorrow.
+			const late = getDeepSeekRateCountdowns(new Date(Date.UTC(2026, 7, 16, 8, 0, 0)));
+			expect(late.peak).toBe(true);
+			expect(late.peakEndsAt).toBe(Date.UTC(2026, 7, 16, 10, 0, 0));
+			expect(late.offPeakEndsAt).toBe(Date.UTC(2026, 7, 17, 1, 0, 0));
+		});
+
+		it('reports both deadlines in off-peak windows', () => {
+			// 05:00 UTC gap → off-peak ends 06:00, peak ends 10:00 (today).
+			const gap = getDeepSeekRateCountdowns(new Date(Date.UTC(2026, 7, 16, 5, 0, 0)));
+			expect(gap.peak).toBe(false);
+			expect(gap.offPeakEndsAt).toBe(Date.UTC(2026, 7, 16, 6, 0, 0));
+			expect(gap.peakEndsAt).toBe(Date.UTC(2026, 7, 16, 10, 0, 0));
+
+			// 12:00 UTC → off-peak ends 01:00 tomorrow, peak ends 04:00 tomorrow.
+			const afternoon = getDeepSeekRateCountdowns(new Date(Date.UTC(2026, 7, 16, 12, 0, 0)));
+			expect(afternoon.peak).toBe(false);
+			expect(afternoon.offPeakEndsAt).toBe(Date.UTC(2026, 7, 17, 1, 0, 0));
+			expect(afternoon.peakEndsAt).toBe(Date.UTC(2026, 7, 17, 4, 0, 0));
+
+			// 00:30 UTC → off-peak ends 01:00 today, peak ends 04:00 today.
+			const midnight = getDeepSeekRateCountdowns(new Date(Date.UTC(2026, 7, 16, 0, 30, 0)));
+			expect(midnight.peak).toBe(false);
+			expect(midnight.offPeakEndsAt).toBe(Date.UTC(2026, 7, 16, 1, 0, 0));
+			expect(midnight.peakEndsAt).toBe(Date.UTC(2026, 7, 16, 4, 0, 0));
 		});
 	});
 

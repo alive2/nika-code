@@ -79,6 +79,52 @@ export function getDeepSeekRatePeriod(date: Date = new Date()): NikaRatePeriodIn
 }
 
 /**
+ * Both DeepSeek rate-period deadlines at once, so the status bar can show how
+ * long the current period lasts AND when the next rate flip happens.
+ */
+export interface NikaRateCountdowns {
+	/** True when the current UTC time is inside a peak window. */
+	readonly peak: boolean;
+	/** Epoch ms at which the current peak window ends (next off-peak begins). */
+	readonly peakEndsAt: number;
+	/** Epoch ms at which the current off-peak window ends (next peak begins). */
+	readonly offPeakEndsAt: number;
+}
+
+/**
+ * Compute both countdown deadlines: when the current (or next) peak window
+ * ends and when the current off-peak window ends. Shares the window table with
+ * {@link getDeepSeekRatePeriod}.
+ *
+ * - In PEAK (e.g. 02:00 UTC): `peakEndsAt` = 04:00 today, `offPeakEndsAt` = 06:00 today.
+ * - In OFF-PEAK (e.g. 12:00 UTC): `peakEndsAt` = 04:00 tomorrow, `offPeakEndsAt` = 01:00 tomorrow.
+ */
+export function getDeepSeekRateCountdowns(date: Date = new Date()): NikaRateCountdowns {
+	const minutes = date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
+	const dayStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+
+	for (const [start, end] of PEAK_WINDOWS) {
+		if (minutes >= start && minutes < end) {
+			// Inside a peak window: it ends at the window's end (today); the
+			// off-peak window ends when the next peak window starts.
+			const nextPeakStart = PEAK_WINDOWS.find(([s]) => s >= end) ?? PEAK_WINDOWS[0];
+			const offPeakEndsAt = dayStart + nextPeakStart[0] * 60_000 + (nextPeakStart === PEAK_WINDOWS[0] ? 24 * 60 * 60_000 : 0);
+			return { peak: true, peakEndsAt: dayStart + end * 60_000, offPeakEndsAt };
+		}
+		if (minutes < start) {
+			// Off-peak, before the first peak window of the day: the off-peak
+			// window ends when that peak window starts; the peak window ends at
+			// its own end (today).
+			return { peak: false, peakEndsAt: dayStart + end * 60_000, offPeakEndsAt: dayStart + start * 60_000 };
+		}
+	}
+	// Off-peak, after the last peak window of the day: the off-peak window ends
+	// at the first peak window of the NEXT day (01:00 tomorrow); the next peak
+	// window ends at 04:00 tomorrow.
+	return { peak: false, peakEndsAt: dayStart + 24 * 60 * 60_000 + PEAK_WINDOWS[0][1] * 60_000, offPeakEndsAt: dayStart + 24 * 60 * 60_000 + PEAK_WINDOWS[0][0] * 60_000 };
+}
+
+/**
  * Format a duration for countdowns, e.g. `45m`, `1h`, `1h 23m`, `<1m`.
  */
 export function formatDuration(ms: number): string {

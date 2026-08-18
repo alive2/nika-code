@@ -43,7 +43,7 @@ import { LocalSession, Session, SessionIdForCLI } from '../common/utils';
 import { getCopilotCLISessionDir } from './cliHelpers';
 import type { CopilotCliBridgeSpanProcessor } from './copilotCliBridgeSpanProcessor';
 import { ICopilotCLIImageSupport } from './copilotCLIImageSupport';
-import { handleExitPlanMode } from './exitPlanModeHandler';
+import { exitPlanModeActionFromLabel, handleExitPlanMode, type ExitPlanModeActionType } from './exitPlanModeHandler';
 import { type McCommand, type McEvent, type McSessionCreateResult, MissionControlApiClient } from './missionControlApiClient';
 import { handleMcpPermission, handleReadPermission, handleShellPermission, handleWritePermission, type PermissionRequest, type PermissionRequestResult, showInteractivePermissionPrompt } from './permissionHelpers';
 import { TodoSqlQuery } from './todoSqlQuery';
@@ -851,6 +851,12 @@ export interface ICopilotCLISession extends IDisposable {
 export class CopilotCLISession extends DisposableStore implements ICopilotCLISession {
 	public readonly sessionId: string;
 	private _createdPullRequestUrl: string | undefined;
+	/**
+	 * Action the user picked on the custom `vscode_reviewPlan` card for the
+	 * current plan. Consumed by the next `exit_plan_mode.requested` so the
+	 * native dialog does not ask for the same approval a second time.
+	 */
+	private _planApprovedAction: ExitPlanModeActionType | undefined;
 	public get createdPullRequestUrl(): string | undefined {
 		return this._createdPullRequestUrl;
 	}
@@ -892,6 +898,37 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 	/** Get or create shared MC state for this SDK session. */
 	private get _mcState(): McSharedState | undefined {
 		return mcStateBySessionId.get(this.sessionId);
+	}
+
+	/**
+	 * Remember the action a user picked on a `vscode_reviewPlan` card so the
+	 * subsequent `exit_plan_mode.requested` can be answered automatically
+	 * instead of showing the native dialog a second time. The tool result is
+	 * either a JSON string or an expanded result object with text contents.
+	 */
+	private _capturePlanReviewApproval(result: unknown): void {
+		const contents = (result as { contents?: Array<{ type?: string; text?: string }> } | undefined)?.contents;
+		const text = typeof result === 'string' ? result
+			: Array.isArray(contents)
+				? contents.filter(block => block.type === 'text' && typeof block.text === 'string').map(block => block.text as string).join('\n')
+				: undefined;
+		if (!text) {
+			return;
+		}
+		try {
+			const parsed = JSON.parse(text) as { action?: string; rejected?: boolean };
+			if (!parsed || typeof parsed !== 'object') {
+				return;
+			}
+			if (parsed.rejected === true) {
+				this._planApprovedAction = undefined;
+			} else if (typeof parsed.action === 'string') {
+				this._planApprovedAction = exitPlanModeActionFromLabel(parsed.action);
+				this.logService.trace(`[CopilotCLISession] Plan review approved with action '${parsed.action}'`);
+			}
+		} catch {
+			// Not the reviewPlan JSON shape; nothing to record.
+		}
 	}
 
 	/** Callback to propagate trace context to the SDK's OtelLifecycle. */
@@ -1397,6 +1434,16 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 			if (shouldHandleExitPlanModeRequests) {
 				disposables.add(toDisposable(this._sdkSession.on('exit_plan_mode.requested', async (event) => {
 					this.updateArtifacts();
+					const priorApproval = this._planApprovedAction;
+					if (priorApproval !== undefined) {
+						// The user already approved this plan through the custom review
+						// card, so respond with the same action instead of asking again.
+						this._planApprovedAction = undefined;
+						this.logService.trace(`[CopilotCLISession] Auto-approving exit plan mode (prior reviewPlan approval: ${priorApproval})`);
+						flushPendingInvocationMessages();
+						this._sdkSession.respondToExitPlanMode(event.data.requestId, { approved: true, selectedAction: priorApproval });
+						return;
+					}
 					try {
 						const response = await handleExitPlanMode(
 							event.data,
@@ -1566,7 +1613,12 @@ export class CopilotCLISession extends DisposableStore implements ICopilotCLISes
 			})));
 			disposables.add(toDisposable(this._sdkSession.on('tool.execution_complete', (event) => {
 				const toolCall = toolCalls.get(event.data.toolCallId);
-				const toolName = toolCall?.toolName || '<unknown>';
+				// `vscode_reviewPlan` is a workbench-side tool that never appears in the
+				// CLI tool-name union, so keep this as a plain string.
+				const toolName: string = toolCall?.toolName || '<unknown>';
+				if (toolName === 'vscode_reviewPlan') {
+					this._capturePlanReviewApproval(event.data.result);
+				}
 				if (toolName.endsWith('create_pull_request') && event.data.success) {
 					const pullRequestUrl = extractPullRequestUrlFromToolResult(event.data.result);
 					if (pullRequestUrl) {

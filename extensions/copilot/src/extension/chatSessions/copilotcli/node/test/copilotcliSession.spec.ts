@@ -2588,6 +2588,83 @@ describe('CopilotCLISession', () => {
 
 			expect(result.value).toEqual({ approved: false });
 		});
+
+		it('auto-approves exit plan mode after the reviewPlan card was approved (no second dialog)', async () => {
+			const result = { value: undefined as unknown };
+			sdkSession.send = async (options: any) => {
+				sdkSession.emit('assistant.turn_start', {});
+				// The plan agent presented the plan via the reviewPlan tool and the
+				// user clicked "Implement Plan" on the custom card.
+				sdkSession.emit('tool.execution_start', {
+					toolCallId: 'review-1',
+					toolName: 'vscode_reviewPlan',
+					arguments: { title: 'Plan summary', actions: [{ label: 'Implement Plan', default: true }, { label: 'Approve Plan Only' }], canProvideFeedback: true },
+				});
+				sdkSession.emit('tool.execution_complete', {
+					toolCallId: 'review-1',
+					toolName: 'vscode_reviewPlan',
+					success: true,
+					result: JSON.stringify({ action: 'Implement Plan', rejected: false }),
+				});
+				result.value = await sdkSession.emitExitPlanModeRequest({ summary: 'Plan ready', actions: ['interactive', 'exit_only'] });
+				sdkSession.emit('assistant.turn_end', {});
+			};
+			const session = await createSession();
+			const stream = new MockChatResponseStream();
+			session.attachStream(stream);
+
+			await session.handleRequest({ id: '', toolInvocationToken: undefined as never }, { prompt: 'Plan' }, [], undefined, authInfo, CancellationToken.None);
+
+			expect(result.value).toEqual({ approved: true, selectedAction: 'interactive' });
+		});
+
+		it('maps an "Approve Plan Only" reviewPlan approval to the exit_only action', async () => {
+			const result = { value: undefined as unknown };
+			sdkSession.send = async (options: any) => {
+				sdkSession.emit('assistant.turn_start', {});
+				sdkSession.emit('tool.execution_start', { toolCallId: 'review-2', toolName: 'vscode_reviewPlan', arguments: {} });
+				sdkSession.emit('tool.execution_complete', {
+					toolCallId: 'review-2',
+					toolName: 'vscode_reviewPlan',
+					success: true,
+					result: JSON.stringify({ action: 'Approve Plan Only', rejected: false }),
+				});
+				result.value = await sdkSession.emitExitPlanModeRequest({ summary: 'Plan ready', actions: ['interactive', 'exit_only'] });
+				sdkSession.emit('assistant.turn_end', {});
+			};
+			const session = await createSession();
+			const stream = new MockChatResponseStream();
+			session.attachStream(stream);
+
+			await session.handleRequest({ id: '', toolInvocationToken: undefined as never }, { prompt: 'Plan' }, [], undefined, authInfo, CancellationToken.None);
+
+			expect(result.value).toEqual({ approved: true, selectedAction: 'exit_only' });
+		});
+
+		it('clears the prior approval when the reviewPlan card is rejected', async () => {
+			const result = { value: undefined as unknown };
+			sdkSession.send = async (options: any) => {
+				sdkSession.emit('assistant.turn_start', {});
+				sdkSession.emit('tool.execution_start', { toolCallId: 'review-3', toolName: 'vscode_reviewPlan', arguments: {} });
+				sdkSession.emit('tool.execution_complete', {
+					toolCallId: 'review-3',
+					toolName: 'vscode_reviewPlan',
+					success: true,
+					result: JSON.stringify({ rejected: true }),
+				});
+				// No pending approval → the native flow runs (and denies because
+				// there is no toolInvocationToken to show the question with).
+				result.value = await sdkSession.emitExitPlanModeRequest({ summary: 'Plan ready', actions: ['interactive', 'exit_only'] });
+				sdkSession.emit('assistant.turn_end', {});
+			};
+			const session = await createSession();
+			const stream = new MockChatResponseStream();
+			session.attachStream(stream);
+
+			await session.handleRequest({ id: '', toolInvocationToken: undefined as never }, { prompt: 'Plan' }, [], undefined, authInfo, CancellationToken.None);
+
+			expect(result.value).toEqual({ approved: false });
+		});
 	});
 
 	describe('usage reporting', () => {

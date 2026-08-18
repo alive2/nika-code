@@ -17,7 +17,7 @@ import { ToolName } from '../../../../tools/common/toolNames';
 import { ICopilotTool } from '../../../../tools/common/toolsRegistry';
 import { IOnWillInvokeToolEvent, IToolsService, IToolValidationResult } from '../../../../tools/common/toolsService';
 import { Session } from '../../common/utils';
-import { handleExitPlanMode, type ExitPlanModeEventData, type ExitPlanModeResponse } from '../exitPlanModeHandler';
+import { exitPlanModeActionFromLabel, handleExitPlanMode, type ExitPlanModeEventData, type ExitPlanModeResponse } from '../exitPlanModeHandler';
 
 // ---------- helpers / mocks ----------
 
@@ -37,6 +37,20 @@ class StubSession {
 	getPlanPath(): string | undefined { return this.planPath; }
 	async writePlan(content: string): Promise<void> { this.writtenPlans.push(content); }
 }
+
+describe('exitPlanModeActionFromLabel', () => {
+	it('maps reviewPlan action labels back to SDK action types', () => {
+		expect(exitPlanModeActionFromLabel('Implement Plan')).toBe('interactive');
+		expect(exitPlanModeActionFromLabel('Approve Plan Only')).toBe('exit_only');
+		expect(exitPlanModeActionFromLabel('Implement with Autopilot')).toBe('autopilot');
+		expect(exitPlanModeActionFromLabel('Implement with Autopilot Fleet')).toBe('autopilot_fleet');
+	});
+
+	it('falls back to interactive for unknown or missing labels', () => {
+		expect(exitPlanModeActionFromLabel('Some custom label')).toBe('interactive');
+		expect(exitPlanModeActionFromLabel(undefined)).toBe('interactive');
+	});
+});
 
 class FakeToolsService implements IToolsService {
 	readonly _serviceBrand: undefined;

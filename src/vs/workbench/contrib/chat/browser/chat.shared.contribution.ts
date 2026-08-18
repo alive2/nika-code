@@ -203,6 +203,7 @@ import { AgentPluginEditorInput } from './agentPluginEditor/agentPluginEditorInp
 import { PlanViewEditor } from './planView/planViewEditor.js';
 import { PlanViewEditorInput } from './planView/planViewEditorInput.js';
 import { PlanViewCommandContribution } from './planView/planViewCommandContribution.js';
+import { PlanTodoFileSync } from './planView/planTodoFileSync.js';
 import { PlanViewService, IPlanViewService } from '../common/planView/planViewService.js';
 import { AgentPluginRepositoryService } from './agentPluginRepositoryService.js';
 import { BrowserPluginGitCommandService } from './pluginGitCommandService.js';
@@ -2869,6 +2870,7 @@ Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEdit
 
 registerWorkbenchContribution2(CopilotTelemetryContribution.ID, CopilotTelemetryContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(PlanViewCommandContribution.ID, PlanViewCommandContribution, WorkbenchPhase.BlockRestore);
+registerWorkbenchContribution2(PlanTodoFileSync.ID, PlanTodoFileSync, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatSpeechToTextInitContribution.ID, ChatSpeechToTextInitContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatResolverContribution.ID, ChatResolverContribution, WorkbenchPhase.BlockStartup);
 registerWorkbenchContribution2(ChatDebugResolverContribution.ID, ChatDebugResolverContribution, WorkbenchPhase.BlockStartup);

@@ -6,17 +6,17 @@
 import * as vscode from 'vscode';
 import { ILogService } from '../../../platform/log/common/logService';
 import { Disposable, toDisposable } from '../../../util/vs/base/common/lifecycle';
-import { formatCost, formatDuration, formatOpenRouterPriceLabel, formatTokenCount, getDeepSeekRatePeriod } from './nikaPricing';
+import { formatCost, formatDuration, formatTokenCount, getDeepSeekRateCountdowns } from './nikaPricing';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaUsageTracker } from './nikaUsageTracker';
 
 const usageStatusBarItemId = 'nika.usageStatus';
 
 /**
- * Status bar item for Nika token usage. While a response streams it shows a
- * live token counter; when idle it shows today's totals plus a provider-aware
- * billing label (DeepSeek PEAK / OFF-PEAK countdown, OpenRouter catalog price,
- * or the provider name). Clicking opens Nika Settings on the `usage` section.
+ * Status bar item for Nika. Shows how long the current DeepSeek rate period
+ * lasts AND when the opposite rate starts (e.g. `PEAK 2h 13m · OFF-PEAK 1h 47m`).
+ * Today's token totals and cost are available in the tooltip. Clicking opens
+ * Nika Settings on the `usage` section.
  */
 export class NikaUsageStatus extends Disposable {
 	/**
@@ -83,41 +83,24 @@ export class NikaUsageStatus extends Disposable {
 				return;
 			}
 
+			// Always render the rate-period countdowns: while streaming we add the
+			// `showProgress` spinner, when idle we prepend the pulse icon.
+			const rateLabel = countdownLabel();
 			const liveCount = this._usageTracker.liveStreamCount;
 			if (liveCount > 0) {
-				const estimate = this._usageTracker.liveTokenEstimate;
 				// `showProgress` renders the spin codicon as one stable DOM node
 				// reused across text updates, so the animation keeps spinning.
 				this._statusItem.showProgress = 'loading';
-				this._setText(`Nika ${formatTokenCount(estimate)} tok`);
-				this._statusItem.tooltip = vscode.l10n.t('Nika tokens streaming ({0} active request{1})...', liveCount, liveCount === 1 ? '' : 's');
+				this._setText(rateLabel);
+				this._statusItem.tooltip = vscode.l10n.t('Nika response streaming ({0} active request{1})... Click to open the usage dashboard.', liveCount, liveCount === 1 ? '' : 's');
 				this._statusItem.show();
 				return;
 			}
 
 			this._statusItem.showProgress = false;
 			const totals = todayTotals(this._usageTracker);
-			// The provider of the most recent successful request decides how the
-			// idle label describes billing. Legacy events default to DeepSeek.
-			const lastEvent = [...this._usageTracker.events].reverse().find(event => !event.error);
-			const provider = lastEvent?.provider ?? 'deepseek';
-			if (provider === 'deepseek') {
-				const rate = getDeepSeekRatePeriod();
-				const countdown = formatDuration(rate.endsAt - Date.now());
-				const rateLabel = rate.peak
-					? `PEAK · ${countdown} left`
-					: `OFF-PEAK · ${countdown} to PEAK`;
-				this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · ${rateLabel}`);
-				this._statusItem.tooltip = vscode.l10n.t('Nika DeepSeek token usage today. Click to open the usage dashboard.');
-			} else if (provider === 'openrouter' && lastEvent?.pricing) {
-				const price = formatOpenRouterPriceLabel(lastEvent.pricing);
-				this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · OpenRouter ${price}`);
-				this._statusItem.tooltip = vscode.l10n.t('Nika OpenRouter token usage today at catalog prices. Click to open the usage dashboard.');
-			} else {
-				const label = provider === 'gemini' ? 'Gemini' : 'Ollama';
-				this._setText(`$(pulse) Nika today ${formatTokenCount(totals.totalTokens)} tok · ${formatCost(totals.cost)} · ${label}`);
-				this._statusItem.tooltip = vscode.l10n.t('Nika {0} token usage today. Click to open the usage dashboard.', label);
-			}
+			this._setText(`$(pulse) ${rateLabel}`);
+			this._statusItem.tooltip = vscode.l10n.t('Nika today: {0} tokens · {1}. {2} Click to open the usage dashboard.', formatTokenCount(totals.totalTokens), formatCost(totals.cost), ratePeriodTooltip());
 			this._statusItem.show();
 		} catch (error) {
 			this._logService.trace(`NikaUsageStatus: failed to update status item: ${String(error)}`);
@@ -131,6 +114,28 @@ export class NikaUsageStatus extends Disposable {
 			this._lastText = text;
 		}
 	}
+}
+
+/**
+ * The always-visible status bar label: how long the current rate period lasts
+ * and how long until the opposite rate begins, e.g. `PEAK 2h 13m · OFF-PEAK 1h 47m`.
+ */
+function countdownLabel(): string {
+	const { peak, peakEndsAt, offPeakEndsAt } = getDeepSeekRateCountdowns();
+	const peakLeft = formatDuration(peakEndsAt - Date.now());
+	const offPeakLeft = formatDuration(offPeakEndsAt - Date.now());
+	return peak
+		? `PEAK ${peakLeft} · OFF-PEAK ${offPeakLeft}`
+		: `OFF-PEAK ${offPeakLeft} · PEAK ${peakLeft}`;
+}
+
+/** Absolute UTC times for the tooltip, e.g. `PEAK ends 04:00 UTC · OFF-PEAK ends 06:00 UTC`. */
+function ratePeriodTooltip(): string {
+	const { peak, peakEndsAt, offPeakEndsAt } = getDeepSeekRateCountdowns();
+	const fmt = (ms: number) => new Date(ms).toISOString().slice(11, 16);
+	return peak
+		? `PEAK ends ${fmt(peakEndsAt)} UTC · OFF-PEAK ends ${fmt(offPeakEndsAt)} UTC`
+		: `OFF-PEAK ends ${fmt(offPeakEndsAt)} UTC · PEAK ends ${fmt(peakEndsAt)} UTC`;
 }
 
 /** Local-day totals for the status bar's idle state. */

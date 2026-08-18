@@ -41,6 +41,9 @@ import { IChatRendererContent, isResponseVM } from '../../../common/model/chatVi
 import { ChatTreeItem } from '../../chat.js';
 import { IChatContentPart, IChatContentPartRenderContext } from './chatContentParts.js';
 import { ChatCollapsibleContentPart } from './chatCollapsibleContentPart.js';
+import { IChatWidget, IChatWidgetService } from '../../chat.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { ExecuteHandoffActionId } from '../../actions/chatExecuteActions.js';
 import { IPlanViewService } from '../../../common/planView/planViewService.js';
 import { IChatOutputRendererService } from '../../chatOutputItemRenderer.js';
 import { PlanViewEditorInput } from '../../planView/planViewEditorInput.js';
@@ -104,6 +107,8 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		@IFileService private readonly _fileService: IFileService,
 		@IPlanViewService private readonly _planViewService: IPlanViewService,
 		@IChatOutputRendererService private readonly _chatOutputRendererService: IChatOutputRendererService,
+		@IChatWidgetService private readonly _chatWidgetService: IChatWidgetService,
+		@ICommandService private readonly _commandService: ICommandService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 	) {
 		super();
@@ -877,11 +882,42 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 				rejected: false,
 				...(textareaFeedback ? { feedback: textareaFeedback, feedbackOverall: textareaFeedback } : {}),
 			});
+			void this._maybeAutoStartImplementation(action);
 			void this.markUsed();
 		} finally {
 			if (!this._isSubmitted) {
 				this._isSubmitting = false;
 			}
+		}
+	}
+
+	/**
+	 * One-click implement: when the user picks an implement action (anything
+	 * but "Approve Plan Only") and the session's current mode offers a
+	 * "Start Implementation" handoff (the custom Plan agent), execute that
+	 * handoff right away so implementation begins without an extra chip click.
+	 * The native SDK exit-plan-mode flow has no such handoff, so it is a no-op
+	 * there (approval still returns through {@link IChatPlanReviewPartOptions.onSubmit}).
+	 */
+	private async _maybeAutoStartImplementation(action: IChatPlanApprovalAction): Promise<void> {
+		if (action.label === 'Approve Plan Only') {
+			return;
+		}
+		try {
+			const widget: IChatWidget | undefined = this._chatWidgetService.getWidgetBySessionResource(this._planViewSessionResource);
+			const mode = widget?.input.currentModeObs.get();
+			const handoffs = mode?.handOffs?.get();
+			const handoff = handoffs?.find(h => h.label.trim().toLowerCase() === 'start implementation');
+			if (!handoff) {
+				return;
+			}
+			await this._commandService.executeCommand(ExecuteHandoffActionId, {
+				label: handoff.label,
+				sourceCustomAgent: mode?.name.get(),
+				sessionResource: this._planViewSessionResource.toString(),
+			});
+		} catch (error) {
+			// Best-effort: the handoff chip remains available if auto-start fails.
 		}
 	}
 
