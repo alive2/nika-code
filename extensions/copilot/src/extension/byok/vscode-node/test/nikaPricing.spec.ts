@@ -204,5 +204,23 @@ describe('Nika DeepSeek pricing', () => {
 			expect(formatUsdAmount(0.0002)).toBe('$0.0002');
 			expect(formatUsdAmount(250)).toBe('$250');
 		});
+
+		it('never emits a trailing-dot amount for sub-cent prices', () => {
+			// Regression: rounding to 4 decimals and stripping zeros once produced
+			// `$0.` for very small catalog prices.
+			expect(formatUsdAmount(0.00005)).toBe('$0.00005');
+			expect(formatUsdAmount(0.0000001)).toBe('$0.0000001');
+			expect(formatUsdAmount(0.0001)).toBe('$0.0001');
+			expect(formatUsdAmount(0.001)).toBe('$0.001');
+			expect(formatUsdAmount(-1)).toBe('$0');
+			expect(formatUsdAmount(Number.NaN)).toBe('$0');
+			expect(formatUsdAmount(Number.POSITIVE_INFINITY)).toBe('$0');
+		});
+
+		it('labels free models without numeric prices', () => {
+			const free = parseOpenRouterPricing({ prompt: '0', completion: '0' })!;
+			expect(free.free).toBe(true);
+			expect(formatOpenRouterPriceLabel(free)).toBe('Free');
+		});
 	});
 });

@@ -9,7 +9,7 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_SECRET, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL } from './nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, resolveNikaTokenLimits } from './nikaModels';
 import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { NikaUsageTracker } from './nikaUsageTracker';
@@ -77,6 +77,9 @@ export function compareVersions(a: string, b: string): number {
 export class NikaSettingsEditor extends Disposable {
 	private _panel: vscode.WebviewPanel | undefined;
 	private _activeSection: NikaSettingsSection = 'overview';
+	private _deepSeekKey: string | undefined;
+	private _geminiKey: string | undefined;
+	private _openRouterKey: string | undefined;
 	private readonly _output = this._register(vscode.window.createOutputChannel(vscode.l10n.t('Nika')));
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
 
@@ -247,12 +250,23 @@ export class NikaSettingsEditor extends Disposable {
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 		]);
+		// Cache the key presence so view-model helpers (modelChoices) can gate
+		// model visibility without re-reading secrets for every dropdown.
+		this._deepSeekKey = deepseekKey;
+		this._geminiKey = geminiKey;
+		this._openRouterKey = openRouterKey;
 		const value = <T>(key: string, fallback: T): T => config.get<T>(key, fallback);
+		const openRouterCatalog = openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [];
 		return {
 			deepseekConfigured: !!deepseekKey,
 			geminiConfigured: !!geminiKey,
 			openrouterConfigured: !!openRouterKey,
-			openrouterModels: openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [],
+			openrouterModels: openRouterCatalog,
+			// Flattened, key-gated model list for the Models / Agents / Vision
+			// dropdowns (native + OpenRouter catalog).
+			modelChoices: await this._modelChoicesState(config, openRouterCatalog),
+			hasOllama: true,
+			ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 			appVersion: vscode.version,
 			extensionVersion: String((this._context.extension.packageJSON as { version?: string }).version ?? 'unknown'),
 			connections: Object.fromEntries(this._connections),
@@ -312,6 +326,12 @@ export class NikaSettingsEditor extends Disposable {
 				vision: model.capabilities.vision,
 				toolCalling: model.capabilities.toolCalling,
 				reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+				// Per-model reasoning-effort levels from the catalog (e.g.
+				// `['low','medium','high']`); empty when the model has none.
+				efforts: model.capabilities.supportsReasoningEffort ?? [],
+				provider: 'openrouter',
+				// The vendor segment of the catalog id (e.g. `anthropic`).
+				vendor: model.id.split('/')[0] ?? '',
 				priceLabel: model.pricing ? formatOpenRouterPriceLabel(model.pricing) : '',
 				free: !!model.pricing?.free,
 			}));
@@ -320,6 +340,49 @@ export class NikaSettingsEditor extends Disposable {
 			this.log('WARN', vscode.l10n.t('OpenRouter catalog unavailable: {0}', detail));
 			return [];
 		}
+	}
+
+	/**
+	 * Flattened, key-gated model list for the settings dropdowns (Models
+	 * page, Agents page, vision defaults). Mirrors the chat model picker's
+	 * visibility rules in `nikaProvider.provideLanguageModelChatInformation`:
+	 * DeepSeek/Gemini only when their key is present, Gemma always, and the
+	 * OpenRouter catalog only when an OpenRouter key is present. Each entry
+	 * carries the id (as stored in `nika.defaultModel`, i.e. `nika/…` for
+	 * native models and `nika/openrouter/…` for catalog models), a display
+	 * name, the provider family, capabilities (vision, effort levels), and
+	 * optional context/pricing for the catalog rows.
+	 */
+	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[]): Promise<unknown[]> {
+		const limits = resolveNikaTokenLimits(
+			config.get<string>('contextWindow', '128K'),
+			config.get<string>('outputTokens', '8K'),
+		);
+		const nativeChoices = getVisibleNikaModelIds(!!this._deepSeekKey, !!this._geminiKey).map(id => {
+			const capabilities = getNikaModelCapabilities(id, limits);
+			return {
+				id: `nika/${id}`,
+				displayName: capabilities.name,
+				provider: getNikaModelProvider(id),
+				vision: capabilities.vision ?? false,
+				efforts: getNikaEffortOptionsForModel(id),
+			};
+		});
+		const catalogChoices = (openRouterCatalog as unknown[]).map(model => {
+			const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; vendor: string; contextWindow: number; priceLabel: string; free: boolean };
+			return {
+				id: `nika/${NIKA_OPENROUTER_MODEL_PREFIX}${entry.id}`,
+				displayName: entry.name,
+				provider: 'openrouter',
+				vendor: entry.vendor,
+				vision: entry.vision,
+				efforts: entry.efforts,
+				contextWindow: entry.contextWindow,
+				priceLabel: entry.priceLabel,
+				free: entry.free,
+			};
+		});
+		return [...nativeChoices, ...catalogChoices];
 	}
 
 	private _usageState(): Record<string, unknown> {
@@ -480,7 +543,20 @@ export class NikaSettingsEditor extends Disposable {
 			throw new Error(vscode.l10n.t('Temperature must be between 0 and 2.'));
 		}
 		if ((key === 'thinkingEffort' || key.endsWith('ThinkingEffort')) && !isNikaThinkingEffort(value)) {
-			throw new Error(vscode.l10n.t('Thinking effort must be None, Low, High, or Max.'));
+			throw new Error(vscode.l10n.t('Thinking effort must be None, Low, Medium, High, or Max.'));
+		}
+		// Clamp an effort value that the associated model does not support to
+		// the nearest supported level (e.g. `max` → `high` for OpenRouter /
+		// Gemini, or `medium` → `high` for DeepSeek). This keeps the stored
+		// value valid for the model that will actually run the request.
+		if ((key === 'thinkingEffort' || key.endsWith('ThinkingEffort')) && typeof value === 'string') {
+			const modelId = key === 'thinkingEffort'
+				? vscode.workspace.getConfiguration('nika').get<string>('defaultModel', NIKA_RESPONSES_MODEL)
+				: vscode.workspace.getConfiguration('nika').get<string>(`agent.${key.slice('agent.'.length, -'ThinkingEffort'.length)}`, NIKA_RESPONSES_MODEL);
+			const supported = getNikaEffortOptionsForModel(modelId);
+			if (supported.length > 0 && !supported.includes(value)) {
+				value = this._clampEffort(value, supported);
+			}
 		}
 		if ((key === 'pdfMaxFileSizeMB' || key === 'pdfMaxPages' || key === 'pdfSparseThreshold') && (typeof value !== 'number' || !Number.isFinite(value) || value < 1)) {
 			throw new Error(vscode.l10n.t('PDF limits must be positive numbers.'));
@@ -713,7 +789,7 @@ nav button{display:block;width:100%;border:0;border-radius:6px;background:transp
 main{padding:38px 46px 80px}section{display:none}section.active{display:block}h1{font-size:26px;margin:0 0 8px}h2{font-size:16px;margin:30px 0 8px}.lead{color:var(--vscode-descriptionForeground);margin:0 0 28px;line-height:1.55}
 .card{padding:18px;border:1px solid var(--vscode-panel-border);border-radius:10px;margin:12px 0;background:color-mix(in srgb,var(--vscode-editor-background) 94%,var(--vscode-sideBar-background))}.row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(210px,1fr);gap:22px;align-items:center;padding:11px 0}.row+.row{border-top:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent)}label strong{display:block;margin-bottom:4px}.hint,.status{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}.agent-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px}
 input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
-.chart{margin:8px 0 4px}.chart svg{display:block;width:100%;height:auto}.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0 4px}.kpi .k{color:var(--vscode-descriptionForeground);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.kpi .v{font-size:21px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}table.usage{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}table.usage th,table.usage td{text-align:left;padding:6px 10px;border-bottom:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent);vertical-align:top}table.usage th{color:var(--vscode-descriptionForeground);font-weight:600;white-space:nowrap}table.usage td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}table.usage tr:last-child td{border-bottom:0}.peak-badge{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:color-mix(in srgb,var(--vscode-badge-background) 55%,transparent)}.peak-badge .dot{background:#22c55e}.peak-badge.peak .dot{background:#ef4444}.empty{color:var(--vscode-descriptionForeground);font-style:italic;padding:10px 0}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
+.chart{margin:8px 0 4px}.chart svg{display:block;width:100%;height:auto}.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0 4px}.kpi .k{color:var(--vscode-descriptionForeground);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.kpi .v{font-size:21px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}table.usage{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;table-layout:fixed}table.usage th,table.usage td{text-align:left;padding:6px 10px;border-bottom:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent);vertical-align:top;overflow-wrap:break-word;word-break:break-word}table.usage th{color:var(--vscode-descriptionForeground);font-weight:600;white-space:nowrap}table.usage td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}table.usage tr:last-child td{border-bottom:0}table.usage [data-openrouter-default]{white-space:normal;text-align:left;word-break:break-word}.peak-badge{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:color-mix(in srgb,var(--vscode-badge-background) 55%,transparent)}.peak-badge .dot{background:#22c55e}.peak-badge.peak .dot{background:#ef4444}.empty{color:var(--vscode-descriptionForeground);font-style:italic;padding:10px 0}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>NikaCode</div><nav>
 ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['indexing', vscode.l10n.t('Indexing')], ['usage', vscode.l10n.t('Usage')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
 </nav></aside><main>
@@ -727,15 +803,15 @@ ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Provide
 ${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._secretRow('openrouter', vscode.l10n.t('3. OpenRouter API key (optional)'), vscode.l10n.t('Adds the full OpenRouter catalog to the model picker with live pricing, web search, and free models.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
 </div></section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
-${this._selectRow('defaultModel', vscode.l10n.t('Default model for new chats'), [['nika/deepseek-v4-flash', 'DeepSeek V4 Flash'], ['nika/deepseek-v4-pro', 'DeepSeek V4 Pro'], ['nika/deepseek-v4-flash-responses', 'DeepSeek V4 Flash (Responses)'], ['nika/deepseek-v4-pro-responses', 'DeepSeek V4 Pro (Responses)'], ['nika/gemini-2.5-flash', 'Gemini 2.5 Flash'], ['nika/gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite'], ['nika/gemma4:31b', 'Gemma 4 31B']])}
-${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._selectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), [['none', vscode.l10n.t('None')], ['low', vscode.l10n.t('Low')], ['high', vscode.l10n.t('High')], ['max', vscode.l10n.t('Max')]])}</div>
-${(state.openrouterModels as unknown[]).length > 0 ? `<div class="card"><h2>${vscode.l10n.t('OpenRouter catalog')}</h2><p class="hint">${vscode.l10n.t('Search the full catalog and pick a default. The chat model picker always shows the complete list with live prices.')}</p><div class="controls"><input type="text" data-openrouter-filter placeholder="${vscode.l10n.t('Filter by model id or name…')}"></div><div data-openrouter-catalog></div></div>` : ''}</section>
-<section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only DeepSeek models. Provider credentials are managed on the Providers page.')}</p><div class="card">
-${this._selectRow('visionModel', vscode.l10n.t('Image-description backend'), [['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite'], ['gemma4:31b', 'Gemma 4 31B (Ollama)'], ['openrouter', 'OpenRouter'], ['vscode', vscode.l10n.t('Another VS Code vision model')]])}${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}
+${this._modelSelectRow('defaultModel', vscode.l10n.t('Default model for new chats'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL))}
+${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._effortSelectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL), String((state.settings as Record<string, unknown>).thinkingEffort ?? 'high'))}</div>
+${(state.openrouterModels as unknown[]).length > 0 ? `<div class="card" style="min-width:0"><h2>${vscode.l10n.t('OpenRouter catalog')}</h2><p class="hint">${vscode.l10n.t('Search the full catalog and pick a default. The chat model picker always shows the complete list with live prices.')}</p><div class="controls"><input type="text" data-openrouter-filter placeholder="${vscode.l10n.t('Filter by model id or name…')}"></div><div data-openrouter-catalog style="min-width:0"></div></div>` : ''}</section>
+<section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only models. Provider credentials are managed on the Providers page.')}</p><div class="card">
+${this._visionBackendRow(state, String((state.settings as Record<string, unknown>).visionModel ?? 'gemini-2.5-flash'))}${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}
 <div class="row"><label for="visionOpenRouterModel"><strong>${vscode.l10n.t('OpenRouter vision model')}</strong><span class="hint">${vscode.l10n.t('A vision-capable OpenRouter model id, e.g. google/gemini-2.5-flash.')}</span></label><input id="visionOpenRouterModel" data-setting="visionOpenRouterModel" type="text" list="openrouter-vision-models"></div><datalist id="openrouter-vision-models"></datalist>
 </div></section>
 <section id="pdf"><h1>${vscode.l10n.t('PDF')}</h1><p class="lead">${vscode.l10n.t('PDF limits apply only to PDF reads. Page ranges can be requested in English or Hebrew.')}</p><div class="card">${this._numberRow('pdfMaxFileSizeMB', vscode.l10n.t('Maximum PDF size (MB)'), '1', '1024', '1')}${this._numberRow('pdfMaxPages', vscode.l10n.t('Pages without an explicit range'), '1', '1000', '1')}${this._checkboxRow('pdfPageNotice', vscode.l10n.t('Show truncation notice'))}${this._checkboxRow('pdfSparseFallback', vscode.l10n.t('Use Gemini for sparse or scanned PDFs'))}${this._numberRow('pdfSparseThreshold', vscode.l10n.t('Sparse-document character threshold'), '1', '100000', '100')}</div></section>
-<section id="agents"><h1>${vscode.l10n.t('Agents')}</h1><p class="lead">${vscode.l10n.t('Assign a model and thinking effort to each built-in role. The recommended profile uses DeepSeek V4 Flash Responses for every role.')}</p><div class="card">${(['plan', 'explore', 'utility', 'utilitySmall', 'inlineChat'] as const).map(id => this._agentRow(id, ({ plan: vscode.l10n.t('Plan'), explore: vscode.l10n.t('Explore'), utility: vscode.l10n.t('Utility'), utilitySmall: vscode.l10n.t('Utility Small'), inlineChat: vscode.l10n.t('Inline Chat') } as Record<string, string>)[id])).join('')}</div><div class="actions"><button class="action" data-action="recommendedAgents">${vscode.l10n.t('Apply recommended mappings')}</button></div></section>
+<section id="agents"><h1>${vscode.l10n.t('Agents')}</h1><p class="lead">${vscode.l10n.t('Assign a model and thinking effort to each built-in role. The recommended profile uses DeepSeek V4 Flash Responses for every role.')}</p><div class="card">${(['plan', 'explore', 'utility', 'utilitySmall', 'inlineChat'] as const).map(id => this._agentRow(id, ({ plan: vscode.l10n.t('Plan'), explore: vscode.l10n.t('Explore'), utility: vscode.l10n.t('Utility'), utilitySmall: vscode.l10n.t('Utility Small'), inlineChat: vscode.l10n.t('Inline Chat') } as Record<string, string>)[id], state)).join('')}</div><div class="actions"><button class="action" data-action="recommendedAgents">${vscode.l10n.t('Apply recommended mappings')}</button></div></section>
 <section id="indexing"><h1>${vscode.l10n.t('Indexing')}</h1><p class="lead">${vscode.l10n.t('Choose how Nika indexes this workspace. The default applies everywhere; a workspace-specific scheme overrides it here.')}</p><div class="card">
 ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', vscode.l10n.t('Off (ripgrep only)')], ['github-remote', vscode.l10n.t('GitHub remote')], ['local', vscode.l10n.t('Local (ONNX)')], ['cloud', vscode.l10n.t('Cloud')]])}
 <div class="row"><label><strong>${vscode.l10n.t('Scope')}</strong><span class="hint">${vscode.l10n.t('Apply the scheme to every workspace or only this one.')}</span></label><div class="controls wrap"><button class="action secondary" data-action="setIndexingWorkspace">${vscode.l10n.t('Use for this workspace')}</button><button class="action secondary" data-action="clearIndexingWorkspace">${vscode.l10n.t('Clear workspace override')}</button></div></div>
@@ -755,6 +831,16 @@ const settings=state.settings;let activeSection;document.getElementById('app-ver
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('openrouter',state.openrouterConfigured);status('ollama',true);
 function renderIndexing(){const i=state.indexing||{};const labels={idle:'Idle',building:'Building',indexing:'Indexing',synced:'Synced',error:'Error'};const s=i.status||'idle';document.querySelectorAll('[data-indexing-status]').forEach(el=>el.textContent=labels[s]||s);document.querySelectorAll('[data-indexing-progress]').forEach(el=>{el.textContent=(typeof i.indexedFileCount==='number'&&typeof i.totalFileCount==='number')?i.indexedFileCount+' / '+i.totalFileCount:'';});document.querySelectorAll('[data-indexing-error]').forEach(el=>{el.textContent=i.lastError||'';});document.querySelectorAll('[data-indexing-message]').forEach(el=>{el.textContent=i.message||'';});document.querySelectorAll('[data-indexing-scope]').forEach(el=>{el.textContent=i.workspaceOverride?'Workspace':'Default';});}renderIndexing();
 document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);post({type:'saveSetting',key,value});});});
+const effortLabels={none:'None',low:'Low',medium:'Medium',high:'High',max:'Max'};
+function modelEfforts(modelId){const m=(state.modelChoices||[]).find(x=>x.id===modelId);return (m&&m.efforts)||[];}
+function refreshEffortSelect(select,modelId,currentValue){const efforts=modelEfforts(modelId);const hasCurrent=efforts.includes(currentValue);const fallback=hasCurrent?'':'<option value="'+esc(currentValue)+'">'+esc(currentValue)+'</option>';select.innerHTML=fallback+efforts.map(e=>'<option value="'+e+'">'+(effortLabels[e]||e)+'</option>').join('');select.disabled=efforts.length===0;select.value=hasCurrent?currentValue:(efforts[0]||currentValue);}
+// When the default model changes, refresh the default thinking-effort options
+// client-side so they always match the selected model's capabilities.
+const defaultModelSelect=document.getElementById('defaultModel');
+const thinkingEffortSelect=document.getElementById('thinkingEffort');
+if(defaultModelSelect&&thinkingEffortSelect){defaultModelSelect.addEventListener('change',()=>{refreshEffortSelect(thinkingEffortSelect,defaultModelSelect.value,settings.thinkingEffort||'high');});}
+// Agent rows: refresh each role's effort select when its model select changes.
+document.querySelectorAll('[data-setting^="agent."]').forEach(el=>{const key=el.dataset.setting;if(key.endsWith('ThinkingEffort'))return;const role=key.slice('agent.'.length);const effortEl=document.getElementById('agent.'+role+'ThinkingEffort');if(effortEl){el.addEventListener('change',()=>{refreshEffortSelect(effortEl,el.value,settings['agent.'+role+'ThinkingEffort']||'high');});}});
 function activateSection(id){const button=document.querySelector('nav button[data-section="'+id+'"]');const section=document.getElementById(id);if(!button||!section)return;document.querySelectorAll('nav button,section').forEach(el=>el.classList.remove('active'));button.classList.add('active');section.classList.add('active');activeSection=id;const saved=vscode.getState()||{};vscode.setState({...saved,activeSection:id});}
 const restoredSection=(vscode.getState()||{}).activeSection;activateSection(restoredSection||state.initialSection||'overview');document.querySelectorAll('[data-section]').forEach(button=>button.addEventListener('click',()=>activateSection(button.dataset.section)));
 function post(message){vscode.postMessage({...message,activeSection});}
@@ -800,13 +886,25 @@ function renderOpenRouterCatalog(){
   const list=(state.openrouterModels||[]).filter(m=>!q||m.id.toLowerCase().includes(q)||m.name.toLowerCase().includes(q));
   const shown=list.slice(0,100);
   const chips=m=>{const c=[];if(m.free)c.push('<span class="pill">free</span>');if(m.vision)c.push('<span class="pill">vision</span>');if(m.toolCalling)c.push('<span class="pill">tools</span>');if(m.reasoning)c.push('<span class="pill">reasoning</span>');return c.join(' ');};
-  const rows=shown.map(m=>'<tr><td><button class="action secondary" data-openrouter-default="'+esc(m.id)+'">'+esc(m.id)+'</button></td><td>'+esc(m.name)+'</td><td class="num">'+fmtTok(m.contextWindow)+'</td><td>'+esc(m.priceLabel||'—')+'</td><td>'+chips(m)+'</td></tr>').join('');
+  const rows=shown.map(m=>'<tr><td><button class="action" data-openrouter-default="'+esc(m.id)+'">'+esc(m.id)+'</button></td><td>'+esc(m.name)+'</td><td class="num">'+fmtTok(m.contextWindow)+'</td><td>'+esc(m.priceLabel||'—')+'</td><td>'+chips(m)+'</td></tr>').join('');
   hosts.forEach(el=>{el.innerHTML=rows?'<table class="usage"><thead><tr><th>Model id</th><th>Name</th><th>Context</th><th>Price (per 1M)</th><th>Caps</th></tr></thead><tbody>'+rows+'</tbody></table>'+(list.length>100?'<p class="hint">Showing the first 100 matches — refine the filter.</p>':''):'<div class="empty">No models match the filter.</div>';});
 }
 if(openRouterFilter){openRouterFilter.addEventListener('input',renderOpenRouterCatalog);renderOpenRouterCatalog();}
 document.addEventListener('click',e=>{const btn=e.target.closest('[data-openrouter-default]');if(btn){post({type:'setOpenRouterDefault',model:btn.dataset.openrouterDefault});}});
 const visionOptions=(state.openrouterModels||[]).filter(m=>m.vision).map(m=>'<option value="'+esc(m.id)+'">').join('');
 document.querySelectorAll('#openrouter-vision-models').forEach(el=>{el.innerHTML=visionOptions;});
+// Auto-fill the OpenRouter vision model from the default model when it is a
+// vision-capable OpenRouter model and the field is empty.
+(function autoFillVisionOpenRouter(){
+  const input=document.getElementById('visionOpenRouterModel');if(!input||input.value)return;
+  const defaultModel=settings.defaultModel||'';
+  const prefix='nika/openrouter/';
+  if(defaultModel.startsWith(prefix)){
+    const raw=defaultModel.slice(prefix.length);
+    const m=(state.openrouterModels||[]).find(x=>x.id===raw);
+    if(m&&m.vision){input.value=raw;}
+  }
+})();
 if(window.__rateTimer)clearInterval(window.__rateTimer);
 window.__rateTimer=setInterval(renderRateCountdown,1000);
 </script></body></html>`;
@@ -836,19 +934,142 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 		return `<div class="row"><label><strong>${label}</strong><span data-provider-status="${provider}"></span></label><div><button class="action secondary" data-secret-test="${provider}">${vscode.l10n.t('Test Connection')}</button></div></div>`;
 	}
 
-	private _agentRow(role: 'plan' | 'explore' | 'utility' | 'utilitySmall' | 'inlineChat', label: string): string {
+	/** Typed view of the flattened `modelChoices` state array. */
+	private _modelChoices(state: Record<string, unknown>): { id: string; displayName: string; provider: string; vision: boolean; efforts: string[]; vendor?: string; contextWindow?: number; priceLabel?: string; free?: boolean }[] {
+		return (state.modelChoices as unknown[]) as { id: string; displayName: string; provider: string; vision: boolean; efforts: string[]; vendor?: string; contextWindow?: number; priceLabel?: string; free?: boolean }[];
+	}
+
+	private _providerLabel(provider: string): string {
+		switch (provider) {
+			case 'deepseek': return vscode.l10n.t('DeepSeek');
+			case 'gemini': return vscode.l10n.t('Gemini');
+			case 'gemma': return vscode.l10n.t('Ollama');
+			case 'openrouter': return vscode.l10n.t('OpenRouter');
+			default: return provider;
+		}
+	}
+
+	private _providerPill(provider: string): string {
+		return `<span class="pill">${this._providerLabel(provider)}</span>`;
+	}
+
+	/**
+	 * Clamp a requested effort to the nearest supported level. The effort
+	 * magnitudes are ordered `none < low < medium < high < max`; when the
+	 * requested value is unsupported we pick the closest supported level,
+	 * preferring the next-higher one when equidistant (so a `max` request on a
+	 * model that tops out at `high` becomes `high`, not `low`).
+	 */
+	private _clampEffort(requested: string, supported: string[]): string {
+		const order = ['none', 'low', 'medium', 'high', 'max'];
+		const target = order.indexOf(requested);
+		if (target === -1 || supported.length === 0) {
+			return requested;
+		}
+		if (supported.includes(requested)) {
+			return requested;
+		}
+		let best = supported[0];
+		let bestDist = Number.POSITIVE_INFINITY;
+		for (const level of supported) {
+			const dist = Math.abs(order.indexOf(level) - target);
+			if (dist < bestDist || (dist === bestDist && order.indexOf(level) > order.indexOf(best))) {
+				best = level;
+				bestDist = dist;
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * Effort `<option>` pairs for a model id, derived from its capability list
+	 * (empty for models with no effort control). Labels are localized.
+	 */
+	private _effortOptionsForModel(state: Record<string, unknown>, modelId: string): string[][] {
+		const model = this._modelChoices(state).find(m => m.id === modelId);
+		const efforts = model?.efforts ?? [];
+		const labels: Record<string, string> = {
+			none: vscode.l10n.t('None'),
+			low: vscode.l10n.t('Low'),
+			medium: vscode.l10n.t('Medium'),
+			high: vscode.l10n.t('High'),
+			max: vscode.l10n.t('Max'),
+		};
+		return efforts.map(e => [e, labels[e] ?? e]);
+	}
+
+	/**
+	 * A model `<select>` populated from `modelChoices` (key-gated native models
+	 * + OpenRouter catalog). The current value is always included as a fallback
+	 * option so the dropdown never renders blank, and a provider pill is shown
+	 * next to the select.
+	 */
+	private _modelSelectRow(key: string, label: string, state: Record<string, unknown>, currentValue: string): string {
+		const choices = this._modelChoices(state);
+		const options = choices.map(m => `<option value="${m.id}">${m.displayName}</option>`).join('');
+		const hasCurrent = choices.some(m => m.id === currentValue);
+		const fallback = hasCurrent ? '' : `<option value="${currentValue}">${currentValue}</option>`;
+		const currentProvider = choices.find(m => m.id === currentValue)?.provider;
+		const pill = currentProvider ? this._providerPill(currentProvider) : '';
+		return `<div class="row"><label for="${key}"><strong>${label}</strong></label><div class="controls"><select id="${key}" data-setting="${key}">${fallback}${options}</select>${pill}</div></div>`;
+	}
+
+	/**
+	 * An effort `<select>` whose options derive from the given model's
+	 * capability list. When the model has no effort control, the select is
+	 * disabled with a hint. The current value is always included as a fallback
+	 * option so it never renders blank.
+	 */
+	private _effortSelectRow(key: string, label: string, state: Record<string, unknown>, modelId: string, currentValue: string): string {
+		const options = this._effortOptionsForModel(state, modelId);
+		const hasCurrent = options.some(([value]) => value === currentValue);
+		const fallback = hasCurrent ? '' : `<option value="${currentValue}">${currentValue}</option>`;
+		const disabled = options.length === 0 ? ' disabled' : '';
+		const hint = options.length === 0 ? `<span class="hint">${vscode.l10n.t('This model does not support a thinking-effort setting.')}</span>` : '';
+		return `<div class="row"><label for="${key}"><strong>${label}</strong>${hint}</label><select id="${key}" data-setting="${key}"${disabled}>${fallback}${options.map(([value, text]) => `<option value="${value}">${text}</option>`).join('')}</select></div>`;
+	}
+
+	/**
+	 * The image-description backend select. Options are key-gated by the
+	 * configured providers (Gemini only when a Gemini key exists, OpenRouter
+	 * only when an OpenRouter key exists, Gemma always). A `none` option
+	 * ("None (native vision)") is offered and enabled only when the default
+	 * model supports native image input, so users can turn off preprocessing
+	 * when the model already handles images itself.
+	 */
+	private _visionBackendRow(state: Record<string, unknown>, currentValue: string): string {
+		const defaultModel = String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL);
+		const defaultModelVision = this._modelChoices(state).find(m => m.id === defaultModel)?.vision ?? false;
+		const options: string[][] = [];
+		if (defaultModelVision) {
+			options.push(['none', vscode.l10n.t('None (native vision)')]);
+		}
+		if (state.geminiConfigured) {
+			options.push(['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite']);
+		}
+		options.push(['gemma4:31b', vscode.l10n.t('Gemma 4 31B (Ollama)')]);
+		if (state.openrouterConfigured) {
+			options.push(['openrouter', 'OpenRouter']);
+		}
+		options.push(['vscode', vscode.l10n.t('Another VS Code vision model')]);
+		const hasCurrent = options.some(([value]) => value === currentValue);
+		const fallback = hasCurrent ? '' : `<option value="${currentValue}">${currentValue}</option>`;
+		const hint = defaultModelVision
+			? vscode.l10n.t('Your default model supports images natively — you can turn preprocessing off.')
+			: vscode.l10n.t('Your default model is text-only, so images are described by this backend first.');
+		return `<div class="row"><label for="visionModel"><strong>${vscode.l10n.t('Image-description backend')}</strong><span class="hint">${hint}</span></label><select id="visionModel" data-setting="visionModel">${fallback}${options.map(([value, text]) => `<option value="${value}">${text}</option>`).join('')}</select></div>`;
+	}
+
+	private _agentRow(role: 'plan' | 'explore' | 'utility' | 'utilitySmall' | 'inlineChat', label: string, state: Record<string, unknown>): string {
 		const modelKey = `agent.${role}`;
 		const effortKey = `agent.${role}ThinkingEffort`;
-		const models = [
-			[NIKA_RESPONSES_MODEL, vscode.l10n.t('DeepSeek V4 Flash (Responses)')],
-			['nika/deepseek-v4-flash', vscode.l10n.t('DeepSeek V4 Flash')],
-			['nika/deepseek-v4-pro', vscode.l10n.t('DeepSeek V4 Pro')],
-			['nika/deepseek-v4-pro-responses', vscode.l10n.t('DeepSeek V4 Pro (Responses)')],
-			['nika/gemini-2.5-flash', vscode.l10n.t('Gemini 2.5 Flash')],
-			['nika/gemini-2.5-flash-lite', vscode.l10n.t('Gemini 2.5 Flash Lite')],
-			['nika/gemma4:31b', vscode.l10n.t('Gemma 4 31B (Ollama)')],
-		];
-		const efforts = [['none', vscode.l10n.t('None')], ['low', vscode.l10n.t('Low')], ['high', vscode.l10n.t('High')], ['max', vscode.l10n.t('Max')]];
-		return `<div class="row"><label for="${modelKey}"><strong>${label}</strong></label><div class="agent-controls"><select id="${modelKey}" aria-label="${vscode.l10n.t('{0} model', label)}" data-setting="${modelKey}">${models.map(([value, text]) => `<option value="${value}">${text}</option>`).join('')}</select><select id="${effortKey}" aria-label="${vscode.l10n.t('{0} thinking effort', label)}" data-setting="${effortKey}">${efforts.map(([value, text]) => `<option value="${value}">${text}</option>`).join('')}</select></div></div>`;
+		const currentModel = String((state.settings as Record<string, unknown>)[modelKey] ?? NIKA_RESPONSES_MODEL);
+		const currentEffort = String((state.settings as Record<string, unknown>)[effortKey] ?? 'high');
+		const modelOptions = this._modelChoices(state).map(m => `<option value="${m.id}">${m.displayName}</option>`).join('');
+		const effortOptions = this._effortOptionsForModel(state, currentModel);
+		const hasCurrentEffort = effortOptions.some(([value]) => value === currentEffort);
+		const effortFallback = hasCurrentEffort ? '' : `<option value="${currentEffort}">${currentEffort}</option>`;
+		const effortDisabled = effortOptions.length === 0 ? ' disabled' : '';
+		return `<div class="row"><label for="${modelKey}"><strong>${label}</strong></label><div class="agent-controls"><select id="${modelKey}" aria-label="${vscode.l10n.t('{0} model', label)}" data-setting="${modelKey}">${modelOptions}</select><select id="${effortKey}" aria-label="${vscode.l10n.t('{0} thinking effort', label)}" data-setting="${effortKey}"${effortDisabled}>${effortFallback}${effortOptions.map(([value, text]) => `<option value="${value}">${text}</option>`).join('')}</select></div></div>`;
 	}
 }

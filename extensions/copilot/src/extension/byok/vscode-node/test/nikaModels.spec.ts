@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it } from 'vitest';
-import { getNikaModelCapabilities, getVisibleNikaModelIds, isNikaDeepSeekModel, isNikaGeminiModel, isNikaModelId, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, resolveNikaTokenLimits } from '../nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getVisibleNikaModelIds, isNikaDeepSeekModel, isNikaGeminiModel, isNikaModelId, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, resolveNikaTokenLimits } from '../nikaModels';
 
 describe('Nika model metadata', () => {
 	it('uses the documented default budgets', () => {
@@ -60,5 +60,31 @@ describe('Nika model metadata', () => {
 			utilitySmall: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
 			inlineChat: { model: NIKA_RESPONSES_MODEL, effort: 'none' },
 		});
+	});
+
+	it('maps model ids to their provider family', () => {
+		expect(getNikaModelProvider('deepseek-v4-flash')).toBe('deepseek');
+		expect(getNikaModelProvider('nika/deepseek-v4-flash-responses')).toBe('deepseek');
+		expect(getNikaModelProvider('gemini-2.5-flash')).toBe('gemini');
+		expect(getNikaModelProvider('gemma4:31b')).toBe('gemma');
+		expect(getNikaModelProvider('openrouter/anthropic/claude-sonnet-4')).toBe('openrouter');
+		expect(getNikaModelProvider('nika/openrouter/anthropic/claude-sonnet-4')).toBe('openrouter');
+		expect(getNikaModelProvider('unknown-model')).toBeUndefined();
+	});
+
+	it('derives reasoning-effort options per provider', () => {
+		expect(getNikaEffortOptionsForModel('deepseek-v4-flash')).toEqual(['none', 'low', 'high', 'max']);
+		expect(getNikaEffortOptionsForModel('nika/deepseek-v4-pro-responses')).toEqual(['none', 'low', 'high', 'max']);
+		expect(getNikaEffortOptionsForModel('gemini-2.5-flash')).toEqual(['none', 'low', 'high']);
+		expect(getNikaEffortOptionsForModel('openrouter/anthropic/claude-sonnet-4')).toEqual(['low', 'medium', 'high']);
+		expect(getNikaEffortOptionsForModel('gemma4:31b')).toEqual([]);
+		expect(getNikaEffortOptionsForModel('unknown-model')).toEqual([]);
+	});
+
+	it('accepts the medium effort level', () => {
+		expect(isNikaThinkingEffort('medium')).toBe(true);
+		expect(isNikaThinkingEffort('none')).toBe(true);
+		expect(isNikaThinkingEffort('max')).toBe(true);
+		expect(isNikaThinkingEffort('ultra')).toBe(false);
 	});
 });

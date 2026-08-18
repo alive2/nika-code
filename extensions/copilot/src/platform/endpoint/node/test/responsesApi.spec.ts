@@ -1756,8 +1756,8 @@ describe('phase commentary followed by phase final_answer', () => {
 		const accumulatedTexts: string[] = [];
 		const phases: string[] = [];
 
-		const commentaryText = 'Responding directly in commentary as requested. My name is GitHub Copilot.';
-		const finalText = 'My name is GitHub Copilot.';
+		const commentaryText = 'Responding directly in commentary as requested. My name is Nika.';
+		const finalText = 'My name is Nika.';
 
 		// Real-world Responses API stream: commentary message (output_index 0)
 		// followed by final_answer message (output_index 1), with incremental
@@ -1776,27 +1776,23 @@ describe('phase commentary followed by phase final_answer', () => {
 			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: ' My', logprobs: [], sequence_number: 12 },
 			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: ' name', logprobs: [], sequence_number: 13 },
 			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: ' is', logprobs: [], sequence_number: 14 },
-			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: ' Git', logprobs: [], sequence_number: 15 },
-			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: 'Hub', logprobs: [], sequence_number: 16 },
-			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: ' Cop', logprobs: [], sequence_number: 17 },
-			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: 'ilot', logprobs: [], sequence_number: 18 },
-			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: '.', logprobs: [], sequence_number: 19 },
-			{ type: 'response.output_text.done', output_index: 0, content_index: 0, item_id: 'item-0', text: commentaryText, logprobs: [], sequence_number: 20 },
-			{ type: 'response.content_part.done', output_index: 0, content_index: 0, item_id: 'item-0', part: { type: 'output_text', text: commentaryText, annotations: [], logprobs: [] }, sequence_number: 21 },
-			{ type: 'response.output_item.done', output_index: 0, item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: commentaryText, annotations: [], logprobs: [] }], phase: 'commentary', status: 'completed' }, sequence_number: 22 },
+			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: ' Nik', logprobs: [], sequence_number: 15 },
+			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: 'a', logprobs: [], sequence_number: 16 },
+			{ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'item-0', delta: '.', logprobs: [], sequence_number: 17 },
+			{ type: 'response.output_text.done', output_index: 0, content_index: 0, item_id: 'item-0', text: commentaryText, logprobs: [], sequence_number: 18 },
+			{ type: 'response.content_part.done', output_index: 0, content_index: 0, item_id: 'item-0', part: { type: 'output_text', text: commentaryText, annotations: [], logprobs: [] }, sequence_number: 19 },
+			{ type: 'response.output_item.done', output_index: 0, item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: commentaryText, annotations: [], logprobs: [] }], phase: 'commentary', status: 'completed' }, sequence_number: 20 },
 			{ type: 'response.output_item.added', output_index: 1, item: { type: 'message', role: 'assistant', content: [], phase: 'final_answer', status: 'in_progress' }, sequence_number: 23 },
 			{ type: 'response.content_part.added', output_index: 1, content_index: 0, item_id: 'item-1', part: { type: 'output_text', text: '', annotations: [], logprobs: [] }, sequence_number: 24 },
 			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: 'My', logprobs: [], sequence_number: 25 },
 			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: ' name', logprobs: [], sequence_number: 26 },
 			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: ' is', logprobs: [], sequence_number: 27 },
-			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: ' Git', logprobs: [], sequence_number: 28 },
-			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: 'Hub', logprobs: [], sequence_number: 29 },
-			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: ' Cop', logprobs: [], sequence_number: 30 },
-			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: 'ilot', logprobs: [], sequence_number: 31 },
-			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: '.', logprobs: [], sequence_number: 32 },
-			{ type: 'response.output_text.done', output_index: 1, content_index: 0, item_id: 'item-1', text: finalText, logprobs: [], sequence_number: 33 },
-			{ type: 'response.content_part.done', output_index: 1, content_index: 0, item_id: 'item-1', part: { type: 'output_text', text: finalText, annotations: [], logprobs: [] }, sequence_number: 34 },
-			{ type: 'response.output_item.done', output_index: 1, item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: finalText, annotations: [], logprobs: [] }], phase: 'final_answer', status: 'completed' }, sequence_number: 35 },
+			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: ' Nik', logprobs: [], sequence_number: 28 },
+			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: 'a', logprobs: [], sequence_number: 29 },
+			{ type: 'response.output_text.delta', output_index: 1, content_index: 0, item_id: 'item-1', delta: '.', logprobs: [], sequence_number: 30 },
+			{ type: 'response.output_text.done', output_index: 1, content_index: 0, item_id: 'item-1', text: finalText, logprobs: [], sequence_number: 31 },
+			{ type: 'response.content_part.done', output_index: 1, content_index: 0, item_id: 'item-1', part: { type: 'output_text', text: finalText, annotations: [], logprobs: [] }, sequence_number: 32 },
+			{ type: 'response.output_item.done', output_index: 1, item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: finalText, annotations: [], logprobs: [] }], phase: 'final_answer', status: 'completed' }, sequence_number: 33 },
 			{
 				type: 'response.completed',
 				response: {

@@ -166,7 +166,7 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 ### 4.3 Rendering
 
 - **Markdown body**: reuse the chat markdown renderer path — render via `IMarkdownRendererService` **with** `codeBlockRendererSync` hooked to `IChatOutputRendererService.hasCodeBlockRenderer` (same as `ChatMarkdownContentPart`). This makes mermaid + other `chatOutputRenderers` render for free in the plan view.
-- **Checklist footer**: 
+- **Checklist footer**:
   - Parse the plan markdown's checklist section (the `- [ ]`/`- [x]`/`- [>]` items, ideally under a `## TODO`/`## Steps` heading) with the workbench parser.
   - Overlay live statuses from `IChatTodoListService.getTodos(sessionResource)` **matched by title** (the plan file is authored by the agent; the todo tool is the live state).
   - Render a `WorkbenchList<IChatTodo>` (copy the `TodoListRenderer`/delegate pattern from `ChatTodoListWidget`): green check = done, blue record = in-progress (with a subtle pulse/glow), gray circle = pending.

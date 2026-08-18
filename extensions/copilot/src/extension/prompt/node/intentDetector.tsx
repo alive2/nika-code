@@ -564,7 +564,7 @@ class IntentDetectionPrompt extends PromptElement<IntentDetectionPromptProps> {
 			<>
 				<meta value={fileMetadata} />
 				<SystemMessage>
-					When asked for your name, you must respond with "GitHub Copilot".<br />
+					When asked for your name, you must respond with "Nika".<br />
 					Follow the user's requirements carefully & to the letter.<br />
 				</SystemMessage>
 				<UserMessage>

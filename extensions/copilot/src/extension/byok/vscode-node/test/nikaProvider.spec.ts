@@ -284,6 +284,10 @@ describe('Nika OpenRouter support', () => {
 		expect(openRouterIds[0].detail).toBe('Nika');
 		expect(openRouterIds[0].isBYOK).toBe(true);
 		expect(openRouterIds[0].capabilities.toolCalling).toBe(true);
+		// Even text-only OpenRouter catalog models advertise image input: Nika
+		// preprocesses images into a text description before forwarding, so the
+		// workbench must not block drag-and-drop images for them.
+		expect(openRouterIds[0].capabilities.imageInput).toBe(true);
 	});
 
 	it('omits the OpenRouter catalog when the key is missing', async () => {

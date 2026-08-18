@@ -73,7 +73,7 @@ export const NIKA_OUTPUT_PRESETS = {
 
 export type NikaContextPreset = keyof typeof NIKA_CONTEXT_PRESETS;
 export type NikaOutputPreset = keyof typeof NIKA_OUTPUT_PRESETS;
-export type NikaThinkingEffort = 'none' | 'low' | 'high' | 'max';
+export type NikaThinkingEffort = 'none' | 'low' | 'medium' | 'high' | 'max';
 export type NikaAgentRole = 'plan' | 'explore' | 'utility' | 'utilitySmall' | 'inlineChat';
 
 export const NIKA_RESPONSES_MODEL = 'nika/deepseek-v4-flash-responses';
@@ -128,7 +128,67 @@ export function isNikaGeminiModel(value: string): value is NikaModelId {
 }
 
 export function isNikaThinkingEffort(value: unknown): value is NikaThinkingEffort {
-	return value === 'none' || value === 'low' || value === 'high' || value === 'max';
+	return value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'max';
+}
+
+/**
+ * The provider family a Nika model belongs to. Gemma is served from a local
+ * Ollama host rather than a cloud API.
+ */
+export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'openrouter';
+
+/**
+ * Strips the optional `nika/` vendor prefix used in settings values (e.g.
+ * `nika/deepseek-v4-flash-responses`) so provider checks and catalog ids can
+ * match against the bare model id.
+ */
+function unprefixNikaModelId(id: string): string {
+	return id.startsWith('nika/') ? id.slice('nika/'.length) : id;
+}
+
+/**
+ * Returns the provider family for a Nika model id. The id may carry the `nika/`
+ * vendor prefix (as stored in `nika.defaultModel`) or the bare model id (the
+ * chat-picker form). OpenRouter catalog ids are `openrouter/<vendor>/<model>`.
+ * Returns `undefined` for unknown ids.
+ */
+export function getNikaModelProvider(id: string): NikaModelProvider | undefined {
+	const value = unprefixNikaModelId(id);
+	if (isNikaDeepSeekModel(value)) {
+		return 'deepseek';
+	}
+	if (isNikaGeminiModel(value)) {
+		return 'gemini';
+	}
+	if (value === NIKA_GEMMA_MODEL_ID) {
+		return 'gemma';
+	}
+	if (isNikaOpenRouterModel(value)) {
+		return 'openrouter';
+	}
+	return undefined;
+}
+
+/**
+ * The reasoning-effort levels a Nika model of the given id accepts. DeepSeek
+ * supports the full range; Gemini omits `max`; OpenRouter uses `low`-`high`
+ * with `medium` (its own magnitude) rather than `none`/`max`; Gemma has no
+ * effort control (empty). For OpenRouter catalog models the narrower
+ * per-model list from the catalog's `supportsReasoningEffort` should take
+ * precedence when building dropdowns.
+ */
+export function getNikaEffortOptionsForModel(id: string): NikaThinkingEffort[] {
+	switch (getNikaModelProvider(id)) {
+		case 'deepseek':
+			return ['none', 'low', 'high', 'max'];
+		case 'gemini':
+			return ['none', 'low', 'high'];
+		case 'openrouter':
+			return ['low', 'medium', 'high'];
+		case 'gemma':
+		default:
+			return [];
+	}
 }
 
 export function getVisibleNikaModelIds(hasDeepSeekKey: boolean, hasGeminiKey: boolean): NikaModelId[] {

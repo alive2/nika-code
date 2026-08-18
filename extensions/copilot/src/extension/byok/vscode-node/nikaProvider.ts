@@ -139,6 +139,15 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 						name: model.name,
 						detail: vscode.l10n.t('Nika'),
 						tooltip: this._openRouterTooltip(rawId, model.capabilities.vision),
+						// Nika preprocesses images and PDFs into text before
+						// forwarding to OpenRouter (the same conversion it runs
+						// for native DeepSeek). Advertise image input so the
+						// workbench lets users attach images to text-only
+						// OpenRouter models instead of blocking them.
+						capabilities: {
+							...base.capabilities,
+							imageInput: true,
+						},
 						isBYOK: true,
 						isDefault: id === defaultModel,
 					});
@@ -153,10 +162,13 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return entries;
 	}
 
-	private _openRouterTooltip(rawId: string, vision: boolean): string {
-		return vision
-			? vscode.l10n.t('{0} via OpenRouter with catalog pricing and image input.', rawId)
-			: vscode.l10n.t('{0} via OpenRouter with catalog pricing.', rawId);
+	private _openRouterTooltip(rawId: string, nativeVision: boolean): string {
+		if (nativeVision) {
+			return vscode.l10n.t('{0} via OpenRouter with catalog pricing and native image input.', rawId);
+		}
+		// Text-only OpenRouter models still accept images because Nika converts
+		// them to a text description first (via the configured vision backend).
+		return vscode.l10n.t('{0} via OpenRouter with catalog pricing. Images are described by your Nika vision backend first.', rawId);
 	}
 
 	private logOpenRouterError(error: unknown): void {

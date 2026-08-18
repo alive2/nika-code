@@ -280,7 +280,10 @@ export function parseOpenRouterPricing(raw: unknown): OpenRouterModelPricing | u
 }
 
 /**
- * Format a USD amount, e.g. `$0.44`, `$1.32`, `$12.5`, `$0.0002`.
+ * Format a USD amount, e.g. `$0.44`, `$1.32`, `$12.5`, `$0.0002`. Sub-cent
+ * values keep enough significant digits to be meaningful (`0.00005` →
+ * `$0.00005`, `0.0000001` → `$0.0000001`), and a zero amount renders as `$0`
+ * — never a trailing-dot `$0.` from stripping zeros off a rounded value.
  */
 export function formatUsdAmount(amount: number): string {
 	if (!Number.isFinite(amount) || amount <= 0) {
@@ -292,7 +295,11 @@ export function formatUsdAmount(amount: number): string {
 	if (amount >= 0.01) {
 		return `$${amount.toFixed(2).replace(/\.?0+$/, '')}`;
 	}
-	return `$${amount.toFixed(4).replace(/0+$/, '')}`;
+	// Sub-cent: show ~2 significant digits, trimming trailing zeros but never
+	// leaving a bare `0.` (e.g. 0.00005 → `$0.00005`, 0.0000001 → `$0.0000001`).
+	const decimals = Math.max(2, Math.min(8, -Math.floor(Math.log10(amount)) + 2));
+	const trimmed = amount.toFixed(decimals).replace(/0+$/, '').replace(/\.$/, '');
+	return `$${trimmed}`;
 }
 
 /**

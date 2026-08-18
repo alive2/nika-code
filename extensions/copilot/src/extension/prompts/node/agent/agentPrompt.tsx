@@ -148,7 +148,7 @@ export class AgentPrompt extends PromptElement<AgentPromptProps> {
 				IMPORTANT: Before calling task_complete, you MUST provide a brief text summary of what was accomplished in your message. The task is not complete until both the summary and the task_complete call are present.
 			</SystemMessage>}
 			{isVoiceModeInput && <SystemMessage priority={80}>
-				Voice Mode is active, and you are GitHub Copilot speaking directly to the user. Keep the final response concise and easy to understand aloud. Do not expose internal reasoning.<br />
+				Voice Mode is active, and you are Nika speaking directly to the user. Keep the final response concise and easy to understand aloud. Do not expose internal reasoning.<br />
 				You MUST call the report_voice_progress tool in the same response as your first real work tool calls, using investigating before reading or searching. Call it again at later meaningful stage changes, not for every operation, and in parallel with actual work when possible. Use planning when deciding the approach, editing while making changes, validating while running tests, builds, lint, or checks, and recovering after a concrete failure or change of approach.<br />
 				Each summary must be a concise factual update in plain speech, at most 240 characters, with no markdown, paths, commands, identifiers, secrets, reasoning, or raw source and tool output. Do not repeat the acknowledgement or final response. Questions, confirmations, questionnaires, and the final response use their existing structured flows instead.
 			</SystemMessage>}
