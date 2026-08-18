@@ -19,7 +19,7 @@ type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf
 type ConnectionResult = { readonly ok: boolean; readonly message: string; readonly checkedAt: string };
 
 const SETTINGS = new Set([
-	'defaultModel', 'outputTokens', 'contextWindow', 'temperature', 'thinkingEffort',
+	'defaultModel', 'outputTokens', 'contextWindow', 'temperature', 'thinkingEffort', 'openrouterFloor',
 	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'ollamaBaseUrl',
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
@@ -276,6 +276,7 @@ export class NikaSettingsEditor extends Disposable {
 				contextWindow: value('contextWindow', '128K'),
 				temperature: value('temperature', 0.7),
 				thinkingEffort: value('thinkingEffort', 'high'),
+				openrouterFloor: value('openrouterFloor', false),
 				visionModel: value('visionModel', 'gemini-2.5-flash'),
 				visionVSCodeModel: value('visionVSCodeModel', ''),
 				visionOpenRouterModel: value('visionOpenRouterModel', ''),
@@ -804,7 +805,7 @@ ${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.
 </div></section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
 ${this._modelSelectRow('defaultModel', vscode.l10n.t('Default model for new chats'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL))}
-${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._effortSelectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL), String((state.settings as Record<string, unknown>).thinkingEffort ?? 'high'))}</div>
+${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._effortSelectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL), String((state.settings as Record<string, unknown>).thinkingEffort ?? 'high'))}${this._checkboxRow('openrouterFloor', vscode.l10n.t('Use floor pricing for OpenRouter models'))}</div>
 ${(state.openrouterModels as unknown[]).length > 0 ? `<div class="card" style="min-width:0"><h2>${vscode.l10n.t('OpenRouter catalog')}</h2><p class="hint">${vscode.l10n.t('Search the full catalog and pick a default. The chat model picker always shows the complete list with live prices.')}</p><div class="controls"><input type="text" data-openrouter-filter placeholder="${vscode.l10n.t('Filter by model id or name…')}"></div><div data-openrouter-catalog style="min-width:0"></div></div>` : ''}</section>
 <section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only models. Provider credentials are managed on the Providers page.')}</p><div class="card">
 ${this._visionBackendRow(state, String((state.settings as Record<string, unknown>).visionModel ?? 'gemini-2.5-flash'))}${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}

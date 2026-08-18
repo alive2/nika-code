@@ -3256,6 +3256,11 @@
             "default": "high",
             "markdownDescription": "%nika.config.thinkingEffort%"
           },
+          "nika.openrouterFloor": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "%nika.config.openrouterFloor%"
+          },
           "nika.visionModel": {
             "type": "string",
             "enum": [

@@ -43,7 +43,7 @@ vi.mock('vscode', async (importOriginal) => {
 		ChatMcpToolInvocationData: class ChatMcpToolInvocationData { },
 		LanguageModelToolInformation: class LanguageModelToolInformation { },
 		workspace: {
-			getConfiguration: vi.fn(() => ({ get: (_key: string, fallback: unknown) => fallback })),
+			getConfiguration: vi.fn(() => ({ get: (key: string, fallback: unknown) => key === 'openrouterFloor' ? floorEnabled : fallback })),
 			onDidChangeConfiguration: configurationChange.event,
 			workspaceFolders: [],
 			asRelativePath: (_uri: unknown, _includeWorkspaceFolder: boolean) => '',
@@ -54,6 +54,9 @@ vi.mock('vscode', async (importOriginal) => {
 		},
 	};
 });
+
+// Mutable flag the vscode mock reads for the `openrouterFloor` setting.
+let floorEnabled = false;
 
 function createByokStorage() {
 	return {
@@ -227,6 +230,38 @@ describe('Nika OpenRouter support', () => {
 		expect(fakes.openRouterProvider.createEndpoint).toHaveBeenCalledWith('anthropic/claude-sonnet-4', 'test-key');
 		expect(fakes.lmWrapper.provideLanguageModelResponse).toHaveBeenCalledTimes(1);
 		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
+	});
+
+	it('appends the :floor variant to the wire model id when the toggle is on', async () => {
+		floorEnabled = true;
+		try {
+			const { provider, fakes } = createProvider();
+			const model = { id: 'openrouter/deepseek/deepseek-v4-flash-0731', vendor: 'openrouter' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+			expect(fakes.openRouterProvider.createEndpoint).toHaveBeenCalledWith('deepseek/deepseek-v4-flash-0731:floor', 'test-key');
+			expect(fakes.lmWrapper.provideLanguageModelResponse).toHaveBeenCalledTimes(1);
+		} finally {
+			floorEnabled = false;
+		}
+	});
+
+	it('does not double-append :floor when the model id already ends with it', async () => {
+		floorEnabled = true;
+		try {
+			const { provider, fakes } = createProvider();
+			const model = { id: 'openrouter/deepseek/deepseek-v4-flash-0731:floor', vendor: 'openrouter' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+			expect(fakes.openRouterProvider.createEndpoint).toHaveBeenCalledWith('deepseek/deepseek-v4-flash-0731:floor', 'test-key');
+			expect(fakes.lmWrapper.provideLanguageModelResponse).toHaveBeenCalledTimes(1);
+		} finally {
+			floorEnabled = false;
+		}
 	});
 
 	it('rejects openrouter models when the API key is missing', async () => {

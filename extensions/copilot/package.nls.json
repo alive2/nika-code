@@ -11,6 +11,7 @@
 	"nika.config.contextWindow": "The desired input-token budget. Nika clamps it so input plus output never exceeds DeepSeek's one-million-token context window.",
 	"nika.config.temperature": "The sampling temperature used when thinking is disabled. Thinking requests omit temperature and top-p.",
 	"nika.config.thinkingEffort": "The default Nika thinking effort. Per-conversation model configuration takes precedence.",
+	"nika.config.openrouterFloor": "Append the :floor variant to OpenRouter model ids so requests are served at the lowest-cost provider. When off, the base model id is used.",
 	"nika.config.visionModel": "The model used to describe images for text-only DeepSeek models.",
 	"nika.config.visionVSCodeModel": "The qualified identifier of another image-capable VS Code language model used for image descriptions.",
 	"nika.config.visionOpenRouterModel": "The OpenRouter model id used for image descriptions when the vision backend is set to OpenRouter.",

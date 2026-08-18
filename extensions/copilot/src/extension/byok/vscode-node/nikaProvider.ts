@@ -171,6 +171,20 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return vscode.l10n.t('{0} via OpenRouter with catalog pricing. Images are described by your Nika vision backend first.', rawId);
 	}
 
+	/**
+	 * The OpenRouter model id sent on the wire for a raw catalog id. When the
+	 * `nika.openrouterFloor` toggle is on, the `:floor` variant suffix is
+	 * appended so OpenRouter serves the request at the lowest-cost provider.
+	 * The catalog lookup always uses the base id; only the wire id is suffixed.
+	 */
+	private _openRouterWireModelId(rawId: string): string {
+		const floor = vscode.workspace.getConfiguration('nika').get<boolean>('openrouterFloor', false);
+		if (floor && !rawId.endsWith(':floor')) {
+			return `${rawId}:floor`;
+		}
+		return rawId;
+	}
+
 	private logOpenRouterError(error: unknown): void {
 		const detail = error instanceof Error ? error.message : String(error);
 		console.warn(`[Nika] OpenRouter catalog failed: ${detail}`);
@@ -272,7 +286,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const title = extractPromptTitle(messages);
 			const workspace = currentWorkspaceName();
 			try {
-				const endpoint = this._openRouterProvider.createEndpoint(rawId, key);
+				const endpoint = this._openRouterProvider.createEndpoint(this._openRouterWireModelId(rawId), key);
 				const processed = await this._attachmentProcessor.process(messages, token);
 				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
 				// OpenRouter models accept `low`/`medium`/`high` effort only; drop
@@ -332,7 +346,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return this._geminiProvider.provideTokenCount(delegate, text, token);
 		}
 		if (isNikaOpenRouterModel(model.id)) {
-			const endpoint = this._openRouterProvider.createEndpoint(model.id.slice(NIKA_OPENROUTER_MODEL_PREFIX.length), await this._context.secrets.get(NIKA_OPENROUTER_SECRET) ?? '');
+			const endpoint = this._openRouterProvider.createEndpoint(this._openRouterWireModelId(model.id.slice(NIKA_OPENROUTER_MODEL_PREFIX.length)), await this._context.secrets.get(NIKA_OPENROUTER_SECRET) ?? '');
 			return this._lmWrapper.provideTokenCount(endpoint, text);
 		}
 		const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
