@@ -68,60 +68,76 @@ describe('NikaLlamaCppProvider', () => {
 		expect(catalog.size).toBe(2);
 	});
 
-	it('uses meta.llama.context_length as the model context window when the server reports it', async () => {
-		const { provider } = createProvider({
-			json: {
-				object: 'list',
-				data: [{
-					id: 'qwen-q8-64k',
-					object: 'model',
-					created: 1710000002,
-					owned_by: 'llamacpp',
-					// llama.cpp reports the GGUF context length as a string.
-					meta: { 'llama.context_length': '65536', 'llama.model_type': 'qwen2', n_params: 27320697856 },
-				}],
-			},
-		});
-		const catalog = await provider.getCatalog('http://localhost:8080');
-
-		const model = catalog.get('qwen-q8-64k');
-		expect(model).toBeDefined();
-		expect(model!.contextWindow).toBe(65536);
-		expect(model!.capabilities.contextWindow).toBe(65536);
-		expect(model!.capabilities.maxInputTokens).toBe(65536 - LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS);
-		expect(model!.capabilities.maxOutputTokens).toBe(LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS);
-	});
-
-	it('accepts a numeric llama.context_length and the n_ctx fork fallback', async () => {
+	it('reads the served context from launch args for every model, and meta.n_ctx for the loaded one', async () => {
 		const { provider } = createProvider({
 			json: {
 				object: 'list',
 				data: [
-					{ id: 'qwen-q6-262k', object: 'model', created: 1, owned_by: 'llamacpp', meta: { 'llama.context_length': 262144 } },
-					{ id: 'fork-model', object: 'model', created: 2, owned_by: 'llamacpp', meta: { n_ctx: 32768 } },
+					// Unloaded model: no meta at all, but status.args carries --ctx-size.
+					{
+						id: 'qwen-q6-262k',
+						object: 'model',
+						owned_by: 'llamacpp',
+						status: { value: 'unloaded', args: ['llama-server.exe', '--alias', 'qwen-q6-262k', '--ctx-size', '262144', '--model', 'C:/Models/Qwen3.8-27B-Q6_K.gguf'] },
+					},
+					// Loaded model: meta.n_ctx is the served context, not n_ctx_train.
+					{
+						id: 'qwen-q8-64k',
+						object: 'model',
+						owned_by: 'llamacpp',
+						status: { value: 'loaded', args: ['llama-server.exe', '--alias', 'qwen-q8-64k', '--ctx-size', '65536'] },
+						meta: { n_ctx: 65536, n_ctx_train: 262144, n_vocab: 248320 },
+					},
+					// Inline --ctx-size=<n> form.
+					{
+						id: 'inline-form',
+						object: 'model',
+						owned_by: 'llamacpp',
+						status: { value: 'unloaded', args: ['llama-server.exe', '--ctx-size=8192', '--model', 'C:/Models/x.gguf'] },
+					},
 				],
 			},
 		});
 		const catalog = await provider.getCatalog('http://localhost:8080');
 
 		expect(catalog.get('qwen-q6-262k')!.contextWindow).toBe(262144);
-		expect(catalog.get('fork-model')!.contextWindow).toBe(32768);
+		expect(catalog.get('qwen-q8-64k')!.contextWindow).toBe(65536);
+		expect(catalog.get('qwen-q8-64k')!.capabilities.maxInputTokens).toBe(65536 - LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS);
+		expect(catalog.get('qwen-q8-64k')!.capabilities.maxOutputTokens).toBe(LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS);
+		expect(catalog.get('inline-form')!.contextWindow).toBe(8192);
 	});
 
-	it('falls back to the default window when meta context is absent or invalid', async () => {
+	it('accepts meta.llama.context_length from forks and meta.n_ctx', async () => {
 		const { provider } = createProvider({
 			json: {
 				object: 'list',
 				data: [
-					{ id: 'unloaded', object: 'model', created: 1, owned_by: 'llamacpp' },
-					{ id: 'broken', object: 'model', created: 2, owned_by: 'llamacpp', meta: { 'llama.context_length': 'lots' } },
-					{ id: 'zero', object: 'model', created: 3, owned_by: 'llamacpp', meta: { 'llama.context_length': '0' } },
+					{ id: 'fork-string', object: 'model', created: 1, owned_by: 'llamacpp', meta: { 'llama.context_length': '262144' } },
+					{ id: 'fork-number', object: 'model', created: 2, owned_by: 'llamacpp', meta: { 'llama.context_length': 65536 } },
 				],
 			},
 		});
 		const catalog = await provider.getCatalog('http://localhost:8080');
 
-		for (const id of ['unloaded', 'broken', 'zero']) {
+		expect(catalog.get('fork-string')!.contextWindow).toBe(262144);
+		expect(catalog.get('fork-number')!.contextWindow).toBe(65536);
+	});
+
+	it('falls back to the default window when context is absent or invalid', async () => {
+		const { provider } = createProvider({
+			json: {
+				object: 'list',
+				data: [
+					{ id: 'unloaded', object: 'model', created: 1, owned_by: 'llamacpp' },
+					{ id: 'noargs', object: 'model', created: 2, owned_by: 'llamacpp', status: { value: 'unloaded', args: ['llama-server.exe', '--model', 'C:/Models/x.gguf'] } },
+					{ id: 'broken', object: 'model', created: 3, owned_by: 'llamacpp', meta: { 'llama.context_length': 'lots' } },
+					{ id: 'zero', object: 'model', created: 4, owned_by: 'llamacpp', meta: { 'llama.context_length': '0' } },
+				],
+			},
+		});
+		const catalog = await provider.getCatalog('http://localhost:8080');
+
+		for (const id of ['unloaded', 'noargs', 'broken', 'zero']) {
 			expect(catalog.get(id)!.contextWindow).toBe(LLAMACPP_DEFAULT_CONTEXT_WINDOW);
 		}
 	});

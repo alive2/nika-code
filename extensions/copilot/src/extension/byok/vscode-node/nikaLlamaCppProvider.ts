@@ -19,11 +19,11 @@ import { OpenAIEndpoint } from '../node/openAIEndpoint';
 const CATALOG_TTL_MS = 10 * 60 * 1000;
 
 /**
- * Fallback context window for llama.cpp server models. The server's
- * `/v1/models` endpoint reports each model's context as
- * `meta["llama.context_length"]` (the GGUF-declared length, e.g. `262144`
- * for a 262k model), which is preferred when present. When it is missing
- * (e.g. a model listed but not currently loaded) this 32K default —
+ * Fallback context window for llama.cpp server models. The server reports
+ * the served context (`--ctx-size`) for each model in `status.args` (all
+ * models, loaded or not) and in `meta.n_ctx` for the currently loaded model;
+ * some forks expose `meta["llama.context_length"]` (GGUF length) instead.
+ * When none is present (e.g. an entry without args) this 32K default —
  * llama.cpp's own default — is used.
  */
 export const LLAMACPP_DEFAULT_CONTEXT_WINDOW = 32768;
@@ -120,15 +120,14 @@ export class NikaLlamaCppProvider extends Disposable {
 			if (!id) {
 				continue;
 			}
-			// llama.cpp reports the per-model context as `meta["llama.context_length"]`
-			// (a string, from the GGUF metadata — e.g. `262144` for a 262k model).
-			// Some forks expose `meta.n_ctx` instead. Both are the model's own
-			// context, not the training window; unloaded entries have no `meta`,
-			// so fall back to the default.
+			// llama.cpp reports the served context for the loaded model as
+			// `meta.n_ctx` (a number). Models that are not currently loaded carry
+			// no `meta` at all, but every entry has `status.args` (the launch
+			// command line), which always contains `--ctx-size <n>` (or `-c <n>`) —
+			// the context the server will serve that model with. Some forks expose
+			// `meta["llama.context_length"]` (a string, the GGUF length) instead.
 			const meta = (entry as { meta?: Record<string, unknown> }).meta;
-			const rawContext = meta
-				? meta['llama.context_length'] ?? meta['context_length'] ?? meta.n_ctx
-				: undefined;
+			const rawContext = meta?.n_ctx ?? contextFromArgs((entry as { status?: { args?: unknown[] } }).status?.args) ?? meta?.['llama.context_length'] ?? meta?.['context_length'];
 			const parsedContext = typeof rawContext === 'number' ? rawContext : typeof rawContext === 'string' ? Number(rawContext) : undefined;
 			const contextWindow = (parsedContext && parsedContext > 0) ? parsedContext : LLAMACPP_DEFAULT_CONTEXT_WINDOW;
 			const limits = resolveModelTokenLimits({
@@ -162,4 +161,30 @@ export class NikaLlamaCppProvider extends Disposable {
 /** The workbench-facing id of a raw llama.cpp server model id under the Nika group. */
 export function nikaLlamaCppModelId(rawId: string): string {
 	return `${NIKA_LLAMACPP_MODEL_PREFIX}${rawId}`;
+}
+
+/**
+ * Extract the served context (`--ctx-size`, `--ctx-size=<n>`, or `-c`) from
+ * a llama.cpp model entry's launch args. Returns undefined when absent.
+ */
+function contextFromArgs(args: unknown[] | undefined): number | undefined {
+	if (!args) {
+		return undefined;
+	}
+	for (let i = 0; i < args.length; i++) {
+		const arg = String(args[i]);
+		if (arg === '--ctx-size' || arg === '-c') {
+			const value = Number(args[i + 1]);
+			if (value > 0) {
+				return value;
+			}
+		}
+		if (arg.startsWith('--ctx-size=')) {
+			const value = Number(arg.slice('--ctx-size='.length));
+			if (value > 0) {
+				return value;
+			}
+		}
+	}
+	return undefined;
 }
