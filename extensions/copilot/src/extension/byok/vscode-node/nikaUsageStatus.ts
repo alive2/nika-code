@@ -84,22 +84,26 @@ export class NikaUsageStatus extends Disposable {
 			}
 
 			// Always render the rate-period countdowns: while streaming we add the
-			// `showProgress` spinner, when idle we prepend the pulse icon.
+			// live token count and output rate, when idle we prepend the pulse
+			// icon and today's totals.
 			const rateLabel = countdownLabel();
 			const liveCount = this._usageTracker.liveStreamCount;
 			if (liveCount > 0) {
 				// `showProgress` renders the spin codicon as one stable DOM node
 				// reused across text updates, so the animation keeps spinning.
 				this._statusItem.showProgress = 'loading';
-				this._setText(rateLabel);
-				this._statusItem.tooltip = vscode.l10n.t('Nika response streaming ({0} active request{1})... Click to open the usage dashboard.', liveCount, liveCount === 1 ? '' : 's');
+				const liveTokens = this._usageTracker.liveTokenEstimate;
+				const rate = this._usageTracker.liveTokensPerSecond;
+				const rateText = rate > 0 ? ` · ${formatTokenRate(rate)} tok/s` : '';
+				this._setText(`${rateLabel} · ${formatTokenCount(liveTokens)} tok${rateText}`);
+				this._statusItem.tooltip = vscode.l10n.t('Nika response streaming: ~{0} tokens at {1} tok/s ({2} active request{3})... Click to open the usage dashboard.', formatTokenCount(liveTokens), formatTokenRate(rate), liveCount, liveCount === 1 ? '' : 's');
 				this._statusItem.show();
 				return;
 			}
 
 			this._statusItem.showProgress = false;
 			const totals = todayTotals(this._usageTracker);
-			this._setText(`$(pulse) ${rateLabel}`);
+			this._setText(`$(pulse) ${rateLabel} · ${formatTokenCount(totals.totalTokens)} tok`);
 			this._statusItem.tooltip = vscode.l10n.t('Nika today: {0} tokens · {1}. {2} Click to open the usage dashboard.', formatTokenCount(totals.totalTokens), formatCost(totals.cost), ratePeriodTooltip());
 			this._statusItem.show();
 		} catch (error) {
@@ -136,6 +140,14 @@ function ratePeriodTooltip(): string {
 	return peak
 		? `PEAK ends ${fmt(peakEndsAt)} UTC · OFF-PEAK ends ${fmt(offPeakEndsAt)} UTC`
 		: `OFF-PEAK ends ${fmt(offPeakEndsAt)} UTC · PEAK ends ${fmt(peakEndsAt)} UTC`;
+}
+
+/** Live tokens/sec for the status bar: `12` or `12.4` (one decimal below 100). */
+function formatTokenRate(rate: number): string {
+	if (!Number.isFinite(rate) || rate <= 0) {
+		return '0';
+	}
+	return rate >= 100 ? String(Math.round(rate)) : rate.toFixed(1);
 }
 
 /** Local-day totals for the status bar's idle state. */

@@ -1575,26 +1575,36 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 	}
 
 	/**
-	 * The image-description backend select. Options are key-gated by the
-	 * configured providers (Gemini only when a Gemini key exists, OpenRouter
-	 * only when an OpenRouter key exists, Gemma always). A `none` option
-	 * ("None (native vision)") is offered and enabled only when the default
-	 * model supports native image input, so users can turn off preprocessing
-	 * when the model already handles images itself.
+	 * The image-description backend select. Options are the vision-capable
+	 * models fetched from the configured providers — the same lineup shown on
+	 * the Models page: native models plus the wizard-selected catalog models
+	 * (managed mode) or the key-gated natives/catalogs (legacy mode). Each
+	 * entry stores the model id (`nika/…`) so `_describeMedia` can route to
+	 * the right provider. A `none` option ("None (native vision)") is offered
+	 * only when the default model supports native image input, and `vscode`
+	 * lets users type any other VS Code vision model.
 	 */
 	private _visionBackendRow(state: Record<string, unknown>, currentValue: string): string {
 		const defaultModel = String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL);
-		const defaultModelVision = this._modelChoices(state).find(m => m.id === defaultModel)?.vision ?? false;
+		const choices = this._modelChoices(state);
+		// DeepSeek advertises media input only so Copilot preserves attachments
+		// for Nika's text conversion — it cannot describe images itself, so it
+		// never counts as a vision backend or as natively vision-capable.
+		const defaultModelEntry = choices.find(m => m.id === defaultModel);
+		const defaultModelVision = (defaultModelEntry?.vision ?? false) && defaultModelEntry?.provider !== 'deepseek';
 		const options: string[][] = [];
 		if (defaultModelVision) {
 			options.push(['none', vscode.l10n.t('None (native vision)')]);
 		}
-		if (state.geminiConfigured) {
-			options.push(['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite']);
-		}
-		options.push(['gemma4:31b', vscode.l10n.t('Gemma 4 31B (Ollama)')]);
-		if (state.openrouterConfigured) {
-			options.push(['openrouter', 'OpenRouter']);
+		const seen = new Set<string>();
+		for (const model of choices) {
+			if (!model.vision || model.provider === 'deepseek' || seen.has(model.id)) {
+				continue;
+			}
+			seen.add(model.id);
+			const providerLabel = this._providerLabel(model.provider);
+			const hasProviderInName = providerLabel && model.displayName.toLowerCase().includes(providerLabel.toLowerCase());
+			options.push([model.id, hasProviderInName ? model.displayName : `${model.displayName} (${providerLabel})`]);
 		}
 		options.push(['vscode', vscode.l10n.t('Another VS Code vision model')]);
 		const hasCurrent = options.some(([value]) => value === currentValue);

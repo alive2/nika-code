@@ -8,7 +8,8 @@ import { IVSCodeExtensionContext } from '../../../platform/extContext/common/ext
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
-import { NIKA_GEMINI_SECRET, NIKA_OPENROUTER_SECRET } from './nikaModels';
+import { NIKA_CURSOR_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, getNikaModelProvider } from './nikaModels';
+import { CURSOR_BASE_URL } from './nikaCursorProvider';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 
 const NIKA_VISION_REPLAY_MIME = 'application/vnd.nika.vision-replay+json';
@@ -44,6 +45,9 @@ export class NikaAttachmentProcessor {
 	) { }
 
 	async process(messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, token: vscode.CancellationToken, options: NikaAttachmentProcessOptions = {}): Promise<NikaAttachmentResult> {
+		// `None (native vision)` passes images through untouched; otherwise the
+		// caller decides (llama.cpp/Cursor preserve, the rest describe).
+		const preserveImages = options.preserveImages ?? (vscode.workspace.getConfiguration('nika').get<string>('visionModel', 'gemini-2.5-flash') === 'none');
 		const pdfCount = messages.reduce((count, message) => count + message.content.filter(part => part instanceof vscode.LanguageModelDataPart && isPdfMime(part.mimeType)).length, 0);
 		if (pdfCount > 0) {
 			this._settingsEditor.log('INFO', vscode.l10n.t('Received {0} PDF attachment(s) for Nika preprocessing.', pdfCount));
@@ -64,7 +68,7 @@ export class NikaAttachmentProcessor {
 						continue;
 					}
 					if (part.mimeType.startsWith('image/')) {
-						if (options.preserveImages) {
+						if (preserveImages) {
 							content.push(part);
 							continue;
 						}
@@ -78,7 +82,7 @@ export class NikaAttachmentProcessor {
 					}
 				}
 				if (part instanceof vscode.LanguageModelToolResultPart) {
-					content.push(await this._processToolResult(part, index === lastUserIndex, pageRequest, replay, generatedMarkers, token, options));
+					content.push(await this._processToolResult(part, index === lastUserIndex, pageRequest, replay, generatedMarkers, token, { ...options, preserveImages }));
 					continue;
 				}
 				content.push(part);
@@ -189,13 +193,14 @@ export class NikaAttachmentProcessor {
 	private async _describeMedia(data: Uint8Array, mimeType: string, prompt: string, token: vscode.CancellationToken): Promise<string> {
 		const config = vscode.workspace.getConfiguration('nika');
 		const backend = config.get<string>('visionModel', 'gemini-2.5-flash');
+		// Legacy route values from before the dynamic lineup: keep them working.
 		if (backend === 'gemini-2.5-flash' || backend === 'gemini-2.5-flash-lite') {
 			const key = await this._context.secrets.get(NIKA_GEMINI_SECRET);
 			if (!key) { throw new Error(vscode.l10n.t('Configure a Gemini key for the selected vision backend.')); }
 			return this._describeWithGemini(data, mimeType, prompt, backend, key, token);
 		}
 		if (backend === 'gemma4:31b') {
-			return this._describeWithOllama(data, prompt, token);
+			return this._describeWithOllama(data, prompt, token, 'gemma4:31b');
 		}
 		if (backend === 'openrouter') {
 			const model = config.get<string>('visionOpenRouterModel', '').trim();
@@ -204,16 +209,64 @@ export class NikaAttachmentProcessor {
 			if (!key) { throw new Error(vscode.l10n.t('Configure an OpenRouter key for the selected vision backend.')); }
 			return this._describeWithOpenRouter(data, mimeType, prompt, model, key, token);
 		}
+		// Model ids picked from the fetched provider lineups (`nika/…`). Route by
+		// provider family so any vision-capable model the user selected in the
+		// wizard can serve as the image-description backend.
+		const provider = getNikaModelProvider(backend);
+		if (provider) {
+			const raw = backend.startsWith('nika/') ? backend.slice('nika/'.length) : backend;
+			switch (provider) {
+				case 'gemini': {
+					const model = raw.startsWith('gemini/') ? raw.slice('gemini/'.length) : raw;
+					const key = await this._context.secrets.get(NIKA_GEMINI_SECRET);
+					if (!key) { throw new Error(vscode.l10n.t('Configure a Gemini key for the selected vision backend.')); }
+					return this._describeWithGemini(data, mimeType, prompt, model, key, token);
+				}
+				case 'gemma':
+					return this._describeWithOllama(data, prompt, token, 'gemma4:31b');
+				case 'ollama': {
+					const model = raw.slice('ollama/'.length);
+					return this._describeWithOllama(data, prompt, token, model);
+				}
+				case 'openrouter': {
+					const model = raw.slice('openrouter/'.length);
+					const key = await this._context.secrets.get(NIKA_OPENROUTER_SECRET);
+					if (!key) { throw new Error(vscode.l10n.t('Configure an OpenRouter key for the selected vision backend.')); }
+					return this._describeWithOpenRouter(data, mimeType, prompt, model, key, token);
+				}
+				case 'llamacpp': {
+					const model = raw.slice('llamacpp/'.length);
+					const baseUrl = config.get<string>('llamaCppBaseUrl', 'http://localhost:8080').replace(/\/$/, '');
+					const key = await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined;
+					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, `${baseUrl}/v1/chat/completions`, 'nika-llamacpp-vision', 'llama.cpp', token);
+				}
+				case 'cursor': {
+					const model = raw.slice('cursor/'.length);
+					const key = await this._context.secrets.get(NIKA_CURSOR_SECRET);
+					if (!key) { throw new Error(vscode.l10n.t('Configure a Cursor key for the selected vision backend.')); }
+					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, `${CURSOR_BASE_URL}/v1/chat/completions`, 'nika-cursor-vision', 'Cursor', token);
+				}
+				case 'deepseek':
+					break; // text-only models cannot describe images
+			}
+		}
 		return this._describeWithVSCodeModel(data, mimeType, prompt, token);
 	}
 
 	private async _describeWithOpenRouter(data: Uint8Array, mimeType: string, prompt: string, model: string, key: string, token: vscode.CancellationToken): Promise<string> {
+		return this._describeWithChatCompletions(data, mimeType, prompt, model, key, 'https://openrouter.ai/api/v1/chat/completions', 'nika-openrouter-vision', 'OpenRouter', token);
+	}
+
+	/** OpenAI-compatible chat-completions image description (OpenRouter, llama.cpp, Cursor). */
+	private async _describeWithChatCompletions(data: Uint8Array, mimeType: string, prompt: string, model: string, key: string | undefined, url: string, callSite: string, label: string, token: vscode.CancellationToken): Promise<string> {
 		const abort = this._fetcherService.makeAbortController();
 		const subscription = token.onCancellationRequested(() => abort.abort());
 		try {
-			const response = await this._fetcherService.fetch('https://openrouter.ai/api/v1/chat/completions', {
+			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+			if (key) { headers.Authorization = `Bearer ${key}`; }
+			const response = await this._fetcherService.fetch(url, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+				headers,
 				body: JSON.stringify({
 					model,
 					max_tokens: 512,
@@ -226,12 +279,12 @@ export class NikaAttachmentProcessor {
 					}],
 				}),
 				signal: abort.signal,
-				callSite: 'nika-openrouter-vision',
+				callSite,
 			});
-			if (!response.ok) { throw new Error(vscode.l10n.t('OpenRouter vision returned HTTP {0}.', response.status)); }
+			if (!response.ok) { throw new Error(vscode.l10n.t('{0} vision returned HTTP {1}.', label, response.status)); }
 			const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
 			const text = json.choices?.[0]?.message?.content?.trim();
-			if (!text) { throw new Error(vscode.l10n.t('OpenRouter vision returned no description.')); }
+			if (!text) { throw new Error(vscode.l10n.t('{0} vision returned no description.', label)); }
 			return text;
 		} finally {
 			subscription.dispose();
@@ -259,7 +312,7 @@ export class NikaAttachmentProcessor {
 		}
 	}
 
-	private async _describeWithOllama(data: Uint8Array, prompt: string, token: vscode.CancellationToken): Promise<string> {
+	private async _describeWithOllama(data: Uint8Array, prompt: string, token: vscode.CancellationToken, model: string): Promise<string> {
 		const abort = this._fetcherService.makeAbortController();
 		const subscription = token.onCancellationRequested(() => abort.abort());
 		try {
@@ -267,7 +320,7 @@ export class NikaAttachmentProcessor {
 			const response = await this._fetcherService.fetch(`${baseUrl}/api/chat`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ model: 'gemma4:31b', stream: false, messages: [{ role: 'user', content: prompt, images: [Buffer.from(data).toString('base64')] }] }),
+				body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: prompt, images: [Buffer.from(data).toString('base64')] }] }),
 				signal: abort.signal,
 				callSite: 'nika-ollama-vision',
 			});

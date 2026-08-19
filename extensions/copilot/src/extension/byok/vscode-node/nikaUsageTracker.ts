@@ -104,6 +104,8 @@ export interface NikaWorkspaceSummary {
 export class TokenTrackingProgress implements vscode.Progress<vscode.LanguageModelResponsePart2> {
 	private _liveChars = 0;
 	private _exactUsage: APIUsage | undefined;
+	private readonly _startedAt = Date.now();
+	private _firstCharAt: number | undefined;
 
 	constructor(
 		private readonly _delegate: vscode.Progress<vscode.LanguageModelResponsePart2>,
@@ -115,6 +117,18 @@ export class TokenTrackingProgress implements vscode.Progress<vscode.LanguageMod
 		return Math.round(this._liveChars / 4);
 	}
 
+	/** Milliseconds since this stream began. */
+	get elapsedMs(): number {
+		return Date.now() - this._startedAt;
+	}
+
+	/** Live output rate: estimated tokens streamed per second since the first token. */
+	get liveTokensPerSecond(): number {
+		const sinceFirstChar = this._firstCharAt ? Date.now() - this._firstCharAt : 0;
+		const seconds = sinceFirstChar > 0 ? sinceFirstChar / 1000 : 0;
+		return seconds > 0 ? this.liveEstimateTokens / seconds : 0;
+	}
+
 	/** Exact server-reported usage, once the stream completes. */
 	get exactUsage(): APIUsage | undefined {
 		return this._exactUsage;
@@ -123,6 +137,7 @@ export class TokenTrackingProgress implements vscode.Progress<vscode.LanguageMod
 	report(part: vscode.LanguageModelResponsePart2): void {
 		if (part instanceof vscode.LanguageModelTextPart) {
 			this._liveChars += part.value.length;
+			this._firstCharAt ??= Date.now();
 			this._onLiveChange();
 		} else if (part instanceof vscode.LanguageModelThinkingPart) {
 			const value = part.value;
@@ -133,6 +148,7 @@ export class TokenTrackingProgress implements vscode.Progress<vscode.LanguageMod
 					this._liveChars += chunk.length;
 				}
 			}
+			this._firstCharAt ??= Date.now();
 			this._onLiveChange();
 		} else if (part instanceof vscode.LanguageModelDataPart && part.mimeType === CustomDataPartMimeTypes.Usage) {
 			try {
@@ -205,6 +221,15 @@ export class NikaUsageTracker extends Disposable {
 			total += stream.liveEstimateTokens;
 		}
 		return total;
+	}
+
+	/** Aggregate live output rate across all in-flight streams (tokens/sec). */
+	get liveTokensPerSecond(): number {
+		let rate = 0;
+		for (const stream of this._liveStreams.values()) {
+			rate += stream.liveTokensPerSecond;
+		}
+		return rate;
 	}
 
 	get liveStreamCount(): number {
