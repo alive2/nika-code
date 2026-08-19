@@ -23,6 +23,16 @@ export interface NikaAttachmentResult {
 	readonly replayMarkers: vscode.LanguageModelDataPart[];
 }
 
+export interface NikaAttachmentProcessOptions {
+	/**
+	 * When true, image parts pass through untouched as native data parts
+	 * (used for multimodal llama.cpp models). Only PDFs are converted to
+	 * text. Default: false (all media converted to text for text-only
+	 * models).
+	 */
+	readonly preserveImages?: boolean;
+}
+
 /** Converts media attachments into deterministic text for DeepSeek. */
 export class NikaAttachmentProcessor {
 	private readonly _visionCache = new Map<string, string>();
@@ -33,7 +43,7 @@ export class NikaAttachmentProcessor {
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 	) { }
 
-	async process(messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, token: vscode.CancellationToken): Promise<NikaAttachmentResult> {
+	async process(messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, token: vscode.CancellationToken, options: NikaAttachmentProcessOptions = {}): Promise<NikaAttachmentResult> {
 		const pdfCount = messages.reduce((count, message) => count + message.content.filter(part => part instanceof vscode.LanguageModelDataPart && isPdfMime(part.mimeType)).length, 0);
 		if (pdfCount > 0) {
 			this._settingsEditor.log('INFO', vscode.l10n.t('Received {0} PDF attachment(s) for Nika preprocessing.', pdfCount));
@@ -54,6 +64,10 @@ export class NikaAttachmentProcessor {
 						continue;
 					}
 					if (part.mimeType.startsWith('image/')) {
+						if (options.preserveImages) {
+							content.push(part);
+							continue;
+						}
 						const replacement = await this._imageToText(part, index === lastUserIndex, replay, generatedMarkers, token);
 						if (replacement) { content.push(replacement); }
 						continue;
@@ -64,7 +78,7 @@ export class NikaAttachmentProcessor {
 					}
 				}
 				if (part instanceof vscode.LanguageModelToolResultPart) {
-					content.push(await this._processToolResult(part, index === lastUserIndex, pageRequest, replay, generatedMarkers, token));
+					content.push(await this._processToolResult(part, index === lastUserIndex, pageRequest, replay, generatedMarkers, token, options));
 					continue;
 				}
 				content.push(part);
@@ -78,12 +92,16 @@ export class NikaAttachmentProcessor {
 		return { messages: result, replayMarkers: generatedMarkers };
 	}
 
-	private async _processToolResult(part: vscode.LanguageModelToolResultPart, current: boolean, pageRequest: string, replay: Map<string, string>, markers: vscode.LanguageModelDataPart[], token: vscode.CancellationToken): Promise<vscode.LanguageModelToolResultPart> {
+	private async _processToolResult(part: vscode.LanguageModelToolResultPart, current: boolean, pageRequest: string, replay: Map<string, string>, markers: vscode.LanguageModelDataPart[], token: vscode.CancellationToken, options: NikaAttachmentProcessOptions): Promise<vscode.LanguageModelToolResultPart> {
 		const content: Array<vscode.LanguageModelTextPart | vscode.LanguageModelDataPart | unknown> = [];
 		for (const item of part.content) {
 			if (item instanceof vscode.LanguageModelDataPart && item.mimeType.startsWith('image/')) {
-				const replacement = await this._imageToText(item, current, replay, markers, token);
-				if (replacement) { content.push(replacement); }
+				if (options.preserveImages) {
+					content.push(item);
+				} else {
+					const replacement = await this._imageToText(item, current, replay, markers, token);
+					if (replacement) { content.push(replacement); }
+				}
 			} else if (item instanceof vscode.LanguageModelDataPart && isPdfMime(item.mimeType)) {
 				content.push(new vscode.LanguageModelTextPart(await this._pdfToText(item, pageRequest, token)));
 			} else if (!(item instanceof vscode.LanguageModelDataPart && item.mimeType === NIKA_VISION_REPLAY_MIME)) {

@@ -62,6 +62,30 @@ describe('Nika attachment preprocessing', () => {
 		expect(text.value).toContain('older image was omitted');
 		expect(log).toHaveBeenCalled();
 	});
+
+	it('passes images through untouched when preserveImages is set (llama.cpp)', async () => {
+		const secrets = { get: vi.fn() };
+		const fetch = vi.fn();
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			{ secrets } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[1],
+			{ fetch, makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+		);
+		const image = new Uint8Array([1, 2, 3]);
+		const result = await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(image, 'image/png')]),
+		], new vscode.CancellationTokenSource().token, { preserveImages: true });
+
+		// The image stays a native data part: no vision backend was called and
+		// no text replacement (or replay marker) was produced.
+		const part = result.messages[0].content[0];
+		expect(part).toBeInstanceOf(vscode.LanguageModelDataPart);
+		expect((part as vscode.LanguageModelDataPart).mimeType).toBe('image/png');
+		expect(result.messages[0].content).toHaveLength(1);
+		expect(result.replayMarkers).toHaveLength(0);
+		expect(secrets.get).not.toHaveBeenCalled();
+		expect(fetch).not.toHaveBeenCalled();
+	});
 });
 
 describe('Nika OpenRouter vision', () => {

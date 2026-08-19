@@ -19,7 +19,6 @@ import { BYOKStorageService, IBYOKStorageService } from './byokStorageService';
 import { CustomEndpointBYOKModelProvider } from './customEndpointProvider';
 import { CustomOAIBYOKModelProvider } from './customOAIProvider';
 import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
-import { OllamaLMProvider } from './ollamaProvider';
 import { OAIBYOKLMProvider } from './openAIProvider';
 import { OpenRouterLMProvider } from './openRouterProvider';
 import { XAIBYOKLMProvider } from './xAIProvider';
@@ -59,7 +58,12 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		const xai = instantiationService.createInstance(XAIBYOKLMProvider, {}, this._byokStorageService);
 		const openai = instantiationService.createInstance(OAIBYOKLMProvider, {}, this._byokStorageService);
 
-		this._providers.set(OllamaLMProvider.providerId, instantiationService.createInstance(OllamaLMProvider, this._byokStorageService));
+		// NikaCode: the upstream `ollama` vendor is intentionally not
+		// registered. Nika owns the Ollama experience end-to-end (host from
+		// `nika.ollamaBaseUrl`, dynamic `/api/tags` listing, wizard-driven
+		// model selection, and request delegation), so a separate `ollama/*`
+		// vendor would duplicate models in the picker and bypass Nika's
+		// provider gating.
 		this._providers.set(AnthropicLMProvider.providerId, anthropic);
 		this._providers.set(GeminiNativeBYOKLMProvider.providerId, gemini);
 		this._providers.set(XAIBYOKLMProvider.providerId, xai);

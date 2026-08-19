@@ -9,28 +9,33 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, resolveNikaTokenLimits } from './nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaModelId, NikaProviderConfig, NikaProviderId, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
 import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
+import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, NikaLlamaCppProvider } from './nikaLlamaCppProvider';
+import { NikaCursorProvider } from './nikaCursorProvider';
+import { NikaGeminiProvider } from './nikaGeminiProvider';
 import { NikaUsageTracker } from './nikaUsageTracker';
 
-type NikaConnection = 'deepseek' | 'gemini' | 'ollama' | 'openrouter';
+type NikaConnection = NikaProviderId;
 type NikaSettingsSection = 'overview' | 'providers' | 'models' | 'vision' | 'pdf' | 'agents' | 'indexing' | 'usage' | 'diagnostics';
 type ConnectionResult = { readonly ok: boolean; readonly message: string; readonly checkedAt: string };
 
 const SETTINGS = new Set([
 	'defaultModel', 'outputTokens', 'contextWindow', 'temperature', 'thinkingEffort', 'openrouterFloor',
-	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'ollamaBaseUrl',
+	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'ollamaBaseUrl', 'llamaCppBaseUrl',
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
 	'logLevel', 'releaseCheckEnabled', 'safetyRules.enabled', 'github.enabled', 'indexing.scheme', 'usage.enabled',
 ]);
 
-const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter', string> = {
+const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor', string> = {
 	deepseek: NIKA_DEEPSEEK_SECRET,
 	gemini: NIKA_GEMINI_SECRET,
 	openrouter: NIKA_OPENROUTER_SECRET,
+	llamacpp: NIKA_LLAMACPP_SECRET,
+	cursor: NIKA_CURSOR_SECRET,
 };
 
 function providerDisplayName(provider: NikaConnection): string {
@@ -39,6 +44,8 @@ function providerDisplayName(provider: NikaConnection): string {
 		case 'gemini': return 'Gemini';
 		case 'ollama': return 'Ollama';
 		case 'openrouter': return 'OpenRouter';
+		case 'llamacpp': return 'llama.cpp';
+		case 'cursor': return 'Cursor';
 	}
 }
 
@@ -79,13 +86,15 @@ export class NikaSettingsEditor extends Disposable {
 	private _activeSection: NikaSettingsSection = 'overview';
 	private _deepSeekKey: string | undefined;
 	private _geminiKey: string | undefined;
-	private _openRouterKey: string | undefined;
 	private readonly _output = this._register(vscode.window.createOutputChannel(vscode.l10n.t('Nika')));
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
 
 	constructor(
 		private readonly _usageTracker: NikaUsageTracker,
 		private readonly _openRouterProvider: NikaOpenRouterProvider,
+		private readonly _llamaCppProvider: NikaLlamaCppProvider,
+		private readonly _geminiCatalogProvider: NikaGeminiProvider,
+		private readonly _cursorProvider: NikaCursorProvider,
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 		@ILogService private readonly _logService: ILogService,
@@ -110,7 +119,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET) {
 				void this._render(this._activeSection);
 			}
 		}));
@@ -124,12 +133,13 @@ export class NikaSettingsEditor extends Disposable {
 
 		if (!this._context.globalState.get<boolean>('nika.firstRunPromptShown')) {
 			await this._context.globalState.update('nika.firstRunPromptShown', true);
-			const [deepseekKey, geminiKey, openRouterKey] = await Promise.all([
+			const [deepseekKey, geminiKey, openRouterKey, cursorKey] = await Promise.all([
 				this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 				this._context.secrets.get(NIKA_GEMINI_SECRET),
 				this._context.secrets.get(NIKA_OPENROUTER_SECRET),
+				this._context.secrets.get(NIKA_CURSOR_SECRET),
 			]);
-			if (!deepseekKey && !geminiKey && !openRouterKey) {
+			if (!deepseekKey && !geminiKey && !openRouterKey && !cursorKey) {
 				this.open('providers');
 				void vscode.window.showInformationMessage(vscode.l10n.t('Welcome to NikaCode. Nika Settings is open: add and test a DeepSeek key to start chatting. Gemini and OpenRouter keys are optional for more models and vision features.'));
 			} else {
@@ -245,28 +255,88 @@ export class NikaSettingsEditor extends Disposable {
 
 	private async _state(): Promise<Record<string, unknown>> {
 		const config = vscode.workspace.getConfiguration('nika');
-		const [deepseekKey, geminiKey, openRouterKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
+			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
+			this._context.secrets.get(NIKA_CURSOR_SECRET),
 		]);
 		// Cache the key presence so view-model helpers (modelChoices) can gate
 		// model visibility without re-reading secrets for every dropdown.
 		this._deepSeekKey = deepseekKey;
 		this._geminiKey = geminiKey;
-		this._openRouterKey = openRouterKey;
 		const value = <T>(key: string, fallback: T): T => config.get<T>(key, fallback);
 		const openRouterCatalog = openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [];
+		const llamaCppBaseUrl = this._llamaCppBaseUrl();
+		const llamaCppCatalog = llamaCppBaseUrl ? await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined) : [];
+		const ollamaCatalog = await this._ollamaCatalogState(value('ollamaBaseUrl', 'http://localhost:11434'));
+		const geminiCatalog = geminiKey ? await this._geminiCatalogState(geminiKey) : [];
+		const cursorCatalog = cursorKey ? await this._cursorCatalogState(cursorKey) : [];
+		// Wizard-driven provider selection. Absent = legacy mode (classic
+		// key-based visibility); present = managed mode (only the selected
+		// models of added providers are visible anywhere).
+		const providers = parseNikaProviderConfig(config.get('providers'));
+		const providersManaged = providers !== undefined;
+		const limits = resolveNikaTokenLimits(
+			config.get<string>('contextWindow', '128K'),
+			config.get<string>('outputTokens', '8K'),
+		);
+		const nativeModelEntry = (id: NikaModelId, provider: NikaProviderId): Record<string, unknown> => {
+			const capabilities = getNikaModelCapabilities(id, limits);
+			return {
+				id,
+				name: capabilities.name,
+				provider,
+				vision: capabilities.vision ?? false,
+				toolCalling: capabilities.toolCalling ?? false,
+				reasoning: (capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+				efforts: getNikaEffortOptionsForModel(id),
+			};
+		};
+		// Wizard entries must carry the full exposed id (with the provider
+		// prefix for catalog families) because `_saveProviderConfig` persists
+		// them verbatim and the chat picker gates on the prefixed form.
+		const prefixCatalog = (catalog: unknown[], prefix: string): Record<string, unknown>[] =>
+			(catalog as { id: string }[]).map(model => ({ ...model, id: `${prefix}${model.id}` }));
 		return {
 			deepseekConfigured: !!deepseekKey,
 			geminiConfigured: !!geminiKey,
 			openrouterConfigured: !!openRouterKey,
 			openrouterModels: openRouterCatalog,
-			// Flattened, key-gated model list for the Models / Agents / Vision
-			// dropdowns (native + OpenRouter catalog).
-			modelChoices: await this._modelChoicesState(config, openRouterCatalog),
+			llamacppConfigured: !!llamaCppKey,
+			llamacppModels: llamaCppCatalog,
+			cursorConfigured: !!cursorKey,
+			providers,
+			providersManaged,
+			// Per-provider configured flag for status pills. Legacy mode keeps
+			// the classic rules; managed mode reflects the added providers.
+			providersConfigured: providersManaged
+				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor }
+				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey },
+			// Available models per provider for the wizard's selection step.
+			// Native entries are bare ids; catalog families carry their prefix
+			// so the wizard stores exactly what the picker gates on.
+			providerModels: {
+				deepseek: NIKA_DEEPSEEK_MODEL_IDS.map(id => nativeModelEntry(id, 'deepseek')),
+				gemini: [
+					...NIKA_GEMINI_MODEL_IDS.map(id => nativeModelEntry(id, 'gemini')),
+					// The catalog excludes the native lineup (see
+					// `_geminiCatalogState`), so no dedup is needed here.
+					...prefixCatalog(geminiCatalog, NIKA_GEMINI_MODEL_PREFIX),
+				],
+				ollama: prefixCatalog(ollamaCatalog, NIKA_OLLAMA_MODEL_PREFIX),
+				openrouter: prefixCatalog(openRouterCatalog, NIKA_OPENROUTER_MODEL_PREFIX),
+				llamacpp: prefixCatalog(llamaCppCatalog, NIKA_LLAMACPP_MODEL_PREFIX),
+				cursor: prefixCatalog(cursorCatalog, NIKA_CURSOR_MODEL_PREFIX),
+			},
+			// Flattened, selection-gated model list for the Models / Agents /
+			// Vision dropdowns (native + Ollama + OpenRouter + llama.cpp +
+			// Gemini catalog + Cursor).
+			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, providers),
 			hasOllama: true,
 			ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
+			llamaCppBaseUrl,
 			appVersion: vscode.version,
 			extensionVersion: String((this._context.extension.packageJSON as { version?: string }).version ?? 'unknown'),
 			connections: Object.fromEntries(this._connections),
@@ -344,22 +414,159 @@ export class NikaSettingsEditor extends Disposable {
 	}
 
 	/**
-	 * Flattened, key-gated model list for the settings dropdowns (Models
+	 * Serialized llama.cpp model list for the Models section. Mirrors
+	 * {@link _openRouterCatalogState}: the list travels through state because
+	 * the webview CSP forbids fetch calls. A server that is unreachable (or
+	 * has no loaded models) degrades to an empty list rather than breaking
+	 * the whole settings page.
+	 */
+	private async _llamaCppCatalogState(baseUrl: string, apiKey: string | undefined): Promise<unknown[]> {
+		try {
+			const catalog = await this._llamaCppProvider.getCatalog(baseUrl, apiKey);
+			return [...catalog.values()].map(model => ({
+				id: model.id,
+				name: model.name,
+				contextWindow: model.contextWindow,
+				vision: model.capabilities.vision,
+				toolCalling: model.capabilities.toolCalling,
+				reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+				// llama.cpp models have no reasoning-effort control.
+				efforts: [],
+				provider: 'llamacpp',
+				// Local inference is free: no price label.
+				priceLabel: '',
+				free: true,
+			}));
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('llama.cpp model list unavailable: {0}', detail));
+			return [];
+		}
+	}
+
+	/**
+	 * Serialized Ollama model list for the wizard and the Models section.
+	 * Mirrors {@link _openRouterCatalogState}: the list travels through state
+	 * because the webview CSP forbids fetch calls. A host that is unreachable
+	 * (or has no pulled models) degrades to an empty list rather than
+	 * breaking the whole settings page.
+	 */
+	private async _ollamaCatalogState(baseUrl: string): Promise<unknown[]> {
+		try {
+			const response = await this._fetcherService.fetch(`${baseUrl}/api/tags`, { method: 'GET', callSite: 'nika-ollama-tags' });
+			if (!response.ok) {
+				throw new Error(vscode.l10n.t('The Ollama host returned HTTP {0}.', response.status));
+			}
+			const body = await response.json() as { models?: unknown[] };
+			const entries: unknown[] = (body.models ?? []).map(entry => {
+				if (!entry || typeof entry !== 'object') {
+					return undefined;
+				}
+				const name = String((entry as { name?: unknown }).name ?? '').trim();
+				if (!name) {
+					return undefined;
+				}
+				return {
+					id: name,
+					name,
+					contextWindow: LLAMACPP_DEFAULT_CONTEXT_WINDOW,
+					vision: true,
+					toolCalling: true,
+					reasoning: false,
+					// Ollama models have no reasoning-effort control.
+					efforts: [],
+					provider: 'ollama',
+					// Local inference is free: no price label.
+					priceLabel: '',
+					free: true,
+				};
+			});
+			return entries.filter((entry): entry is Record<string, unknown> => entry !== undefined);
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('Ollama model list unavailable: {0}', detail));
+			return [];
+		}
+	}
+
+	/**
+	 * Serialized Gemini catalog for the wizard and the Models section.
+	 * Mirrors {@link _openRouterCatalogState}: the list travels through state
+	 * because the webview CSP forbids fetch calls. The curated native lineup
+	 * is excluded (those ids are contributed as bare native entries); a key
+	 * that is invalid (or an API outage) degrades to an empty list rather
+	 * than breaking the whole settings page.
+	 */
+	private async _geminiCatalogState(apiKey: string): Promise<unknown[]> {
+		try {
+			const catalog = await this._geminiCatalogProvider.getCatalog(apiKey);
+			return [...catalog.values()].map(model => ({
+				id: model.id,
+				name: model.name,
+				contextWindow: model.contextWindow,
+				vision: model.capabilities.vision,
+				toolCalling: model.capabilities.toolCalling,
+				reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+				// Gemini catalog models accept `none`/`low`/`high`.
+				efforts: model.capabilities.supportsReasoningEffort ?? [],
+				provider: 'gemini',
+				priceLabel: '',
+				free: true,
+			}));
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('Gemini catalog unavailable: {0}', detail));
+			return [];
+		}
+	}
+
+	/**
+	 * Serialized Cursor model list for the wizard and the Models section.
+	 * Mirrors {@link _openRouterCatalogState}: the list travels through state
+	 * because the webview CSP forbids fetch calls. A key that is invalid (or
+	 * an API outage) degrades to an empty list rather than breaking the whole
+	 * settings page.
+	 */
+	private async _cursorCatalogState(apiKey: string): Promise<unknown[]> {
+		try {
+			const catalog = await this._cursorProvider.getCatalog(apiKey);
+			return [...catalog.values()].map(model => ({
+				id: model.id,
+				name: model.name,
+				contextWindow: model.contextWindow,
+				vision: model.capabilities.vision,
+				toolCalling: model.capabilities.toolCalling,
+				reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+				// Cursor models have no reasoning-effort control.
+				efforts: [],
+				provider: 'cursor',
+				priceLabel: '',
+				free: false,
+			}));
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('Cursor model list unavailable: {0}', detail));
+			return [];
+		}
+	}
+
+	/**
+	 * Flattened, selection-gated model list for the settings dropdowns (Models
 	 * page, Agents page, vision defaults). Mirrors the chat model picker's
 	 * visibility rules in `nikaProvider.provideLanguageModelChatInformation`:
-	 * DeepSeek/Gemini only when their key is present, Gemma always, and the
-	 * OpenRouter catalog only when an OpenRouter key is present. Each entry
-	 * carries the id (as stored in `nika.defaultModel`, i.e. `nika/…` for
-	 * native models and `nika/openrouter/…` for catalog models), a display
-	 * name, the provider family, capabilities (vision, effort levels), and
-	 * optional context/pricing for the catalog rows.
+	 * legacy mode (no `nika.providers`) keeps the classic key-based rules,
+	 * while managed mode exposes exactly the wizard-selected models of the
+	 * added providers. Each entry carries the id (as stored in
+	 * `nika.defaultModel`, i.e. `nika/…`), a display name, the provider
+	 * family, capabilities (vision, effort levels), and optional
+	 * context/pricing for the catalog rows.
 	 */
-	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[]): Promise<unknown[]> {
+	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[], llamaCppCatalog: unknown[], ollamaCatalog: unknown[], geminiCatalog: unknown[], cursorCatalog: unknown[], providerConfig: NikaProviderConfig | undefined): Promise<unknown[]> {
 		const limits = resolveNikaTokenLimits(
 			config.get<string>('contextWindow', '128K'),
 			config.get<string>('outputTokens', '8K'),
 		);
-		const nativeChoices = getVisibleNikaModelIds(!!this._deepSeekKey, !!this._geminiKey).map(id => {
+		const nativeChoices = getVisibleNikaModelIds(!!this._deepSeekKey, !!this._geminiKey, providerConfig).map(id => {
 			const capabilities = getNikaModelCapabilities(id, limits);
 			return {
 				id: `nika/${id}`,
@@ -369,21 +576,107 @@ export class NikaSettingsEditor extends Disposable {
 				efforts: getNikaEffortOptionsForModel(id),
 			};
 		});
-		const catalogChoices = (openRouterCatalog as unknown[]).map(model => {
-			const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; vendor: string; contextWindow: number; priceLabel: string; free: boolean };
-			return {
-				id: `nika/${NIKA_OPENROUTER_MODEL_PREFIX}${entry.id}`,
-				displayName: entry.name,
-				provider: 'openrouter',
-				vendor: entry.vendor,
-				vision: entry.vision,
-				efforts: entry.efforts,
-				contextWindow: entry.contextWindow,
-				priceLabel: entry.priceLabel,
-				free: entry.free,
-			};
-		});
-		return [...nativeChoices, ...catalogChoices];
+		const openRouterSelected = getNikaSelectedModels(providerConfig, 'openrouter');
+		const catalogChoices = (openRouterCatalog as unknown[])
+			.filter(model => {
+				if (openRouterSelected === undefined) {
+					// Legacy: the full catalog shows whenever a key is present.
+					return providerConfig === undefined;
+				}
+				return openRouterSelected.includes(`${NIKA_OPENROUTER_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; vendor: string; contextWindow: number; priceLabel: string; free: boolean };
+				return {
+					id: `nika/${NIKA_OPENROUTER_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'openrouter',
+					vendor: entry.vendor,
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+					priceLabel: entry.priceLabel,
+					free: entry.free,
+				};
+			});
+		const llamaCppSelected = getNikaSelectedModels(providerConfig, 'llamacpp');
+		const llamaCppChoices = (llamaCppCatalog as unknown[])
+			.filter(model => {
+				if (llamaCppSelected === undefined) {
+					return providerConfig === undefined;
+				}
+				return llamaCppSelected.includes(`${NIKA_LLAMACPP_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number };
+				return {
+					id: `nika/${NIKA_LLAMACPP_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'llamacpp',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+				};
+			});
+		const ollamaSelected = getNikaSelectedModels(providerConfig, 'ollama');
+		const ollamaChoices = (ollamaCatalog as unknown[])
+			.filter(model => {
+				if (ollamaSelected === undefined) {
+					return providerConfig === undefined;
+				}
+				return ollamaSelected.includes(`${NIKA_OLLAMA_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number };
+				return {
+					id: `nika/${NIKA_OLLAMA_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'ollama',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+				};
+			});
+		// The Gemini catalog only ever appears in managed mode: legacy mode
+		// surfaces exactly the curated native lineup.
+		const geminiSelected = getNikaSelectedModels(providerConfig, 'gemini');
+		const geminiChoices = (geminiCatalog as unknown[])
+			.filter(model => geminiSelected !== undefined && geminiSelected.includes(`${NIKA_GEMINI_MODEL_PREFIX}${(model as { id: string }).id}`))
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number };
+				return {
+					id: `nika/${NIKA_GEMINI_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'gemini',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+				};
+			});
+		const cursorSelected = getNikaSelectedModels(providerConfig, 'cursor');
+		const cursorChoices = (cursorCatalog as unknown[])
+			.filter(model => {
+				if (cursorSelected === undefined) {
+					return providerConfig === undefined;
+				}
+				return cursorSelected.includes(`${NIKA_CURSOR_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number };
+				return {
+					id: `nika/${NIKA_CURSOR_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'cursor',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+				};
+			});
+		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices];
+	}
+
+	private _llamaCppBaseUrl(): string {
+		return vscode.workspace.getConfiguration('nika').get<string>('llamaCppBaseUrl', 'http://localhost:8080').replace(/\/$/, '');
 	}
 
 	private _usageState(): Record<string, unknown> {
@@ -471,20 +764,30 @@ export class NikaSettingsEditor extends Disposable {
 					}
 					break;
 				case 'saveSecret':
-					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter') && typeof message.value === 'string') {
+					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor') && typeof message.value === 'string') {
 						await this._saveSecret(message.provider, message.value);
 					}
 					break;
 				case 'removeSecret':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor') {
 						await this._context.secrets.delete(SECRET_KEYS[message.provider]);
 						this._connections.delete(message.provider);
 						void vscode.window.showInformationMessage(vscode.l10n.t('{0} key removed.', providerDisplayName(message.provider)));
 					}
 					break;
 				case 'testConnection':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor') {
 						await this.testConnection(message.provider);
+					}
+					break;
+				case 'saveProviderConfig':
+					if (typeof message.provider === 'string' && Array.isArray(message.models)) {
+						await this._saveProviderConfig(message.provider as NikaProviderId, message.models);
+					}
+					break;
+				case 'removeProvider':
+					if (typeof message.provider === 'string') {
+						await this._removeProvider(message.provider as NikaProviderId);
 					}
 					break;
 				case 'setOpenRouterDefault':
@@ -555,7 +858,7 @@ export class NikaSettingsEditor extends Disposable {
 				? vscode.workspace.getConfiguration('nika').get<string>('defaultModel', NIKA_RESPONSES_MODEL)
 				: vscode.workspace.getConfiguration('nika').get<string>(`agent.${key.slice('agent.'.length, -'ThinkingEffort'.length)}`, NIKA_RESPONSES_MODEL);
 			const supported = getNikaEffortOptionsForModel(modelId);
-			if (supported.length > 0 && !supported.includes(value)) {
+			if (supported.length > 0 && !(supported as readonly string[]).includes(value)) {
 				value = this._clampEffort(value, supported);
 			}
 		}
@@ -609,14 +912,98 @@ export class NikaSettingsEditor extends Disposable {
 		await this._indexingSchemeManager.clear();
 	}
 
-	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter', value: string): Promise<void> {
+	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor', value: string): Promise<void> {
 		const trimmed = value.trim();
-		if (trimmed.length < 8) {
+		// Local llama.cpp servers often use short tokens; any non-empty value
+		// is accepted there. Cloud providers need a real key.
+		if (trimmed.length < (provider === 'llamacpp' ? 1 : 8)) {
 			throw new Error(vscode.l10n.t('Enter a valid API key before saving.'));
 		}
 		await this._context.secrets.store(SECRET_KEYS[provider], trimmed);
 		this._connections.delete(provider);
 		void vscode.window.showInformationMessage(vscode.l10n.t('{0} key saved securely.', providerDisplayName(provider)));
+	}
+
+	/**
+	 * Persists the wizard's model selection for a provider in the
+	 * `nika.providers` setting. The first save migrates an existing classic
+	 * setup (keys + hosts) into the managed config so nothing the user had
+	 * visible silently disappears.
+	 */
+	private async _saveProviderConfig(provider: NikaProviderId, models: unknown[]): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const current = parseNikaProviderConfig(config.get('providers'));
+		const merged: NikaProviderConfig = current ?? await this._legacyProviderSeed();
+		merged[provider] = {
+			models: [...new Set(models.filter((model): model is string => typeof model === 'string' && model.length > 0))],
+		};
+		await config.update('providers', merged, vscode.ConfigurationTarget.Global);
+		this._connections.delete(provider);
+		this.log('INFO', vscode.l10n.t('Saved the {0} provider selection.', providerDisplayName(provider)));
+	}
+
+	/**
+	 * Seeds the managed `nika.providers` config from the classic setup so the
+	 * first wizard save never hides providers the user already had visible
+	 * (DeepSeek/Gemini keys, the always-visible Gemma model, an OpenRouter
+	 * key, or a llama.cpp host). Catalog failures degrade gracefully: the
+	 * provider is still seeded from whatever could be fetched.
+	 */
+	private async _legacyProviderSeed(): Promise<NikaProviderConfig> {
+		const seed: NikaProviderConfig = {};
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey] = await Promise.all([
+			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
+			this._context.secrets.get(NIKA_GEMINI_SECRET),
+			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
+			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
+			this._context.secrets.get(NIKA_CURSOR_SECRET),
+		]);
+		if (deepseekKey) {
+			seed.deepseek = { models: [...NIKA_DEEPSEEK_MODEL_IDS] };
+		}
+		if (geminiKey) {
+			seed.gemini = { models: [...NIKA_GEMINI_MODEL_IDS] };
+		}
+		if (openRouterKey) {
+			const catalog = await this._openRouterCatalogState(openRouterKey);
+			seed.openrouter = { models: (catalog as { id: string }[]).map(model => `${NIKA_OPENROUTER_MODEL_PREFIX}${model.id}`) };
+		}
+		const llamaCppBaseUrl = this._llamaCppBaseUrl();
+		if (llamaCppBaseUrl) {
+			const catalog = await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined);
+			seed.llamacpp = { models: (catalog as { id: string }[]).map(model => `${NIKA_LLAMACPP_MODEL_PREFIX}${model.id}`) };
+		}
+		const ollamaBaseUrl = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
+		const ollamaCatalog = await this._ollamaCatalogState(ollamaBaseUrl);
+		// The classic setup always exposed Gemma; seed at least that, and all
+		// pulled models when the host is reachable.
+		const ollamaModels = (ollamaCatalog as { id: string }[]).length > 0
+			? (ollamaCatalog as { id: string }[]).map(model => `${NIKA_OLLAMA_MODEL_PREFIX}${model.id}`)
+			: [`${NIKA_OLLAMA_MODEL_PREFIX}${NIKA_GEMMA_MODEL_ID}`];
+		seed.ollama = { models: ollamaModels };
+		if (cursorKey) {
+			const catalog = await this._cursorCatalogState(cursorKey);
+			seed.cursor = { models: (catalog as { id: string }[]).map(model => `${NIKA_CURSOR_MODEL_PREFIX}${model.id}`) };
+		}
+		return seed;
+	}
+
+	/**
+	 * Removes a provider from the managed `nika.providers` config. Its models
+	 * stop appearing in chat, Agents, and the dropdowns immediately. The API
+	 * key (if any) is kept in Secret Storage so re-adding the provider does
+	 * not require re-entering it.
+	 */
+	private async _removeProvider(provider: NikaProviderId): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const current = parseNikaProviderConfig(config.get('providers'));
+		if (!current) {
+			return;
+		}
+		const { [provider]: _removed, ...rest } = current;
+		await config.update('providers', rest, vscode.ConfigurationTarget.Global);
+		this._connections.delete(provider);
+		void vscode.window.showInformationMessage(vscode.l10n.t('{0} removed. Its models no longer appear in chat or agents.', providerDisplayName(provider)));
 	}
 
 	async testConnection(provider: NikaConnection): Promise<boolean> {
@@ -635,6 +1022,14 @@ export class NikaSettingsEditor extends Disposable {
 				const key = await this._context.secrets.get(NIKA_OPENROUTER_SECRET);
 				if (!key) { throw new Error(vscode.l10n.t('No OpenRouter key is configured.')); }
 				response = await this._fetcherService.fetch('https://openrouter.ai/api/v1/models', { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-openrouter-test' });
+			} else if (provider === 'llamacpp') {
+				const url = this._llamaCppBaseUrl();
+				const key = await this._context.secrets.get(NIKA_LLAMACPP_SECRET);
+				response = await this._fetcherService.fetch(`${url}/v1/models`, { method: 'GET', headers: key ? { Authorization: `Bearer ${key}` } : undefined, callSite: 'nika-llamacpp-test' });
+			} else if (provider === 'cursor') {
+				const key = await this._context.secrets.get(NIKA_CURSOR_SECRET);
+				if (!key) { throw new Error(vscode.l10n.t('No Cursor key is configured.')); }
+				response = await this._fetcherService.fetch('https://api.cursor.com/v1/models', { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-cursor-test' });
 			} else {
 				const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 				response = await this._fetcherService.fetch(`${url}/api/version`, { method: 'GET', callSite: 'nika-ollama-test' });
@@ -753,7 +1148,11 @@ export class NikaSettingsEditor extends Disposable {
 			deepseekConfigured: state.deepseekConfigured,
 			geminiConfigured: state.geminiConfigured,
 			openrouterConfigured: state.openrouterConfigured,
+			llamacppConfigured: state.llamacppConfigured,
+			providersManaged: state.providersManaged,
+			providers: state.providers,
 			openrouterModelCount: (state.openrouterModels as unknown[]).length,
+			llamacppModelCount: (state.llamacppModels as unknown[]).length,
 			connections: state.connections,
 			settings: state.settings,
 		};
@@ -789,20 +1188,22 @@ export class NikaSettingsEditor extends Disposable {
 nav button{display:block;width:100%;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);padding:9px 10px;text-align:left;cursor:pointer}nav button:hover,nav button.active{background:var(--vscode-list-hoverBackground)}
 main{padding:38px 46px 80px}section{display:none}section.active{display:block}h1{font-size:26px;margin:0 0 8px}h2{font-size:16px;margin:30px 0 8px}.lead{color:var(--vscode-descriptionForeground);margin:0 0 28px;line-height:1.55}
 .card{padding:18px;border:1px solid var(--vscode-panel-border);border-radius:10px;margin:12px 0;background:color-mix(in srgb,var(--vscode-editor-background) 94%,var(--vscode-sideBar-background))}.row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(210px,1fr);gap:22px;align-items:center;padding:11px 0}.row+.row{border-top:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent)}label strong{display:block;margin-bottom:4px}.hint,.status{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}.agent-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px}
-input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}input[type="checkbox"]{width:auto;min-height:auto;accent-color:var(--vscode-button-background)}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls input[type="checkbox"]{flex:0}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
 .chart{margin:8px 0 4px}.chart svg{display:block;width:100%;height:auto}.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0 4px}.kpi .k{color:var(--vscode-descriptionForeground);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.kpi .v{font-size:21px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}table.usage{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;table-layout:fixed}table.usage th,table.usage td{text-align:left;padding:6px 10px;border-bottom:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent);vertical-align:top;overflow-wrap:break-word;word-break:break-word}table.usage th{color:var(--vscode-descriptionForeground);font-weight:600;white-space:nowrap}table.usage td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}table.usage tr:last-child td{border-bottom:0}table.usage [data-openrouter-default]{white-space:normal;text-align:left;word-break:break-word}.peak-badge{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:color-mix(in srgb,var(--vscode-badge-background) 55%,transparent)}.peak-badge .dot{background:#22c55e}.peak-badge.peak .dot{background:#ef4444}.empty{color:var(--vscode-descriptionForeground);font-style:italic;padding:10px 0}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>NikaCode</div><nav>
 ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['indexing', vscode.l10n.t('Indexing')], ['usage', vscode.l10n.t('Usage')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
 </nav></aside><main>
-<section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, OpenRouter, vision, and PDF support for NikaCode.')}</p>
-<div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Set up a provider to make Nika models available in chat.')}</p><ol><li><strong>${vscode.l10n.t('Add your DeepSeek API key')}</strong> — ${vscode.l10n.t('Use DeepSeek Flash and Flash Responses for Nika chat and agents.')}</li><li><strong>${vscode.l10n.t('Optionally add your Gemini API key')}</strong> — ${vscode.l10n.t('Enable Gemini chat plus image and sparse-PDF vision features.')}</li><li><strong>${vscode.l10n.t('Optionally add your OpenRouter API key')}</strong> — ${vscode.l10n.t('Search the full OpenRouter catalog in the model picker with live pricing.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
-<div class="card"><div class="row"><label><strong>${vscode.l10n.t('DeepSeek')}</strong><span class="hint">${vscode.l10n.t('Flash, Pro, and experimental Responses')}</span></label><span data-provider-status="deepseek"></span></div><div class="row"><label><strong>${vscode.l10n.t('Gemini')}</strong><span class="hint">${vscode.l10n.t('Flash and Flash Lite')}</span></label><span data-provider-status="gemini"></span></div><div class="row"><label><strong>${vscode.l10n.t('OpenRouter')}</strong><span class="hint">${vscode.l10n.t('The full model catalog at OpenRouter prices')}</span></label><span data-provider-status="openrouter"></span></div><div class="row"><label><strong>${vscode.l10n.t('Ollama')}</strong><span class="hint">${vscode.l10n.t('Gemma 4 31B at the configured host')}</span></label><span data-provider-status="ollama"></span></div></div>
+<section id="overview" class="active"><h1>${vscode.l10n.t('Nika Settings')}</h1><p class="lead">${vscode.l10n.t('Native DeepSeek, Gemini, Gemma, OpenRouter, Cursor, llama.cpp, vision, and PDF support for NikaCode.')}</p>
+<div class="card"><h2>${vscode.l10n.t('Get started')}</h2><p class="hint">${vscode.l10n.t('Add the providers you use; only the models you select will appear in chat and agents.')}</p><ol><li><strong>${vscode.l10n.t('Open the Providers page')}</strong> — ${vscode.l10n.t('Choose Add Provider and pick DeepSeek, Gemini, Ollama, OpenRouter, Cursor, or llama.cpp.')}</li><li><strong>${vscode.l10n.t('Enter your key or host')}</strong> — ${vscode.l10n.t('API keys are stored securely; local hosts need just a URL.')}</li><li><strong>${vscode.l10n.t('Select the models you want')}</strong> — ${vscode.l10n.t('Only selected models appear in chat, Agents, and the model dropdowns. You can change this later.')}</li><li><strong>${vscode.l10n.t('Test and finish')}</strong> — ${vscode.l10n.t('The wizard verifies the connection before saving.')}</li></ol><button class="action" data-section="providers">${vscode.l10n.t('Set up providers')}</button></div>
+<div class="card"><h2>${vscode.l10n.t('Providers')}</h2>${this._overviewProviderRows(state)}</div>
 <div class="card"><div class="row"><label><strong>${vscode.l10n.t('NikaCode version')}</strong></label><span id="app-version"></span></div><div class="row"><label><strong>${vscode.l10n.t('Bundled Copilot version')}</strong></label><span id="extension-version"></span></div></div>
 <div class="card"><h2>${vscode.l10n.t('Safety')}</h2><p class="hint">${vscode.l10n.t('Controls the guardrails added to prompts sent to Nika models.')}</p>${this._checkboxRow('safetyRules.enabled', vscode.l10n.t('Enable safety rules'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When on, prompts include Microsoft content policies, copyright, and harmful-content restrictions. Turn off to omit them — you are responsible for what the models produce.')}</span></label></div></div>
 <div class="card"><h2>${vscode.l10n.t('GitHub')}</h2><p class="hint">${vscode.l10n.t('NikaCode runs fully on your own models without a GitHub account. Turn GitHub on to restore Copilot integration.')}</p>${this._checkboxRow('github.enabled', vscode.l10n.t('Enable GitHub Copilot integration'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When off (default), no GitHub sign-in is required anywhere: chat, agent mode, inline chat, and the Agents window all use your Nika models. When on, GitHub sign-in prompts, Copilot utility models, and the GitHub MCP server are restored.')}</span></label></div></div></section>
-<section id="providers"><h1>${vscode.l10n.t('Set up Nika')}</h1><p class="lead">${vscode.l10n.t('Start with DeepSeek: paste the key, select Save, then select Test. Gemini and OpenRouter are optional: Gemini enables native chat plus vision features, and OpenRouter unlocks the full model catalog with catalog pricing. API keys stay in Secret Storage and are never displayed.')}</p><div class="card">
-${this._secretRow('deepseek', vscode.l10n.t('1. DeepSeek API key'), vscode.l10n.t('Required for DeepSeek Flash and Flash Responses. Save the key, then test the connection.'))}${this._secretRow('gemini', vscode.l10n.t('2. Gemini API key (optional)'), vscode.l10n.t('Adds native Gemini chat and image or sparse-PDF vision.'))}${this._secretRow('openrouter', vscode.l10n.t('3. OpenRouter API key (optional)'), vscode.l10n.t('Adds the full OpenRouter catalog to the model picker with live pricing, web search, and free models.'))}${this._textRow('ollamaBaseUrl', vscode.l10n.t('Ollama host'))}${this._connectionRow('ollama', vscode.l10n.t('Ollama connection'))}
-</div></section>
+<section id="providers"><h1>${vscode.l10n.t('Providers')}</h1><p class="lead">${vscode.l10n.t('Add only the providers you use. The models you select are the only ones that appear in chat, Agents, and the model dropdowns.')}</p>
+<div data-provider-cards></div>
+<div class="actions"><button class="action" data-wizard-add>${vscode.l10n.t('Add Provider')}</button></div>
+<div data-wizard></div>
+</section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
 ${this._modelSelectRow('defaultModel', vscode.l10n.t('Default model for new chats'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL))}
 ${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._effortSelectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL), String((state.settings as Record<string, unknown>).thinkingEffort ?? 'high'))}${this._checkboxRow('openrouterFloor', vscode.l10n.t('Use floor pricing for OpenRouter models'))}</div>
@@ -829,7 +1230,129 @@ ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', 
 <section id="diagnostics"><h1>${vscode.l10n.t('Diagnostics')}</h1><p class="lead">${vscode.l10n.t('Nika writes to a native output channel and never creates an automatic log file.')}</p><div class="card">${this._selectRow('logLevel', vscode.l10n.t('Log level'), ['DEBUG', 'INFO', 'WARN', 'ERROR'].map(v => [v, v]))}${this._checkboxRow('releaseCheckEnabled', vscode.l10n.t('Check for releases on startup'))}</div><div class="actions"><button class="action" data-action="openLogs">${vscode.l10n.t('Open Nika Output')}</button><button class="action secondary" data-action="exportDiagnostics">${vscode.l10n.t('Export Diagnostics')}</button><button class="action secondary" data-action="checkUpdates">${vscode.l10n.t('Check for Updates')}</button></div></section>
 </main></div><script nonce="${token}">const vscode=acquireVsCodeApi();const state=${encoded};
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
-function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(result?.ok?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}status('deepseek',state.deepseekConfigured);status('gemini',state.geminiConfigured);status('openrouter',state.openrouterConfigured);status('ollama',true);
+function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});const good=result?result.ok:configured;document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(good?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}
+// --- Provider wizard (Add Provider flow + provider cards) ---
+const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor'};
+const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor'];
+const providerHints={deepseek:'Flash, Pro, and experimental Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account'};
+const providerModels=state.providerModels||{};
+const providerConfig=state.providers||{};
+const providersManaged=!!state.providersManaged;
+const providersConfigured=state.providersConfigured||{};
+providerOrder.forEach(id=>status(id,!!providersConfigured[id]));
+function wizardState(){return (vscode.getState()||{}).wizard||null;}
+function setWizard(w){const saved=vscode.getState()||{};vscode.setState({...saved,wizard:w});}
+function modelNameFor(provider,id){
+  let key=id;
+  ['gemini/','cursor/','openrouter/','ollama/','llamacpp/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
+  const entry=(providerModels[provider]||[]).find(m=>m.id===key);
+  return entry?(entry.name||key):id;
+}
+function renderProviderCards(){
+  document.querySelectorAll('[data-provider-cards]').forEach(host=>{
+    if(!providersManaged){host.innerHTML='';return;}
+    const ids=providerOrder.filter(id=>providerConfig[id]);
+    if(!ids.length){host.innerHTML='<div class="empty">'+esc('No providers added yet. Use Add Provider to bring in the models you want.')+'</div>';return;}
+    host.innerHTML=ids.map(id=>{
+      const models=providerConfig[id].models||[];
+      const chips=models.map(m=>'<span class="pill">'+esc(modelNameFor(id,m))+'</span>').join('');
+      const count=models.length===0?'0 models':(models.length===1?'1 model':models.length+' models');
+      return '<div class="card"><div class="row"><label><strong>'+esc(providerLabels[id])+'</strong><span class="hint">'+count+' &middot; <span data-provider-status="'+id+'"></span></span></label><div class="controls wrap"><button class="action secondary" data-manage-models="'+id+'">'+esc('Manage models')+'</button><button class="action secondary" data-secret-test="'+id+'">'+esc('Test')+'</button><button class="action danger" data-remove-provider="'+id+'">'+esc('Remove')+'</button></div></div>'+(chips?'<div class="controls wrap">'+chips+'</div>':'')+'</div>';
+    }).join('');
+    ids.forEach(id=>status(id,true));
+  });
+}
+function wizardStepHtml(){
+  const w=wizardState();if(!w){return '';}
+  const label=providerLabels[w.provider]||'';
+  let html='<h2>'+esc(w.step==='pick'?'Add Provider':(w.step==='models'?label+' &middot; Select models':label))+'</h2>';
+  if(w.step==='pick'){
+    const available=providerOrder.filter(id=>!providersManaged||!providerConfig[id]);
+    html+=available.length?available.map(id=>'<div class="row"><label><strong>'+esc(providerLabels[id])+'</strong><span class="hint">'+esc(providerHints[id]||'')+'</span></label><div><button class="action secondary" data-wizard-pick="'+id+'">'+esc('Select')+'</button></div></div>').join(''):'<p class="hint">'+esc('All providers are already added.')+'</p>';
+    return html;
+  }
+  if(w.step==='config'){
+    if(w.provider==='ollama'){
+      html+='<div class="row"><label for="wizardOllamaUrl"><strong>'+esc('Ollama host')+'</strong><span class="hint">'+esc('The host that runs Ollama.')+'</span></label><div class="controls"><input id="wizardOllamaUrl" type="text" value="'+esc(settings.ollamaBaseUrl||'http://localhost:11434')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+    }else if(w.provider==='llamacpp'){
+      html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp host')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server (default http://localhost:8080).')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" value="'+esc(state.llamaCppBaseUrl||'http://localhost:8080')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+      html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Leave empty for no authentication.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste your API key')+'"></div></div>';
+    }else{
+      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':'Stored securely in Secret Storage; never read back into this page.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc('Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+    }
+    html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button></div>';
+    return html;
+  }
+  const list=providerModels[w.provider]||[];
+  if((w.provider==='openrouter'||w.provider==='gemini'||w.provider==='cursor')&&list.length>0){html+='<div class="controls"><input type="text" data-wizard-filter placeholder="'+esc('Filter models…')+'"></div>';}
+  if(!list.length&&w.provider==='openrouter'){html+='<p class="hint">'+esc('No catalog models available. Check that the OpenRouter key is valid.')+'</p>';}
+  if(!list.length&&w.provider==='gemini'){html+='<p class="hint">'+esc('No catalog models available. Check that the Gemini API key is valid.')+'</p>';}
+  if(!list.length&&w.provider==='cursor'){html+='<p class="hint">'+esc('No catalog models available. Check that the Cursor API key is valid.')+'</p>';}
+  if(!list.length&&(w.provider==='ollama'||w.provider==='llamacpp')){html+='<p class="hint">'+esc('No models found. Is the server running with models loaded? For Ollama, run ollama pull <model> to add one.')+'</p>';}
+  html+='<div data-wizard-model-list></div>';
+  html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button><button class="action secondary" data-wizard-test>'+esc('Test connection')+'</button><button class="action" data-wizard-done>'+esc('Done')+'</button></div>';
+  return html;
+}
+function renderWizardModelList(filterValue){
+  const w=wizardState();if(!w){return;}
+  const list=providerModels[w.provider]||[];
+  const q=((filterValue||'').toLowerCase());
+  const shown=list.filter(m=>!q||String(m.id||'').toLowerCase().indexOf(q)>=0||String(m.name||'').toLowerCase().indexOf(q)>=0);
+  const selected=w.models||[];
+  const boxes=shown.map(m=>'<label class="row" style="cursor:pointer"><span><strong>'+esc(m.name||m.id)+'</strong><span class="hint">'+esc(m.id)+'</span></span><input type="checkbox" data-wizard-model="'+esc(m.id)+'"'+(selected.indexOf(m.id)>=0?' checked':'')+'></label>').join('');
+  document.querySelectorAll('[data-wizard-model-list]').forEach(el=>{el.innerHTML=boxes?boxes:'<div class="empty">'+esc('No models match the filter.')+'</div>';});
+}
+function renderWizard(){
+  document.querySelectorAll('[data-wizard]').forEach(host=>{
+    const w=wizardState();
+    host.innerHTML=w?wizardStepHtml():'';
+    if(w&&w.step==='models'){renderWizardModelList('');}
+  });
+}
+renderProviderCards();renderWizard();
+document.querySelectorAll('[data-wizard-add]').forEach(btn=>btn.addEventListener('click',()=>{setWizard({step:'pick'});renderWizard();}));
+document.addEventListener('click',e=>{
+  const pick=e.target.closest('[data-wizard-pick]');
+  if(pick){setWizard({provider:pick.dataset.wizardPick,step:'config'});renderWizard();return;}
+  const back=e.target.closest('[data-wizard-back]');
+  if(back){const w=wizardState();if(!w)return;setWizard({provider:w.provider,step:w.step==='config'?'pick':'config',models:w.models||[]});renderWizard();return;}
+  const next=e.target.closest('[data-wizard-next]');
+  if(next){const w=wizardState();if(!w)return;
+    if(w.provider==='ollama'){const input=document.getElementById('wizardOllamaUrl');post({type:'saveSetting',key:'ollamaBaseUrl',value:input?input.value:'http://localhost:11434'});}
+    else if(w.provider==='llamacpp'){const host=document.getElementById('wizardLlamaCppUrl');post({type:'saveSetting',key:'llamaCppBaseUrl',value:host?host.value:'http://localhost:8080'});const key=document.getElementById('wizardLlamaCppKey');if(key&&key.value.trim()){post({type:'saveSecret',provider:'llamacpp',value:key.value});}}
+    else{const input=document.getElementById('wizardKey');post({type:'saveSecret',provider:w.provider,value:input?input.value:''});}
+    setWizard({provider:w.provider,step:'models',models:[]});
+    return;
+  }
+  const test=e.target.closest('[data-wizard-test]');
+  if(test){const w=wizardState();if(w){post({type:'testConnection',provider:w.provider});}return;}
+  const done=e.target.closest('[data-wizard-done]');
+  if(done){const w=wizardState();if(!w)return;
+    const boxes=document.querySelectorAll('[data-wizard-model]:checked');
+    const models=Array.prototype.map.call(boxes,b=>b.dataset.wizardModel);
+    setWizard(null);
+    post({type:'saveProviderConfig',provider:w.provider,models:models});
+    return;
+  }
+  const manage=e.target.closest('[data-manage-models]');
+  if(manage){const id=manage.dataset.manageModels;const existing=providerConfig[id]?providerConfig[id].models:[];setWizard({provider:id,step:'models',models:existing.slice()});renderWizard();renderWizardModelList('');return;}
+  const remove=e.target.closest('[data-remove-provider]');
+  if(remove){post({type:'removeProvider',provider:remove.dataset.removeProvider});}
+});
+document.addEventListener('change',e=>{
+  const box=e.target.closest('[data-wizard-model]');
+  if(!box){return;}
+  const w=wizardState();if(!w){return;}
+  const models=w.models||[];
+  const idx=models.indexOf(box.dataset.wizardModel);
+  if(box.checked&&idx<0){models.push(box.dataset.wizardModel);}
+  if(!box.checked&&idx>=0){models.splice(idx,1);}
+  setWizard({provider:w.provider,step:'models',models:models});
+});
+document.addEventListener('input',e=>{
+  const f=e.target.closest('[data-wizard-filter]');
+  if(f){renderWizardModelList(f.value);}
+});
 function renderIndexing(){const i=state.indexing||{};const labels={idle:'Idle',building:'Building',indexing:'Indexing',synced:'Synced',error:'Error'};const s=i.status||'idle';document.querySelectorAll('[data-indexing-status]').forEach(el=>el.textContent=labels[s]||s);document.querySelectorAll('[data-indexing-progress]').forEach(el=>{el.textContent=(typeof i.indexedFileCount==='number'&&typeof i.totalFileCount==='number')?i.indexedFileCount+' / '+i.totalFileCount:'';});document.querySelectorAll('[data-indexing-error]').forEach(el=>{el.textContent=i.lastError||'';});document.querySelectorAll('[data-indexing-message]').forEach(el=>{el.textContent=i.message||'';});document.querySelectorAll('[data-indexing-scope]').forEach(el=>{el.textContent=i.workspaceOverride?'Workspace':'Default';});}renderIndexing();
 document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);post({type:'saveSetting',key,value});});});
 const effortLabels={none:'None',low:'Low',medium:'Medium',high:'High',max:'Max'};
@@ -860,7 +1383,7 @@ function renderUsage(){
   const lastProvider=u.lastProvider||'deepseek';
   if(peakEl){
     if(lastProvider==='deepseek'){const peak=u.peak;peakEl.innerHTML='<span class="peak-badge'+(peak?' peak':'')+'"><span class="dot"></span>'+(peak?'PEAK':'OFF-PEAK')+'</span>';}
-    else{const label=lastProvider==='openrouter'?'OpenRouter':lastProvider==='gemini'?'Gemini':'Ollama';peakEl.innerHTML='<span class="peak-badge"><span class="dot"></span>'+label+'</span>';}
+    else{const label=lastProvider==='openrouter'?'OpenRouter':lastProvider==='gemini'?'Gemini':lastProvider==='llamacpp'?'llama.cpp':lastProvider==='cursor'?'Cursor':'Ollama';peakEl.innerHTML='<span class="peak-badge"><span class="dot"></span>'+label+'</span>';}
   }
   renderRateCountdown();
   document.getElementById('usage-today-tokens').textContent=fmtTok(u.todayTokens);
@@ -927,17 +1450,36 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 		return `<div class="row"><label for="${key}"><strong>${label}</strong></label><input id="${key}" data-setting="${key}" type="checkbox"></div>`;
 	}
 
-	private _secretRow(provider: 'deepseek' | 'gemini' | 'openrouter', label: string, hint: string): string {
-		return `<div class="row"><label><strong>${label}</strong><span class="hint">${hint} ${vscode.l10n.t('Stored securely; the saved value is never read back into this page.')}</span><span data-provider-status="${provider}"></span></label><div class="controls"><input type="password" autocomplete="off" data-secret="${provider}" placeholder="${vscode.l10n.t('Paste your API key')}"><button data-secret-save="${provider}">${vscode.l10n.t('Save')}</button><button class="secondary" data-secret-test="${provider}">${vscode.l10n.t('Test')}</button><button class="danger" data-secret-remove="${provider}">${vscode.l10n.t('Remove')}</button></div></div>`;
-	}
-
-	private _connectionRow(provider: NikaConnection, label: string): string {
-		return `<div class="row"><label><strong>${label}</strong><span data-provider-status="${provider}"></span></label><div><button class="action secondary" data-secret-test="${provider}">${vscode.l10n.t('Test Connection')}</button></div></div>`;
-	}
-
 	/** Typed view of the flattened `modelChoices` state array. */
 	private _modelChoices(state: Record<string, unknown>): { id: string; displayName: string; provider: string; vision: boolean; efforts: string[]; vendor?: string; contextWindow?: number; priceLabel?: string; free?: boolean }[] {
 		return (state.modelChoices as unknown[]) as { id: string; displayName: string; provider: string; vision: boolean; efforts: string[]; vendor?: string; contextWindow?: number; priceLabel?: string; free?: boolean }[];
+	}
+
+	/**
+	 * Overview-page status rows. Managed mode lists only the added providers;
+	 * legacy mode keeps the classic five rows so nothing disappears for users
+	 * who have not used the wizard yet.
+	 */
+	private _overviewProviderRows(state: Record<string, unknown>): string {
+		const labels: Record<string, [string, string]> = {
+			deepseek: [vscode.l10n.t('DeepSeek'), vscode.l10n.t('Flash, Pro, and experimental Responses')],
+			gemini: [vscode.l10n.t('Gemini'), vscode.l10n.t('Every Gemini model on the Google catalog')],
+			openrouter: [vscode.l10n.t('OpenRouter'), vscode.l10n.t('The full model catalog at OpenRouter prices')],
+			ollama: [vscode.l10n.t('Ollama'), vscode.l10n.t('Models pulled on the configured host')],
+			llamacpp: [vscode.l10n.t('llama.cpp'), vscode.l10n.t('Models loaded on the configured llama.cpp server')],
+			cursor: [vscode.l10n.t('Cursor'), vscode.l10n.t('Cursor API models billed to your Cursor account')],
+		};
+		const configured = (state.providersConfigured ?? {}) as Record<string, boolean>;
+		const ids = state.providersManaged
+			? Object.keys(configured).filter(id => configured[id])
+			: ['deepseek', 'gemini', 'openrouter', 'ollama', 'llamacpp', 'cursor'];
+		if (ids.length === 0) {
+			return `<div class="empty">${vscode.l10n.t('No providers added yet.')}</div>`;
+		}
+		return ids.map(id => {
+			const [label, hint] = labels[id] ?? [id, ''];
+			return `<div class="row"><label><strong>${label}</strong><span class="hint">${hint}</span></label><span data-provider-status="${id}"></span></div>`;
+		}).join('');
 	}
 
 	private _providerLabel(provider: string): string {
@@ -946,6 +1488,8 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			case 'gemini': return vscode.l10n.t('Gemini');
 			case 'gemma': return vscode.l10n.t('Ollama');
 			case 'openrouter': return vscode.l10n.t('OpenRouter');
+			case 'llamacpp': return vscode.l10n.t('llama.cpp');
+			case 'cursor': return vscode.l10n.t('Cursor');
 			default: return provider;
 		}
 	}

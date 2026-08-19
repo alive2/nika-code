@@ -3288,6 +3288,16 @@
             "default": "http://localhost:11434",
             "markdownDescription": "%nika.config.ollamaBaseUrl%"
           },
+          "nika.llamaCppBaseUrl": {
+            "type": "string",
+            "default": "http://localhost:8080",
+            "markdownDescription": "%nika.config.llamaCppBaseUrl%"
+          },
+          "nika.providers": {
+            "type": "object",
+            "default": {},
+            "markdownDescription": "%nika.config.providers%"
+          },
           "nika.pdfMaxFileSizeMB": {
             "type": "number",
             "minimum": 1,
