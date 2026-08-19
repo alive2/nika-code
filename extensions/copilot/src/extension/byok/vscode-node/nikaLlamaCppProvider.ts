@@ -20,10 +20,11 @@ const CATALOG_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Fallback context window for llama.cpp server models. The server's
- * `/v1/models` endpoint includes `meta.n_ctx` (the served context, i.e. what
- * the server was launched with via `-c/--ctx-size`) for loaded models, which
- * is preferred when present. When it is missing (e.g. a model listed but not
- * currently loaded) this 32K default — llama.cpp's own default — is used.
+ * `/v1/models` endpoint reports each model's context as
+ * `meta["llama.context_length"]` (the GGUF-declared length, e.g. `262144`
+ * for a 262k model), which is preferred when present. When it is missing
+ * (e.g. a model listed but not currently loaded) this 32K default —
+ * llama.cpp's own default — is used.
  */
 export const LLAMACPP_DEFAULT_CONTEXT_WINDOW = 32768;
 export const LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS = 4096;
@@ -119,13 +120,17 @@ export class NikaLlamaCppProvider extends Disposable {
 			if (!id) {
 				continue;
 			}
-			// llama.cpp reports the served context (`--ctx-size`) for loaded
-			// models as `meta.n_ctx`; `meta.n_ctx_train` is the training
-			// window and must NOT be used as the served limit. Unloaded
-			// entries have no `meta`, so fall back to the default.
-			const meta = (entry as { meta?: { n_ctx?: unknown } }).meta;
-			const nCtx = meta && typeof meta.n_ctx === 'number' ? meta.n_ctx : undefined;
-			const contextWindow = (nCtx && nCtx > 0) ? nCtx : LLAMACPP_DEFAULT_CONTEXT_WINDOW;
+			// llama.cpp reports the per-model context as `meta["llama.context_length"]`
+			// (a string, from the GGUF metadata — e.g. `262144` for a 262k model).
+			// Some forks expose `meta.n_ctx` instead. Both are the model's own
+			// context, not the training window; unloaded entries have no `meta`,
+			// so fall back to the default.
+			const meta = (entry as { meta?: Record<string, unknown> }).meta;
+			const rawContext = meta
+				? meta['llama.context_length'] ?? meta['context_length'] ?? meta.n_ctx
+				: undefined;
+			const parsedContext = typeof rawContext === 'number' ? rawContext : typeof rawContext === 'string' ? Number(rawContext) : undefined;
+			const contextWindow = (parsedContext && parsedContext > 0) ? parsedContext : LLAMACPP_DEFAULT_CONTEXT_WINDOW;
 			const limits = resolveModelTokenLimits({
 				contextWindow,
 				maxInputTokens: contextWindow,
