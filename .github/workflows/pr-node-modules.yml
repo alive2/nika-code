@@ -5,13 +5,19 @@ name: Code OSS (node_modules)
 # (macos-26-xlarge), which do not exist on this fork. On a personal repo the
 # Compile/Linux/Windows/Copilot jobs queue forever and the macOS job fails
 # immediately, so the workflow can never pass. Keep it on disk for reference
-# only; re-enable by restoring the `on:` block below if this is ever run in
-# the microsoft/vscode infrastructure.
+# only; re-enable by restoring the push trigger. NOTE: a workflow file with
+# no `on:` key is invalid, and GitHub creates a failing run (and notification
+# emails) for it on every push — so this file declares a manual-only
+# `workflow_dispatch` trigger to stay valid without ever auto-running.
 #
-# on:
-#   push:
-#     branches:
-#       - main
+# To re-enable auto-runs, restore:
+#   on:
+#     push:
+#       branches:
+#         - main
+
+on:
+  workflow_dispatch:
 
 permissions: {}
 

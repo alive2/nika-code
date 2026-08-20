@@ -5,7 +5,10 @@ name: Deploy Update Worker
 # build/update/** or product.json failed with a red check ("In a non-
 # interactive environment, it's necessary to set a CLOUDFLARE_API_TOKEN...").
 # The worker is deployed manually instead (cd build/update && npx wrangler
-# deploy).
+# deploy). NOTE: a workflow file with no `on:` key is invalid, and GitHub
+# creates a failing run (and notification emails) for it on every push — so
+# this file declares a manual-only `workflow_dispatch` trigger to stay valid
+# without ever auto-running.
 #
 # To re-enable auto-deploy:
 #   1. Create a Cloudflare API token with "Workers Scripts: Edit" permission:
@@ -13,15 +16,16 @@ name: Deploy Update Worker
 #   2. Add it as a GitHub Actions secret named CLOUDFLARE_API_TOKEN
 #      (repo Settings -> Secrets and variables -> Actions), or via
 #      `gh secret set CLOUDFLARE_API_TOKEN`.
-#   3. Restore the `on:` block below.
-#
-# on:
-#   push:
-#     branches: [main]
-#     paths:
-#       - 'build/update/**'
-#       - 'product.json'
-#   workflow_dispatch:
+#   3. Restore the push trigger:
+#      on:
+#        push:
+#          branches: [main]
+#          paths:
+#            - 'build/update/**'
+#            - 'product.json'
+
+on:
+  workflow_dispatch:
 
 jobs:
   deploy:
