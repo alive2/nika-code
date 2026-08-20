@@ -571,6 +571,37 @@ describe('Nika provider-config gating (nika.providers)', () => {
 		}
 	});
 
+	it('hides the OpenRouter catalog when the provider was never added (leftover key, managed mode)', async () => {
+		providersConfig = { deepseek: { models: ['deepseek-v4-flash'] } };
+		try {
+			const { provider, fakes } = createProvider({
+				keys: { 'nika.openrouter.apiKey': 'or-1' },
+				catalog: new Map([['anthropic/claude-sonnet-4', { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', capabilities: { name: 'Claude Sonnet 4', toolCalling: true, vision: false, maxInputTokens: 200_000, maxOutputTokens: 64_000 } }]]),
+			});
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.openRouterProvider.getCatalog).not.toHaveBeenCalled();
+			expect(models.filter(m => m.id.startsWith('openrouter/'))).toHaveLength(0);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
+	it('hides the llama.cpp catalog when the provider was never added (managed mode)', async () => {
+		providersConfig = { deepseek: { models: ['deepseek-v4-flash'] } };
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.deepseek.apiKey': 'ds' } });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.llamaCppProvider.getCatalog).not.toHaveBeenCalled();
+			expect(models.filter(m => m.id.startsWith('llamacpp/'))).toHaveLength(0);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
 	it('rejects responses for models that are not selected in managed mode', async () => {
 		providersConfig = { deepseek: { models: ['deepseek-v4-flash'] } };
 		try {

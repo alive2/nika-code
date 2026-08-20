@@ -220,8 +220,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		if (openRouterKey) {
 			// Managed mode exposes exactly the wizard-selected catalog models;
 			// legacy mode exposes the full catalog whenever a key is present.
+			// A provider that was never added through the wizard (but has a
+			// leftover key) must not leak its models into the picker.
 			const selected = getNikaSelectedModels(providerConfig, 'openrouter');
-			if (selected === undefined || selected.length > 0) {				try {
+			if (selected === undefined ? providerConfig === undefined : selected.length > 0) {				try {
 					const catalog = await this._openRouterProvider.getCatalog(openRouterKey);
 					for (const [rawId, model] of catalog) {
 						const id = nikaOpenRouterModelId(rawId);
@@ -259,7 +261,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		const llamaCppBaseUrl = this._llamaCppBaseUrl();
 		if (llamaCppBaseUrl) {
 			const selected = getNikaSelectedModels(providerConfig, 'llamacpp');
-			if (selected === undefined || selected.length > 0) {
+			if (selected === undefined ? providerConfig === undefined : selected.length > 0) {
 				try {
 					const catalog = await this._llamaCppProvider.getCatalog(llamaCppBaseUrl, llamaCppKey ?? undefined);
 					for (const [rawId, model] of catalog) {
@@ -297,7 +299,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		// models; legacy mode exposes the full catalog whenever a key exists.
 		if (cursorKey) {
 			const selected = getNikaSelectedModels(providerConfig, 'cursor');
-			if (selected === undefined || selected.length > 0) {
+			if (selected === undefined ? providerConfig === undefined : selected.length > 0) {
 				try {
 					const catalog = await this._cursorProvider.getCatalog(cursorKey);
 					for (const [rawId, model] of catalog) {

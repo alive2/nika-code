@@ -175,6 +175,28 @@ describe('NikaLlamaCppProvider', () => {
 		await expect(provider.getCatalog('http://localhost:8080')).rejects.toThrow(/HTTP 500/);
 	});
 
+	it('serves the last known catalog when a refetch fails (stale-while-revalidate)', async () => {
+		vi.useFakeTimers();
+		try {
+			const { provider, fetch } = createProvider();
+			await provider.getCatalog('http://localhost:8080');
+			expect(fetch).toHaveBeenCalledTimes(1);
+
+			// Expire the TTL, then make the refetch fail (e.g. the server
+			// reloading a model after an idle unload): the last known list is
+			// served instead of emptying the picker.
+			vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+			fetch.mockResolvedValueOnce({ ok: false, status: 500, json: vi.fn() });
+			const catalog = await provider.getCatalog('http://localhost:8080');
+
+			expect(fetch).toHaveBeenCalledTimes(2);
+			expect(catalog.get('qwen2.5vl-7b')).toBeDefined();
+			expect(catalog.size).toBe(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('creates a chat completions endpoint with the resolved model info', async () => {
 		const { provider, createInstance } = createProvider();
 		await provider.getCatalog('http://localhost:8080');

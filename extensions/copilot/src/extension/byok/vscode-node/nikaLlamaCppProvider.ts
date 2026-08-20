@@ -70,9 +70,20 @@ export class NikaLlamaCppProvider extends Disposable {
 		if (cache && cache.key === baseUrl && Date.now() - cache.fetchedAt < CATALOG_TTL_MS) {
 			return cache.models;
 		}
-		const models = await this._fetchCatalog(baseUrl, apiKey);
-		this._catalogCache = { key: baseUrl, fetchedAt: Date.now(), models };
-		return models;
+		try {
+			const models = await this._fetchCatalog(baseUrl, apiKey);
+			this._catalogCache = { key: baseUrl, fetchedAt: Date.now(), models };
+			return models;
+		} catch (error) {
+			// A transient failure (the server is reloading a model after an
+			// idle unload, or the bridge is busy) must not empty the model
+			// picker: serve the last known catalog for this server when one
+			// exists, and only surface the error on a first-ever fetch.
+			if (cache && cache.key === baseUrl) {
+				return cache.models;
+			}
+			throw error;
+		}
 	}
 
 	/**
