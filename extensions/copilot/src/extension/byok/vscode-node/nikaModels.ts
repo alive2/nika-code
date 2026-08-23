@@ -14,6 +14,7 @@ export const NIKA_GEMINI_SECRET = 'nika.gemini.apiKey';
 export const NIKA_OPENROUTER_SECRET = 'nika.openrouter.apiKey';
 export const NIKA_LLAMACPP_SECRET = 'nika.llamacpp.apiKey';
 export const NIKA_CURSOR_SECRET = 'nika.cursor.apiKey';
+export const NIKA_DEEPSEEK_WEB_SECRET = 'nika.deepseekWeb.token';
 
 /**
  * Provider-group prefix for OpenRouter catalog models contributed through the
@@ -58,6 +59,15 @@ export const NIKA_GEMINI_MODEL_PREFIX = 'gemini/';
 export const NIKA_CURSOR_MODEL_PREFIX = 'cursor/';
 
 /**
+ * Provider-group prefix for DeepSeek web chat models (chat.deepseek.com)
+ * contributed through the Nika provider. The web API has a single chat
+ * model (with automatic vision when images are attached), exposed to the
+ * workbench as `deepseekweb/deepseek-chat` (and
+ * `nika/deepseekweb/deepseek-chat` once vendor-qualified).
+ */
+export const NIKA_DEEPSEEK_WEB_MODEL_PREFIX = 'deepseekweb/';
+
+/**
  * Master switch for GitHub Copilot integration. Off (the default) makes
  * NikaCode run entirely on BYOK models without a GitHub account: no sign-in
  * prompts, no Copilot utility models, no GitHub MCP server. Turn it on to
@@ -78,7 +88,7 @@ export type NikaModelId =
  * The Nika provider families a user can add through the Providers wizard.
  * `gemma` (the legacy bare `gemma4:31b` id) maps to the Ollama connection.
  */
-export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor';
+export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb';
 
 /**
  * Per-provider model selection persisted in the `nika.providers` setting. A
@@ -167,7 +177,8 @@ export function isNikaModelId(value: string): boolean {
 		|| isNikaLlamaCppModel(value)
 		|| isNikaOllamaModel(value)
 		|| isNikaGeminiCatalogModel(value)
-		|| isNikaCursorModel(value);
+		|| isNikaCursorModel(value)
+		|| isNikaDeepSeekWebModel(value);
 }
 
 /**
@@ -196,6 +207,15 @@ export function isNikaGeminiCatalogModel(value: string): boolean {
  */
 export function isNikaCursorModel(value: string): boolean {
 	return value.startsWith(NIKA_CURSOR_MODEL_PREFIX);
+}
+
+/**
+ * True for DeepSeek web chat model ids exposed through the Nika provider
+ * (`deepseekweb/<model id>`). The web API's model id follows the prefix,
+ * e.g. `deepseekweb/deepseek-chat`.
+ */
+export function isNikaDeepSeekWebModel(value: string): boolean {
+	return value.startsWith(NIKA_DEEPSEEK_WEB_MODEL_PREFIX);
 }
 
 /**
@@ -234,7 +254,7 @@ export function isNikaThinkingEffort(value: unknown): value is NikaThinkingEffor
  * llama.cpp server's OpenAI-compatible endpoint; `ollama/…` ids are the
  * dynamic Ollama catalog form of the same family.
  */
-export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor';
+export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb';
 
 /**
  * Strips the optional `nika/` vendor prefix used in settings values (e.g.
@@ -275,6 +295,9 @@ export function getNikaModelProvider(id: string): NikaModelProvider | undefined 
 	if (isNikaCursorModel(value)) {
 		return 'cursor';
 	}
+	if (isNikaDeepSeekWebModel(value)) {
+		return 'deepseekweb';
+	}
 	return undefined;
 }
 
@@ -298,6 +321,7 @@ export function getNikaEffortOptionsForModel(id: string): NikaThinkingEffort[] {
 		case 'ollama':
 		case 'gemma':
 		case 'cursor':
+		case 'deepseekweb':
 		default:
 			return [];
 	}
@@ -315,7 +339,7 @@ export function parseNikaProviderConfig(value: unknown): NikaProviderConfig | un
 		return undefined;
 	}
 	const config: NikaProviderConfig = {};
-	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'cursor'] as const) {
+	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'cursor', 'deepseekweb'] as const) {
 		const entry = (value as Record<string, unknown>)[provider];
 		if (entry === undefined || entry === null || typeof entry !== 'object') {
 			continue;

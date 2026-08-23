@@ -19,6 +19,7 @@ import { GeminiNativeBYOKLMProvider } from '../geminiNativeProvider';
 import { NikaLMProvider, type NikaLanguageModelChatInformation } from '../nikaProvider';
 import { NikaCursorProvider } from '../nikaCursorProvider';
 import { NikaGeminiProvider } from '../nikaGeminiProvider';
+import { NikaDeepSeekWebProvider } from '../nikaDeepSeekWebProvider';
 import { OllamaLMProvider } from '../ollamaProvider';
 
 vi.mock('vscode', async (importOriginal) => {
@@ -122,6 +123,16 @@ function createInstantiationService(overrides: {
 		}
 		if (Ctor === NikaCursorProvider) {
 			return overrides.cursorProvider;
+		}
+		if (Ctor === NikaDeepSeekWebProvider) {
+			return {
+				dispose: () => { },
+				// No web models by default: the deepseekweb family stays
+				// invisible unless a dedicated test opts in.
+				getKnownModels: () => ({}),
+				createEndpoint: vi.fn(),
+				invalidateCache: vi.fn(),
+			};
 		}
 		if (Ctor === NikaAttachmentProcessor) {
 			return overrides.attachmentProcessor;

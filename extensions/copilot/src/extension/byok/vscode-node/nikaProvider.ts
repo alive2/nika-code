@@ -23,6 +23,7 @@ import {
 	getVisibleNikaModelIds,
 	isNikaCursorModel,
 	isNikaDeepSeekModel,
+	isNikaDeepSeekWebModel,
 	isNikaGeminiCatalogModel,
 	isNikaGeminiModel,
 	isNikaLlamaCppModel,
@@ -33,6 +34,7 @@ import {
 	NIKA_CURSOR_MODEL_PREFIX,
 	NIKA_CURSOR_SECRET,
 	NIKA_DEEPSEEK_SECRET,
+	NIKA_DEEPSEEK_WEB_SECRET,
 	NIKA_GEMINI_MODEL_IDS,
 	NIKA_GEMINI_MODEL_PREFIX,
 	NIKA_GEMINI_SECRET,
@@ -54,6 +56,7 @@ import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterP
 import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, NikaLlamaCppProvider, nikaLlamaCppModelId } from './nikaLlamaCppProvider';
 import { NikaCursorProvider, nikaCursorModelId } from './nikaCursorProvider';
 import { NikaGeminiProvider, nikaGeminiModelId } from './nikaGeminiProvider';
+import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
 import { OpenRouterModelPricing } from './nikaPricing';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaAttachmentProcessor } from './nikaAttachments';
@@ -91,6 +94,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private readonly _llamaCppProvider: NikaLlamaCppProvider;
 	private readonly _geminiCatalogProvider: NikaGeminiProvider;
 	private readonly _cursorProvider: NikaCursorProvider;
+	private readonly _deepSeekWebProvider: NikaDeepSeekWebProvider;
 	private _ollamaCatalogCache: { readonly fetchedAt: number; readonly models: ReadonlyMap<string, OllamaCatalogModel> } | undefined;
 	readonly settingsEditor: NikaSettingsEditor;
 	readonly usageTracker: NikaUsageTracker;
@@ -110,14 +114,15 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._llamaCppProvider = this._register(this._instantiationService.createInstance(NikaLlamaCppProvider));
 		this._geminiCatalogProvider = this._register(this._instantiationService.createInstance(NikaGeminiProvider));
 		this._cursorProvider = this._register(this._instantiationService.createInstance(NikaCursorProvider));
+		this._deepSeekWebProvider = this._register(this._instantiationService.createInstance(NikaDeepSeekWebProvider));
 		this.usageTracker = this._register(this._instantiationService.createInstance(NikaUsageTracker));
-		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider, this._llamaCppProvider, this._geminiCatalogProvider, this._cursorProvider));
+		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider, this._llamaCppProvider, this._geminiCatalogProvider, this._cursorProvider, this._deepSeekWebProvider));
 		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor);
 		this._register(this._instantiationService.createInstance(NikaIndexingStatus, this.settingsEditor));
 		this._register(this._instantiationService.createInstance(NikaUsageStatus, this.settingsEditor, this.usageTracker));
 
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET) {
 				if (event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET) {
 					// A changed key must never reuse a stale catalog fetch.
 					this._openRouterProvider.invalidateCache();
@@ -126,6 +131,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				}
 				if (event.key === NIKA_GEMINI_SECRET) {
 					this._geminiCatalogProvider.invalidateCache();
+				}
+				if (event.key === NIKA_DEEPSEEK_WEB_SECRET) {
+					// A changed token must never reuse stale clients or sessions.
+					this._deepSeekWebProvider.invalidateCache();
 				}
 				this._onDidChange.fire();
 			}
@@ -147,12 +156,13 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	async provideLanguageModelChatInformation(_options: vscode.PrepareLanguageModelChatModelOptions, _token: vscode.CancellationToken): Promise<NikaLanguageModelChatInformation[]> {
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
 			this._context.secrets.get(NIKA_CURSOR_SECRET),
+			this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET),
 		]);
 		const limits = this._limits();
 		const providerConfig = parseNikaProviderConfig(vscode.workspace.getConfiguration('nika').get('providers'));
@@ -254,6 +264,36 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 					// A catalog failure must not hide the DeepSeek/Gemini/Gemma
 					// models: log it and continue with what we have.
 					this.logOpenRouterError(error);
+				}
+			}
+		}
+
+		// DeepSeek web chat: exposed whenever a web token exists. Managed mode
+		// exposes exactly the wizard-selected model(s); legacy mode exposes
+		// the single web chat model.
+		if (deepSeekWebToken) {
+			const selected = getNikaSelectedModels(providerConfig, 'deepseekweb');
+			if (selected === undefined ? providerConfig === undefined : selected.length > 0) {
+				for (const [id, capabilities] of Object.entries(this._deepSeekWebProvider.getKnownModels())) {
+					if (selected && !selected.includes(id)) {
+						continue;
+					}
+					const base = byokKnownModelToAPIInfo(NIKA_PROVIDER_NAME, id, capabilities);
+					entries.push({
+						...base,
+						name: capabilities.name,
+						detail: vscode.l10n.t('Nika'),
+						tooltip: this._deepSeekWebTooltip(),
+						// Images are uploaded to DeepSeek's servers and analyzed
+						// natively; no vision-backend preprocessing is needed.
+						capabilities: {
+							...base.capabilities,
+							imageInput: true,
+						},
+						isBYOK: true,
+						isDefault: id === defaultModel,
+						statusIcon: undefined,
+					});
 				}
 			}
 		}
@@ -521,6 +561,9 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		if (isNikaCursorModel(id)) {
 			return getNikaSelectedModels(providerConfig, 'cursor')?.includes(id) ?? false;
 		}
+		if (isNikaDeepSeekWebModel(id)) {
+			return getNikaSelectedModels(providerConfig, 'deepseekweb')?.includes(id) ?? false;
+		}
 		// The legacy bare Gemma id is not part of managed mode (Ollama models
 		// are exposed as `ollama/<name>` there), so it is rejected.
 		return false;
@@ -753,6 +796,48 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return;
 		}
 
+		if (isNikaDeepSeekWebModel(model.id)) {
+			const webToken = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
+			if (!webToken) {
+				throw new Error(vscode.l10n.t('Configure a DeepSeek web token in Nika Settings before using this model.'));
+			}
+
+			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
+			const disposeStream = this.usageTracker.trackStream(trackedProgress);
+			const sessionId = typeof options.modelOptions?._nikaSessionId === 'string' ? options.modelOptions._nikaSessionId : undefined;
+			const title = extractPromptTitle(messages);
+			const workspace = currentWorkspaceName();
+			try {
+				const endpoint = this._deepSeekWebProvider.createEndpoint(model.id, webToken, sessionId);
+				// Images ride through natively: they are uploaded to DeepSeek's
+				// servers and analyzed there, so the vision backend must not
+				// preprocess them into text.
+				const processed = await this._attachmentProcessor.process(messages, token, { preserveImages: true });
+				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
+				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
+				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator });
+			} catch (error) {
+				this.usageTracker.record({
+					model: model.id,
+					sessionId,
+					initiator: options.requestInitiator,
+					title,
+					workspace,
+					promptTokens: 0,
+					completionTokens: 0,
+					totalTokens: 0,
+					cachedTokens: 0,
+					reasoningTokens: 0,
+					provider: 'deepseekweb',
+					error: true,
+				});
+				throw error;
+			} finally {
+				disposeStream();
+			}
+			return;
+		}
+
 		const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 		const delegate: OpenAICompatibleLanguageModelChatInformation<OllamaConfig> = {
 			...model,
@@ -796,6 +881,14 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const endpoint = this._cursorProvider.createEndpoint(model.id.slice(NIKA_CURSOR_MODEL_PREFIX.length), await this._context.secrets.get(NIKA_CURSOR_SECRET) ?? '');
 			return this._lmWrapper.provideTokenCount(endpoint, text);
 		}
+		if (isNikaDeepSeekWebModel(model.id)) {
+			const token = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
+			if (!token) {
+				throw new Error(vscode.l10n.t('Configure a DeepSeek web token in Nika Settings before using this model.'));
+			}
+			const endpoint = this._deepSeekWebProvider.createEndpoint(model.id, token, undefined);
+			return this._lmWrapper.provideTokenCount(endpoint, text);
+		}
 		const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 		return this._ollamaProvider.provideTokenCount({ ...model, url, configuration: { url } }, text, token);
 	}
@@ -819,7 +912,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			: isNikaLlamaCppModel(modelId) ? 'llamacpp' as const
 				: isNikaOllamaModel(modelId) ? 'ollama' as const
 					: isNikaCursorModel(modelId) ? 'cursor' as const
-						: 'deepseek' as const;
+						: isNikaDeepSeekWebModel(modelId) ? 'deepseekweb' as const
+							: 'deepseek' as const;
 		const usage = tracked.exactUsage;
 		if (usage) {
 			this.usageTracker.record({
@@ -898,7 +992,14 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		if (isNikaCursorModel(id)) {
 			return vscode.l10n.t('Model served by the Cursor API with native image input.');
 		}
+		if (isNikaDeepSeekWebModel(id)) {
+			return this._deepSeekWebTooltip();
+		}
 		return vscode.l10n.t('Gemma 4 31B through the configured Ollama host.');
+	}
+
+	private _deepSeekWebTooltip(): string {
+		return vscode.l10n.t('DeepSeek Chat through the unofficial web API (chat.deepseek.com). Images are uploaded and analyzed natively.');
 	}
 }
 

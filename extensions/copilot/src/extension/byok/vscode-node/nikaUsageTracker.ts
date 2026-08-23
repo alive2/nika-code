@@ -14,7 +14,7 @@ import { getDeepSeekTokenCost, getOpenRouterTokenCost, isDeepSeekPeakHour, OpenR
  * Which Nika provider produced a usage event. Legacy events (recorded before
  * provider tracking existed) default to `'deepseek'` when loaded.
  */
-export type NikaUsageProvider = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor';
+export type NikaUsageProvider = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb';
 
 /**
  * A single recorded DeepSeek request. Persisted in extension `globalState` so

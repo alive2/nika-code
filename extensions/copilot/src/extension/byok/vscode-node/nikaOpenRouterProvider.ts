@@ -129,7 +129,7 @@ export class NikaOpenRouterProvider extends Disposable {
 				name: capabilities.name,
 				capabilities,
 				pricing,
-				contextWindow: capabilities.maxInputTokens + capabilities.maxOutputTokens,
+				contextWindow: (capabilities.maxInputTokens ?? 0) + (capabilities.maxOutputTokens ?? 0),
 			});
 		}
 		return models;

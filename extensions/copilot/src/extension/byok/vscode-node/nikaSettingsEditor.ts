@@ -9,12 +9,14 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaModelId, NikaProviderConfig, NikaProviderId, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaModelId, NikaProviderConfig, NikaProviderId, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
 import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, NikaLlamaCppProvider } from './nikaLlamaCppProvider';
 import { NikaCursorProvider } from './nikaCursorProvider';
 import { NikaGeminiProvider } from './nikaGeminiProvider';
+import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
+import { DeepSeekWebClient } from '../node/deepSeekWebClient';
 import { NikaUsageTracker } from './nikaUsageTracker';
 
 type NikaConnection = NikaProviderId;
@@ -30,12 +32,13 @@ const SETTINGS = new Set([
 	'logLevel', 'releaseCheckEnabled', 'safetyRules.enabled', 'github.enabled', 'indexing.scheme', 'usage.enabled',
 ]);
 
-const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor', string> = {
+const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb', string> = {
 	deepseek: NIKA_DEEPSEEK_SECRET,
 	gemini: NIKA_GEMINI_SECRET,
 	openrouter: NIKA_OPENROUTER_SECRET,
 	llamacpp: NIKA_LLAMACPP_SECRET,
 	cursor: NIKA_CURSOR_SECRET,
+	deepseekweb: NIKA_DEEPSEEK_WEB_SECRET,
 };
 
 function providerDisplayName(provider: NikaConnection): string {
@@ -46,6 +49,7 @@ function providerDisplayName(provider: NikaConnection): string {
 		case 'openrouter': return 'OpenRouter';
 		case 'llamacpp': return 'llama.cpp';
 		case 'cursor': return 'Cursor';
+		case 'deepseekweb': return 'DeepSeek Web';
 	}
 }
 
@@ -95,6 +99,7 @@ export class NikaSettingsEditor extends Disposable {
 		private readonly _llamaCppProvider: NikaLlamaCppProvider,
 		private readonly _geminiCatalogProvider: NikaGeminiProvider,
 		private readonly _cursorProvider: NikaCursorProvider,
+		private readonly _deepSeekWebProvider: NikaDeepSeekWebProvider,
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 		@ILogService private readonly _logService: ILogService,
@@ -119,7 +124,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET) {
 				void this._render(this._activeSection);
 			}
 		}));
@@ -255,12 +260,13 @@ export class NikaSettingsEditor extends Disposable {
 
 	private async _state(): Promise<Record<string, unknown>> {
 		const config = vscode.workspace.getConfiguration('nika');
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
 			this._context.secrets.get(NIKA_CURSOR_SECRET),
+			this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET),
 		]);
 		// Cache the key presence so view-model helpers (modelChoices) can gate
 		// model visibility without re-reading secrets for every dropdown.
@@ -307,13 +313,14 @@ export class NikaSettingsEditor extends Disposable {
 			llamacppConfigured: !!llamaCppKey,
 			llamacppModels: llamaCppCatalog,
 			cursorConfigured: !!cursorKey,
+			deepseekwebConfigured: !!deepSeekWebToken,
 			providers,
 			providersManaged,
 			// Per-provider configured flag for status pills. Legacy mode keeps
 			// the classic rules; managed mode reflects the added providers.
 			providersConfigured: providersManaged
-				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor }
-				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey },
+				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb }
+				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken },
 			// Available models per provider for the wizard's selection step.
 			// Native entries are bare ids; catalog families carry their prefix
 			// so the wizard stores exactly what the picker gates on.
@@ -329,6 +336,18 @@ export class NikaSettingsEditor extends Disposable {
 				openrouter: prefixCatalog(openRouterCatalog, NIKA_OPENROUTER_MODEL_PREFIX),
 				llamacpp: prefixCatalog(llamaCppCatalog, NIKA_LLAMACPP_MODEL_PREFIX),
 				cursor: prefixCatalog(cursorCatalog, NIKA_CURSOR_MODEL_PREFIX),
+				// The web model ids already carry their `deepseekweb/` prefix
+				// (see NikaDeepSeekWebProvider.getKnownModels), so they persist
+				// verbatim — exactly what the picker gates on.
+				deepseekweb: Object.entries(this._deepSeekWebProvider.getKnownModels()).map(([id, capabilities]) => ({
+					id,
+					name: capabilities.name,
+					provider: 'deepseekweb',
+					vision: capabilities.vision ?? false,
+					toolCalling: capabilities.toolCalling ?? false,
+					reasoning: (capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+					efforts: getNikaEffortOptionsForModel(id),
+				})),
 			},
 			// Flattened, selection-gated model list for the Models / Agents /
 			// Vision dropdowns (native + Ollama + OpenRouter + llama.cpp +
@@ -672,7 +691,20 @@ export class NikaSettingsEditor extends Disposable {
 					contextWindow: entry.contextWindow,
 				};
 			});
-		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices];
+		// The web model is static: no catalog fetch needed. Managed mode gates
+		// on the wizard selection; legacy mode shows it whenever a token
+		// exists (mirroring the classic key-based visibility rules).
+		const deepSeekWebSelected = getNikaSelectedModels(providerConfig, 'deepseekweb');
+		const deepSeekWebChoices = Object.entries(this._deepSeekWebProvider.getKnownModels())
+			.filter(([id]) => deepSeekWebSelected === undefined ? providerConfig === undefined : deepSeekWebSelected.includes(id))
+			.map(([id, capabilities]) => ({
+				id: `nika/${id}`,
+				displayName: capabilities.name,
+				provider: 'deepseekweb',
+				vision: capabilities.vision ?? false,
+				efforts: getNikaEffortOptionsForModel(id),
+			}));
+		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices];
 	}
 
 	private _llamaCppBaseUrl(): string {
@@ -912,7 +944,7 @@ export class NikaSettingsEditor extends Disposable {
 		await this._indexingSchemeManager.clear();
 	}
 
-	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor', value: string): Promise<void> {
+	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb', value: string): Promise<void> {
 		const trimmed = value.trim();
 		// Local llama.cpp servers often use short tokens; any non-empty value
 		// is accepted there. Cloud providers need a real key.
@@ -951,12 +983,13 @@ export class NikaSettingsEditor extends Disposable {
 	 */
 	private async _legacyProviderSeed(): Promise<NikaProviderConfig> {
 		const seed: NikaProviderConfig = {};
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
 			this._context.secrets.get(NIKA_CURSOR_SECRET),
+			this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET),
 		]);
 		if (deepseekKey) {
 			seed.deepseek = { models: [...NIKA_DEEPSEEK_MODEL_IDS] };
@@ -985,6 +1018,9 @@ export class NikaSettingsEditor extends Disposable {
 			const catalog = await this._cursorCatalogState(cursorKey);
 			seed.cursor = { models: (catalog as { id: string }[]).map(model => `${NIKA_CURSOR_MODEL_PREFIX}${model.id}`) };
 		}
+		if (deepSeekWebToken) {
+			seed.deepseekweb = { models: Object.keys(this._deepSeekWebProvider.getKnownModels()) };
+		}
 		return seed;
 	}
 
@@ -1009,8 +1045,16 @@ export class NikaSettingsEditor extends Disposable {
 	async testConnection(provider: NikaConnection): Promise<boolean> {
 		let result: ConnectionResult;
 		try {
-			let response;
-			if (provider === 'deepseek') {
+			let response: { ok: boolean; status: number } | undefined;
+			if (provider === 'deepseekweb') {
+				const token = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
+				if (!token) { throw new Error(vscode.l10n.t('No DeepSeek web token is configured.')); }
+				// A chat-session round trip proves the token and the PoW path
+				// work end to end. The orphan session is harmless.
+				const client = new DeepSeekWebClient(token, this._fetcherService);
+				await client.createChatSession();
+				response = { ok: true, status: 200 };
+			} else if (provider === 'deepseek') {
 				const key = await this._context.secrets.get(NIKA_DEEPSEEK_SECRET);
 				if (!key) { throw new Error(vscode.l10n.t('No DeepSeek key is configured.')); }
 				response = await this._fetcherService.fetch('https://api.deepseek.com/models', { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-deepseek-test' });
@@ -1232,9 +1276,9 @@ ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', 
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});const good=result?result.ok:configured;document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(good?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}
 // --- Provider wizard (Add Provider flow + provider cards) ---
-const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor'};
-const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor'];
-const providerHints={deepseek:'Flash, Pro, and experimental Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account'};
+const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor',deepseekweb:'DeepSeek Web'};
+const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor','deepseekweb'];
+const providerHints={deepseek:'Flash, Pro, and experimental Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically'};
 const providerModels=state.providerModels||{};
 const providerConfig=state.providers||{};
 const providersManaged=!!state.providersManaged;
@@ -1244,8 +1288,9 @@ function wizardState(){return (vscode.getState()||{}).wizard||null;}
 function setWizard(w){const saved=vscode.getState()||{};vscode.setState({...saved,wizard:w});}
 function modelNameFor(provider,id){
   let key=id;
-  ['gemini/','cursor/','openrouter/','ollama/','llamacpp/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
-  const entry=(providerModels[provider]||[]).find(m=>m.id===key);
+  ['deepseekweb/','gemini/','cursor/','openrouter/','ollama/','llamacpp/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
+  const list=providerModels[provider]||[];
+  const entry=list.find(m=>m.id===key)||list.find(m=>m.id===id);
   return entry?(entry.name||key):id;
 }
 function renderProviderCards(){
@@ -1278,7 +1323,7 @@ function wizardStepHtml(){
       html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp host')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server (default http://localhost:8080).')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" value="'+esc(state.llamaCppBaseUrl||'http://localhost:8080')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
       html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Leave empty for no authentication.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste your API key')+'"></div></div>';
     }else{
-      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':'Stored securely in Secret Storage; never read back into this page.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc('Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':(w.provider==='deepseekweb'?'Sign in at chat.deepseek.com, open the browser console, and copy the userToken value from localStorage. Stored securely; never read back into this page.':'Stored securely in Secret Storage; never read back into this page.'))+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc('Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
     }
     html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button></div>';
     return html;
