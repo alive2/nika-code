@@ -1093,6 +1093,9 @@ export class NikaSettingsEditor extends Disposable {
 		await this._context.secrets.store(NIKA_DEEPSEEK_WEB_SECRET, token);
 		this._deepSeekWebProvider.invalidateCache();
 		this._connections.delete('deepseekweb');
+		// Tell the wizard to advance: the token is in place, so move from the
+		// credential step to the model-selection step.
+		this._panel?.webview.postMessage({ type: 'deepSeekWebTokenImported' });
 		void vscode.window.showInformationMessage(vscode.l10n.t('DeepSeek Web token imported ({0}…{1}).', token.slice(0, 6), token.slice(-4)));
 	}
 
@@ -1480,6 +1483,18 @@ document.addEventListener('click',e=>{
   if(manage){const id=manage.dataset.manageModels;const existing=providerConfig[id]?providerConfig[id].models:[];setWizard({provider:id,step:'models',models:existing.slice()});renderWizard();renderWizardModelList('');return;}
   const remove=e.target.closest('[data-remove-provider]');
   if(remove){post({type:'removeProvider',provider:remove.dataset.removeProvider});}
+});
+// Extension-side success signal: the DeepSeek Web token was imported, so the
+// wizard can leave the credential step and move to model selection.
+window.addEventListener('message',function(e){
+  const d=e.data||{};
+  if(d.type==='deepSeekWebTokenImported'){
+    const w=wizardState();
+    if(w&&w.provider==='deepseekweb'&&w.step==='config'){
+      setWizard({provider:'deepseekweb',step:'models',models:[]});
+      renderWizard();
+    }
+  }
 });
 document.addEventListener('change',e=>{
   const box=e.target.closest('[data-wizard-model]');
