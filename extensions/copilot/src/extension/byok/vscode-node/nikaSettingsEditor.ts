@@ -310,6 +310,9 @@ export class NikaSettingsEditor extends Disposable {
 		const prefixCatalog = (catalog: unknown[], prefix: string): Record<string, unknown>[] =>
 			(catalog as { id: string }[]).map(model => ({ ...model, id: `${prefix}${model.id}` }));
 		return {
+			// The integrated-browser command only exists in the desktop app;
+			// the web client must use the manual console-paste flow.
+			isWeb: vscode.env.uiKind === vscode.UIKind.Web,
 			deepseekConfigured: !!deepseekKey,
 			geminiConfigured: !!geminiKey,
 			openrouterConfigured: !!openRouterKey,
@@ -1056,15 +1059,27 @@ export class NikaSettingsEditor extends Disposable {
 	 * the integrated browser and stores it as the DeepSeek Web secret. The
 	 * token is the webapp's auth value (`{ value, __version }` in storage);
 	 * no part of it is logged or shown beyond a masked preview.
+	 *
+	 * In clients without the integrated browser (e.g. the web client, where
+	 * `workbench.action.browser.evaluateJavascript` does not exist) the user
+	 * is guided through the manual console-paste flow instead.
 	 */
 	private async _deepSeekWebImportToken(): Promise<void> {
-		const result = await vscode.commands.executeCommand<{ matched: boolean; value?: unknown; error?: string }>(
-			'workbench.action.browser.evaluateJavascript',
-			{
+		const commandId = 'workbench.action.browser.evaluateJavascript';
+		let result: { matched: boolean; value?: unknown; error?: string } | undefined;
+		try {
+			result = await vscode.commands.executeCommand<{ matched: boolean; value?: unknown; error?: string }>(commandId, {
 				urlPrefix: 'chat.deepseek.com',
 				expression: `(() => { const raw = localStorage.getItem('userToken'); if (!raw) { return null; } try { return JSON.parse(raw)?.value ?? raw; } catch { return raw; } })()`,
-			},
-		);
+			});
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			if (detail.includes('not found')) {
+				await this._promptManualTokenImport();
+				return;
+			}
+			throw error;
+		}
 		if (!result?.matched) {
 			throw new Error(vscode.l10n.t('No chat.deepseek.com tab is open in the integrated browser. Run “Nika: DeepSeek Web — Sign In” first.'));
 		}
@@ -1079,6 +1094,24 @@ export class NikaSettingsEditor extends Disposable {
 		this._deepSeekWebProvider.invalidateCache();
 		this._connections.delete('deepseekweb');
 		void vscode.window.showInformationMessage(vscode.l10n.t('DeepSeek Web token imported ({0}…{1}).', token.slice(0, 6), token.slice(-4)));
+	}
+
+	/**
+	 * Guides the user through pasting the token manually from the
+	 * chat.deepseek.com console (used when the integrated-browser command is
+	 * unavailable, e.g. in the web client).
+	 */
+	private async _promptManualTokenImport(): Promise<void> {
+		const snippet = `JSON.parse(localStorage.getItem("userToken")).value`;
+		const copy = vscode.l10n.t('Copy console command');
+		const picked = await vscode.window.showWarningMessage(
+			vscode.l10n.t('Automatic token import needs the integrated browser, which is only available in the desktop app. In chat.deepseek.com, press F12, run the console command, and paste the result into the key field.'),
+			copy,
+		);
+		if (picked === copy) {
+			await vscode.env.clipboard.writeText(snippet);
+			void vscode.window.showInformationMessage(vscode.l10n.t('Console command copied to the clipboard.'));
+		}
 	}
 
 	/**
@@ -1379,8 +1412,9 @@ function wizardStepHtml(){
       html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp host')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server (default http://localhost:8080).')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" value="'+esc(state.llamaCppBaseUrl||'http://localhost:8080')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
       html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Leave empty for no authentication.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste your API key')+'"></div></div>';
     }else{
-      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':(w.provider==='deepseekweb'?'Sign in at chat.deepseek.com, then import your userToken: on desktop use “Import token from browser”; on web paste the value from the browser console (JSON.parse(localStorage.getItem("userToken")).value). Stored securely; never read back into this page.':'Stored securely in Secret Storage; never read back into this page.'))+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc(w.provider==='deepseekweb'?'Paste your userToken':'Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
-      if(w.provider==='deepseekweb'){
+      const manualHint=w.provider==='deepseekweb'?(state.isWeb?'Sign in at chat.deepseek.com in your browser, then paste your userToken here: open the browser console (F12) and run JSON.parse(localStorage.getItem("userToken")).value. Stored securely; never read back into this page.':'Sign in at chat.deepseek.com, then import your userToken: on desktop use “Import token from browser”; on web paste the value from the browser console (JSON.parse(localStorage.getItem("userToken")).value). Stored securely; never read back into this page.'):'Stored securely in Secret Storage; never read back into this page.';
+      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':manualHint)+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc(w.provider==='deepseekweb'?'Paste your userToken':'Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+      if(w.provider==='deepseekweb'&&!state.isWeb){
         html+='<div class="actions"><button class="action secondary" data-wizard-web-signin>'+esc('Sign in in browser')+'</button><button class="action secondary" data-wizard-web-import>'+esc('Import token from browser')+'</button></div>';
       }
     }
