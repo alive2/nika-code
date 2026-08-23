@@ -40,7 +40,6 @@ import { IContextKey, IContextKeyService } from '../../../../../platform/context
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 
 import { ITextResourceEditorInput } from '../../../../../platform/editor/common/editor.js';
-import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
@@ -65,8 +64,6 @@ import { ChatRequestQueueKind, ChatSendResult, ChatSendResultSent, IChatLocation
 import { IChatSessionsService, localChatSessionType } from '../../common/chatSessionsService.js';
 import { IChatSlashCommandService } from '../../common/participants/chatSlashCommands.js';
 import { IChatTodoListService } from '../../common/tools/chatTodoListService.js';
-import { parsePlanChecklist, todosFromChecklist } from '../../common/planView/planChecklist.js';
-import { IPlanViewService } from '../../common/planView/planViewService.js';
 import { ChatRequestVariableSet, IChatRequestTranscriptContextVariableEntry, IChatRequestVariableEntry, isPromptFileVariableEntry, isPromptTextVariableEntry, isWorkspaceVariableEntry, PromptFileVariableKind, toPromptFileVariableEntry } from '../../common/attachments/chatVariableEntries.js';
 import { ChatViewModel, IChatResponseViewModel, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
 import { ChatMessageRole, IChatMessage } from '../../common/languageModels.js';
@@ -488,8 +485,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
 		@IChatTodoListService private readonly chatTodoListService: IChatTodoListService,
-		@IPlanViewService private readonly planViewService: IPlanViewService,
-		@IFileService private readonly fileService: IFileService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IChatAttachmentResolveService private readonly chatAttachmentResolveService: IChatAttachmentResolveService,
 		@IChatTipService private readonly chatTipService: IChatTipService,
@@ -1607,7 +1602,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	async executeHandoff(handoff: IHandOff, agentId?: string): Promise<void> {
 		this.chatSuggestNextWidget.hide();
-		await this.seedPlanTodos();
 
 		const promptToUse = handoff.prompt;
 
@@ -1639,34 +1633,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				}
 				this.acceptInput().catch(e => this.logService.error(`[Handoff] Failed to submit handoff to '${handoff.agent}'`, e));
 			}
-		}
-	}
-
-	/**
-	 * When a handoff starts implementation in a session bound to a plan file
-	 * (Plan agent flow), seed the session's todo list from the plan's Tasks
-	 * checklist so progress tracking exists before the executing agent runs.
-	 * No-op when the session already has todos or no plan is bound.
-	 */
-	private async seedPlanTodos(): Promise<void> {
-		const sessionResource = this.viewModel?.sessionResource;
-		if (!sessionResource || this.chatTodoListService.getTodos(sessionResource).length > 0) {
-			return;
-		}
-		const planUri = this.planViewService.getPlanUri(sessionResource);
-		if (!planUri) {
-			return;
-		}
-		try {
-			const content = (await this.fileService.readFile(planUri)).value.toString();
-			const todos = todosFromChecklist(parsePlanChecklist(content));
-			if (todos.length === 0) {
-				return;
-			}
-			this.chatTodoListService.setTodos(sessionResource, todos);
-			this.logService.info(`[Handoff] Seeded ${todos.length} todo(s) from plan '${planUri.path}'`);
-		} catch (e) {
-			this.logService.warn(`[Handoff] Failed to seed todos from plan '${planUri.path}'`, e);
 		}
 	}
 

@@ -200,11 +200,6 @@ import { WorkspacePluginSettingsService, IWorkspacePluginSettingsService } from 
 import { AgentPluginRecommendations } from './claudePluginRecommendations.js';
 import { AgentPluginEditor } from './agentPluginEditor/agentPluginEditor.js';
 import { AgentPluginEditorInput } from './agentPluginEditor/agentPluginEditorInput.js';
-import { PlanViewEditor } from './planView/planViewEditor.js';
-import { PlanViewEditorInput } from './planView/planViewEditorInput.js';
-import { PlanViewCommandContribution } from './planView/planViewCommandContribution.js';
-import { PlanTodoFileSync } from './planView/planTodoFileSync.js';
-import { PlanViewService, IPlanViewService } from '../common/planView/planViewService.js';
 import { AgentPluginRepositoryService } from './agentPluginRepositoryService.js';
 import { BrowserPluginGitCommandService } from './pluginGitCommandService.js';
 import { IPluginGitService } from '../common/plugins/pluginGitService.js';
@@ -2260,16 +2255,6 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 		new SyncDescriptor(AgentPluginEditorInput)
 	]
 );
-Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(
-		PlanViewEditor,
-		PlanViewEditor.ID,
-		nls.localize('planView', "Plan Viewer")
-	),
-	[
-		new SyncDescriptor(PlanViewEditorInput)
-	]
-);
 function isStringKeyedObject(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -2869,8 +2854,6 @@ Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEdit
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(ChatDebugEditorInput.ID, ChatDebugEditorInputSerializer);
 
 registerWorkbenchContribution2(CopilotTelemetryContribution.ID, CopilotTelemetryContribution, WorkbenchPhase.BlockRestore);
-registerWorkbenchContribution2(PlanViewCommandContribution.ID, PlanViewCommandContribution, WorkbenchPhase.BlockRestore);
-registerWorkbenchContribution2(PlanTodoFileSync.ID, PlanTodoFileSync, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatSpeechToTextInitContribution.ID, ChatSpeechToTextInitContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatResolverContribution.ID, ChatResolverContribution, WorkbenchPhase.BlockStartup);
 registerWorkbenchContribution2(ChatDebugResolverContribution.ID, ChatDebugResolverContribution, WorkbenchPhase.BlockStartup);
@@ -3006,7 +2989,6 @@ registerSingleton(IChatAttachmentWidgetRegistry, ChatAttachmentWidgetRegistry, I
 registerSingleton(IChatTodoListService, ChatTodoListService, InstantiationType.Delayed);
 registerSingleton(IChatArtifactsService, ChatArtifactsService, InstantiationType.Delayed);
 registerSingleton(IChatOutputRendererService, ChatOutputRendererService, InstantiationType.Delayed);
-registerSingleton(IPlanViewService, PlanViewService, InstantiationType.Delayed);
 registerSingleton(IChatLayoutService, ChatLayoutService, InstantiationType.Delayed);
 registerSingleton(IPlanReviewFeedbackService, PlanReviewFeedbackService, InstantiationType.Delayed);
 registerSingleton(IChatTipService, ChatTipService, InstantiationType.Delayed);

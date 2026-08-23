@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { AsyncClipboardStrategy, CommentModeController, CommentsModel, EditorController, EditorModel, EditorView, GutterMarker, OffsetRange, Selection, StringEdit, StringReplacement, StringValue, VsCodeV2CommentsView, commands, findNodeOffsetById, taskCheckboxRange, vscodeHostKeyboardProfile, vscodeLocalKeyboardProfile, type CodeBlockAstNode } from '@vscode/markdown-editor';
-import { Disposable, IDisposable, autorun, observableValue } from '@vscode/markdown-editor/observables';
+import { Disposable, autorun, observableValue } from '@vscode/markdown-editor/observables';
 import { VirtualizedIframeEmbeddedEditorFactory, type IframeEmbeddedEditorProvider, type IframeEmbeddedEditorProviderSelector, type ResolvedIframeEmbeddedEditor } from '@vscode/markdown-editor/web-editors';
 import 'katex/dist/katex.min.css';
 import '@vscode/markdown-editor/editor.css';
@@ -13,44 +13,6 @@ import '@vscode/markdown-editor/commentInput.css';
 import '@vscode/markdown-editor/vscodeCommentWidgetV2.css';
 import './markdownEditor.css';
 import { WebviewSyntaxHighlighter } from './syntaxHighlighter';
-
-/** In-progress task marker at the start of a list item, e.g. `- [>] Task title`. */
-const inProgressTaskMarker = /^\s*(?:[-*+]|\d+\.)\s*\[[>~]\]/;
-
-/**
- * Watches the editor DOM for list items whose source line is an in-progress
- * plan task (`- [>] ...` / `- [~] ...`) and tags them with
- * `md-task-in-progress` so CSS can render an animated spinner next to them.
- *
- * The class is toggled on the `<li>` element only, never inside the editor's
- * own content nodes, so the editor's DOM bookkeeping is unaffected; when a
- * re-render replaces the element the observer simply re-applies the class.
- */
-function setupInProgressTaskIndicator(root: HTMLElement): IDisposable {
-	let pending = false;
-	const apply = (): void => {
-		pending = false;
-		for (const li of root.querySelectorAll('li')) {
-			li.classList.toggle('md-task-in-progress', inProgressTaskMarker.test(li.textContent ?? ''));
-		}
-	};
-	const observer = new MutationObserver(mutations => {
-		// Ignore plain text edits that happen outside list items (typing in a
-		// paragraph, a code block, etc.) to keep keystrokes cheap.
-		if (mutations.some(m => m.type === 'characterData' && !(m.target as Node).parentElement?.closest('li'))) {
-			return;
-		}
-		if (!pending) {
-			pending = true;
-			queueMicrotask(apply);
-		}
-	});
-	observer.observe(root, { childList: true, subtree: true, characterData: true });
-	apply();
-	return {
-		dispose: () => observer.disconnect(),
-	};
-}
 
 interface VsCodeApi {
 	postMessage(message: unknown): void;
@@ -321,9 +283,6 @@ class Editor extends Disposable {
 		});
 		host.appendChild(view.element);
 		postEditorFocus();
-
-		// Animated spinner next to in-progress plan tasks (`- [>]` / `- [~]`).
-		this._register(setupInProgressTaskIndicator(view.element));
 
 		// Render comments as the VS Code V2 markdown cards. The card colours come
 		// from the webview's own `--vscode-*` theme variables; `theme` only picks

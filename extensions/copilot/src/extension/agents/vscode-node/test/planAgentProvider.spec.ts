@@ -267,51 +267,6 @@ suite('PlanAgentProvider', () => {
 		assert.ok(!actualTools.includes('apply_patch'));
 	});
 
-	test('plan agent body instructs presenting the plan via the reviewPlan tool', async () => {
-		const provider = createProvider();
-		const agents = await provider.provideCustomAgents({}, {} as any);
-
-		assert.equal(agents.length, 1);
-		const content = await getAgentContent(agents[0]);
-
-		assert.ok(content.includes('vscode_reviewPlan'), 'Body should instruct using the reviewPlan tool');
-		assert.ok(content.includes('canProvideFeedback'), 'Body should pass canProvideFeedback to the tool');
-		assert.ok(content.includes('Implement Plan'), 'Body should suggest an Implement Plan action');
-		assert.ok(content.includes('EXACT markdown'), 'Body should require content to be identical to the saved plan file');
-		assert.ok(content.includes('never diverge'), 'Body should forbid the plan file and content from diverging');
-		assert.ok(content.includes('**Tasks**'), 'Body style guide should include a Tasks checklist section');
-		assert.ok(content.includes('- [ ]'), 'Body style guide should show checkbox task examples');
-	});
-
-	test('plan agent body requires a mermaid diagram in every plan', async () => {
-		const provider = createProvider();
-		const agents = await provider.provideCustomAgents({}, {} as any);
-
-		assert.equal(agents.length, 1);
-		const content = await getAgentContent(agents[0]);
-
-		assert.ok(content.includes('```mermaid'), 'Style guide should include a mermaid code fence');
-		assert.ok(content.includes('flowchart'), 'Style guide mermaid example should be a flowchart');
-		assert.ok(content.includes('**Diagram**'), 'Style guide should include a Diagram section');
-	});
-
-	test('plan agent body places the Tasks checklist at the end of the plan', async () => {
-		const provider = createProvider();
-		const agents = await provider.provideCustomAgents({}, {} as any);
-
-		assert.equal(agents.length, 1);
-		const content = await getAgentContent(agents[0]);
-
-		// Use lastIndexOf to scope to the style-guide template (earlier rule
-		// mentions reference the Tasks/Diagram sections too).
-		const tasksIndex = content.lastIndexOf('**Tasks**');
-		assert.ok(tasksIndex > -1, 'Style guide should include a Tasks section');
-		assert.ok(content.lastIndexOf('**Diagram**') < tasksIndex, 'Tasks should come after the Diagram section');
-		assert.ok(content.lastIndexOf('**Relevant files**') < tasksIndex, 'Tasks should come after Relevant files');
-		assert.ok(content.lastIndexOf('**Verification**') < tasksIndex, 'Tasks should come after Verification');
-		assert.ok(content.lastIndexOf('**Further Considerations**') < tasksIndex, 'Tasks should come after Further Considerations');
-	});
-
 	test('has correct label property', () => {
 		const provider = createProvider();
 		assert.ok(provider.label.includes('Plan'));

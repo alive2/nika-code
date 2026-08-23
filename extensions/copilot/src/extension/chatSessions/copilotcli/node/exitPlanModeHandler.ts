@@ -17,32 +17,12 @@ import { Session } from '../common/utils';
 
 type ExitPlanModeActionType = Parameters<NonNullable<SessionOptions['onExitPlanMode']>>[0]['actions'][number];
 
-export type { ExitPlanModeActionType };
-
 const actionDescriptions: Record<ExitPlanModeActionType, { label: string; description: string }> = {
 	'autopilot': { label: l10n.t("Implement with Autopilot"), description: l10n.t('Auto-approve all tool calls and continue until the task is done.') },
 	'autopilot_fleet': { label: l10n.t("Implement with Autopilot Fleet"), description: l10n.t('Auto-approve all tool calls, including fleet management actions, and continue until the task is done.') },
 	'interactive': { label: l10n.t("Implement Plan"), description: l10n.t('Implement the plan, asking for input and approval for each action.') },
 	'exit_only': { label: l10n.t("Approve Plan Only"), description: l10n.t('Approve the plan without executing it. I will implement it myself.') },
 };
-
-/**
- * Map a plan-review action label (from a `vscode_reviewPlan` tool result) back
- * to the SDK `exit_plan_mode` action type. Unknown labels fall back to
- * `interactive`, which is the safest default for implementation.
- */
-export function exitPlanModeActionFromLabel(label: string | undefined): ExitPlanModeActionType {
-	switch (label) {
-		case 'Implement with Autopilot':
-			return 'autopilot';
-		case 'Implement with Autopilot Fleet':
-			return 'autopilot_fleet';
-		case 'Approve Plan Only':
-			return 'exit_only';
-		default:
-			return 'interactive';
-	}
-}
 
 /**
  * Monitors a plan.md file for user edits and syncs saved changes back to the

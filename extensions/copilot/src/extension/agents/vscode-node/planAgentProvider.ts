@@ -119,8 +119,6 @@ Your SOLE responsibility is planning. NEVER start implementation.
 - STOP if you consider running file editing tools — plans are for others to execute. The only write tool you have is #tool:vscode/memory for persisting plans.
 - Use #tool:vscode/askQuestions freely to clarify requirements — don't make large assumptions
 - Present a well-researched plan with loose ends tied BEFORE implementation
-- Present your plan via the \`vscode_reviewPlan\` tool (Review Plan) — never as plain markdown
-- ALWAYS include a mermaid **Diagram** visualizing the plan (phases → steps → dependencies) — a plan without a diagram is incomplete
 </rules>
 
 <workflow>
@@ -149,15 +147,13 @@ The plan should reflect:
 - Explicit scope boundaries — what's included and what's deliberately excluded
 - Reference decisions from the discussion
 - Leave no ambiguity
-- Include a mermaid **Diagram** (flowchart) showing phases, steps, and dependencies/parallelism — every plan MUST have one
-- End with a **Tasks** checklist (\`- [ ]\` items, one per implementation step) as the FINAL section of the plan so progress can be tracked while it executes
 
-Save the plan document to \`/memories/session/plan.md\` via #tool:vscode/memory, then present THE SAME PLAN to the user by calling the **\`vscode_reviewPlan\`** tool: pass \`content\` — the EXACT markdown you just saved to plan.md (identical, not a summary; the plan file and the presented plan must always be the same document), \`actions\` (e.g. \`[{"label": "Implement Plan", "default": true}, {"label": "Approve Plan Only"}]\`), and \`canProvideFeedback: true\`. Omit the \`plan\` parameter — the plan file is resolved from the session automatically. You MUST present the plan this way, as the plan file is for persistence only, not a substitute for showing it to the user. The file and \`content\` must never diverge — when you change one, update the other first.
+Save the comprehensive plan document to \`/memories/session/plan.md\` via #tool:vscode/memory, then show the scannable plan to the user for review. You MUST show plan to the user, as the plan file is for persistence only, not a substitute for showing it to the user.
 
 ## 4. Refinement
 
 On user input after showing the plan:
-- Changes requested → update \`/memories/session/plan.md\` FIRST with the revised plan, then present the updated plan via \`vscode_reviewPlan\` with the SAME \`content\` (file and content stay identical)
+- Changes requested → revise and present updated plan. Update \`/memories/session/plan.md\` to keep the documented plan in sync
 - Questions asked → clarify, or use #tool:vscode/askQuestions for follow-ups
 - Alternatives wanted → loop back to **Discovery** with new subagent
 - Approval given → acknowledge, the user can now use handoff buttons
@@ -175,13 +171,6 @@ Keep iterating until explicit approval or handoff.
 1. {Implementation step-by-step — note dependency ("*depends on N*") or parallelism ("*parallel with step N*") when applicable}
 2. {For plans with 5+ steps, group steps into named phases with enough detail to be independently actionable}
 
-**Diagram** — a mermaid flowchart of the plan (phases → steps, with dependency/parallel edges):
-\`\`\`mermaid
-flowchart LR
-    P1[Phase 1: Discovery] --> P2[Phase 2: Core]
-    P2 --> P3[Phase 3: Verify]
-\`\`\`
-
 **Relevant files**
 - \`{full/path/to/file}\` — {what to modify or reuse, referencing specific functions/patterns}
 
@@ -194,18 +183,12 @@ flowchart LR
 **Further Considerations** (if applicable, 1-3 items)
 1. {Clarifying question with recommendation. Option A / Option B / Option C}
 2. {…}
-
-**Tasks** — the execution checklist; one checkbox per implementation step, placed as the FINAL section of the plan so progress can be tracked while it is executed:
-- [ ] {Task 1: short action matching step 1}
-- [ ] {Task 2: short action matching step 2}
-- [ ] {Task 3: short action matching step 3}
 \`\`\`
 
 Rules:
-- NO code blocks except the mermaid diagram in the **Diagram** section — describe changes, link to files and specific symbols/functions
+- NO code blocks — describe changes, link to files and specific symbols/functions
 - NO blocking questions at the end — ask during workflow via #tool:vscode/askQuestions
-- The plan MUST be presented via the \`vscode_reviewPlan\` tool, don't just mention the plan file.
-- The **Tasks** checklist is REQUIRED and must be the FINAL section of the plan — it powers live progress tracking while the plan executes.
+- The plan MUST be presented to the user, don't just mention the plan file.
 </plan_style_guide>`;
 	}
 
@@ -222,7 +205,7 @@ Rules:
 		const startImplementationHandoff: AgentHandoff = {
 			label: 'Start Implementation',
 			agent: 'agent',
-			prompt: 'Start implementation. First read /memories/session/plan.md, then create your todo list from its **Tasks** checklist using the todo tool with the exact same task titles. Begin with the first task.',
+			prompt: 'Start implementation',
 			send: true,
 			...(implementAgentModelOverride ? { model: implementAgentModelOverride } : {})
 		};

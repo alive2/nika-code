@@ -9,7 +9,6 @@ import { status } from '../../../../../../base/browser/ui/aria/aria.js';
 import { Button, ButtonWithDropdown, IButton } from '../../../../../../base/browser/ui/button/button.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { Action, Separator } from '../../../../../../base/common/actions.js';
-import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
@@ -28,7 +27,6 @@ import { IContextMenuService } from '../../../../../../platform/contextview/brow
 import { IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
 import { FileChangeType, IFileService } from '../../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
-import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
 import { IEditorService } from '../../../../../services/editor/common/editorService.js';
@@ -41,13 +39,6 @@ import { IChatRendererContent, isResponseVM } from '../../../common/model/chatVi
 import { ChatTreeItem } from '../../chat.js';
 import { IChatContentPart, IChatContentPartRenderContext } from './chatContentParts.js';
 import { ChatCollapsibleContentPart } from './chatCollapsibleContentPart.js';
-import { IChatWidget, IChatWidgetService } from '../../chat.js';
-import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
-import { ExecuteHandoffActionId } from '../../actions/chatExecuteActions.js';
-import { IPlanViewService } from '../../../common/planView/planViewService.js';
-import { IChatOutputRendererService } from '../../chatOutputItemRenderer.js';
-import { PlanViewEditorInput } from '../../planView/planViewEditorInput.js';
-import { createPlanCodeBlockRenderer } from '../../planView/planCodeBlockRenderer.js';
 import './media/chatPlanReview.css';
 
 const MARKDOWN_EDITOR_ID = 'vscode.markdown.editor';
@@ -89,7 +80,6 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 	private _isFeedbackMode = false;
 	private readonly _planReviewRegistration = this._register(new MutableDisposable());
 	private readonly _commentRowDisposables = this._register(new DisposableStore());
-	private readonly _planViewSessionResource: URI;
 
 	constructor(
 		public readonly review: IChatPlanReview,
@@ -105,22 +95,10 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		@ITextFileService private readonly _textFileService: ITextFileService,
 		@IModelService private readonly _modelService: IModelService,
 		@IFileService private readonly _fileService: IFileService,
-		@IPlanViewService private readonly _planViewService: IPlanViewService,
-		@IChatOutputRendererService private readonly _chatOutputRendererService: IChatOutputRendererService,
-		@IChatWidgetService private readonly _chatWidgetService: IChatWidgetService,
-		@ICommandService private readonly _commandService: ICommandService,
-		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 	) {
 		super();
 
-		this._planViewSessionResource = context.element.sessionResource;
 		this._selectedAction = review.actions.find(a => a.default) ?? review.actions[0];
-
-		// Bind the plan file to this chat session so the Plan Viewer can
-		// subscribe to the session's live todo updates.
-		if (review.planUri) {
-			this._register(this._planViewService.registerPlan(URI.revive(review.planUri), context.element.sessionResource));
-		}
 
 		if (review instanceof ChatPlanReviewData && typeof review.draftCollapsed === 'boolean') {
 			this._isCollapsed = review.draftCollapsed;
@@ -214,13 +192,6 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 			reviewButton.element.classList.add('chat-plan-review-title-button', 'chat-plan-review-review-button');
 			this._reviewButton = reviewButton;
 			this._register(reviewButton.onDidClick(() => void this.enterReviewMode()));
-
-			// View Plan button — opens the rich Plan Viewer editor for this file.
-			const viewPlanTooltip = localize('chat.planReview.viewPlanTooltip', 'View Plan');
-			const viewPlanButton = this._register(new Button(this._titleActionsEl, { ...defaultButtonStyles, secondary: true, supportIcons: true, title: viewPlanTooltip, ariaLabel: viewPlanTooltip }));
-			viewPlanButton.element.classList.add('chat-plan-review-title-button', 'chat-plan-review-title-icon-button', 'chat-plan-review-view-plan-button');
-			viewPlanButton.label = `$(${Codicon.checklist.id})`;
-			this._register(viewPlanButton.onDidClick(() => void this.openPlanView()));
 		}
 
 		// Chevron collapse toggle.
@@ -298,14 +269,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		const modelListener = this._planChangeListeners.add(new MutableDisposable());
 		const watchModel = (model: ITextModel) => {
 			if (isEqual(model.uri, planUri)) {
-				modelListener.value = model.onDidChangeContent(() => {
-					// Our own sync writes update the open model too — only mark
-					// outdated when the model actually diverged from the reviewed
-					// content (e.g. the user edited the plan in the editor).
-					if (model.getValue() !== this.review.content) {
-						this.markOutdated();
-					}
-				});
+				modelListener.value = model.onDidChangeContent(() => this.markOutdated());
 			}
 		};
 
@@ -316,27 +280,10 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		this._planChangeListeners.add(this._modelService.onModelAdded(watchModel));
 		const watcher = this._planChangeListeners.add(this._fileService.createWatcher(planUri, { recursive: false, excludes: [] }));
 		this._planChangeListeners.add(watcher.onDidChange(event => {
-			if (event.contains(planUri, FileChangeType.DELETED)) {
+			if (event.contains(planUri, FileChangeType.DELETED) || (!this._modelService.getModel(planUri) && event.contains(planUri, FileChangeType.ADDED, FileChangeType.UPDATED))) {
 				this.markOutdated();
-			} else if (!this._modelService.getModel(planUri) && event.contains(planUri, FileChangeType.ADDED, FileChangeType.UPDATED)) {
-				// Only mark outdated if the file actually diverged from the reviewed
-				// content — syncing the reviewed content to the file must not mark
-				// the card as outdated.
-				void this.markOutdatedIfFileDiverged();
 			}
 		}));
-	}
-
-	private async markOutdatedIfFileDiverged(): Promise<void> {
-		try {
-			const current = (await this._textFileService.read(URI.revive(this.review.planUri!))).value;
-			if (current === this.review.content) {
-				return;
-			}
-		} catch {
-			// Unreadable file — treat as a change.
-		}
-		this.markOutdated();
 	}
 
 	private markOutdated(): void {
@@ -370,17 +317,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		this._messageContentDisposables.value = store;
 		const rendered = store.add(this._markdownRendererService.render(
 			new MarkdownString(this.review.content, { supportThemeIcons: true, isTrusted: false }),
-			{
-				asyncRenderCallback: () => this._messageScrollable.scanDomNode(),
-				// Render mermaid (and other chat output renderer) code fences
-				// inline; everything else keeps the default code block.
-				codeBlockRendererSync: createPlanCodeBlockRenderer(
-					this._chatOutputRendererService,
-					() => this._planViewSessionResource,
-					store,
-					() => this._messageScrollable.scanDomNode(),
-				),
-			}
+			{ asyncRenderCallback: () => this._messageScrollable.scanDomNode() }
 		));
 		this._messageEl.append(rendered.element);
 		this._messageScrollable.scanDomNode();
@@ -786,57 +723,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		this.renderCurrentActionButtons();
 	}
 
-	/**
-	 * Makes the plan file and the reviewed plan identical before the user acts on them:
-	 *
-	 * 1. If the plan file was not modified by the user, the reviewed content wins — the
-	 *    file is updated to match `review.content`. This is what keeps "Open Full Plan"
-	 *    (which opens the plan FILE) showing the plan the user sees in the chat card,
-	 *    even when the agent refined the plan without re-writing the file.
-	 * 2. If the file was modified (dirty editor), the user's edits win: they are saved and
-	 *    re-read into the card via `savePlanFile`.
-	 */
-	private async ensurePlanFileSynced(): Promise<boolean> {
-		if (!this.review.planUri) {
-			return true;
-		}
-		const planUri = URI.revive(this.review.planUri);
-		if (this.review instanceof ChatPlanReviewData && !this._textFileService.isDirty(planUri)) {
-			try {
-				const current = (await this._textFileService.read(planUri)).value;
-				if (current !== this.review.content) {
-					await this._textFileService.write(planUri, this.review.content);
-				}
-			} catch {
-				// The plan file is missing (e.g. the agent never wrote it) — create it
-				// with the reviewed content so the opened file always shows the plan.
-				try {
-					await this._fileService.createFile(planUri, VSBuffer.fromString(this.review.content));
-				} catch {
-					// File system error — nothing to sync; keep the card as-is.
-					return true;
-				}
-			}
-		}
-		// Save any dirty editor state (user edits win) and re-read the file into the card.
-		return this.savePlanFile();
-	}
-
-	/** Opens the plan file in the rich Plan Viewer editor. */
-	private async openPlanView(): Promise<void> {
-		if (!this.review.planUri) {
-			return;
-		}
-		await this.ensurePlanFileSynced();
-		const planUri = URI.revive(this.review.planUri);
-		await this._editorService.openEditor(
-			this._instantiationService.createInstance(PlanViewEditorInput, planUri, this._planViewSessionResource),
-			{ pinned: true }
-		);
-	}
-
 	private async enterReviewMode(): Promise<void> {
-		await this.ensurePlanFileSynced();
 		// Read-only / submitted plans: fall back to opening the file in an editor.
 		if (!this.review.canProvideFeedback || this._isSubmitted) {
 			if (this.review.planUri) {
@@ -869,7 +756,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 					return;
 				}
 			}
-			if (this.review.planUri && !await this.ensurePlanFileSynced()) {
+			if (this.review.planUri && !await this.savePlanFile()) {
 				return;
 			}
 			this._isSubmitted = true;
@@ -882,42 +769,11 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 				rejected: false,
 				...(textareaFeedback ? { feedback: textareaFeedback, feedbackOverall: textareaFeedback } : {}),
 			});
-			void this._maybeAutoStartImplementation(action);
 			void this.markUsed();
 		} finally {
 			if (!this._isSubmitted) {
 				this._isSubmitting = false;
 			}
-		}
-	}
-
-	/**
-	 * One-click implement: when the user picks an implement action (anything
-	 * but "Approve Plan Only") and the session's current mode offers a
-	 * "Start Implementation" handoff (the custom Plan agent), execute that
-	 * handoff right away so implementation begins without an extra chip click.
-	 * The native SDK exit-plan-mode flow has no such handoff, so it is a no-op
-	 * there (approval still returns through {@link IChatPlanReviewPartOptions.onSubmit}).
-	 */
-	private async _maybeAutoStartImplementation(action: IChatPlanApprovalAction): Promise<void> {
-		if (action.label === 'Approve Plan Only') {
-			return;
-		}
-		try {
-			const widget: IChatWidget | undefined = this._chatWidgetService.getWidgetBySessionResource(this._planViewSessionResource);
-			const mode = widget?.input.currentModeObs.get();
-			const handoffs = mode?.handOffs?.get();
-			const handoff = handoffs?.find(h => h.label.trim().toLowerCase() === 'start implementation');
-			if (!handoff) {
-				return;
-			}
-			await this._commandService.executeCommand(ExecuteHandoffActionId, {
-				label: handoff.label,
-				sourceCustomAgent: mode?.name.get(),
-				sessionResource: this._planViewSessionResource.toString(),
-			});
-		} catch (error) {
-			// Best-effort: the handoff chip remains available if auto-start fails.
 		}
 	}
 
@@ -927,7 +783,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		}
 		this._isSubmitting = true;
 		try {
-			if (this.review.planUri && !await this.ensurePlanFileSynced()) {
+			if (this.review.planUri && !await this.savePlanFile()) {
 				return;
 			}
 			this._isSubmitted = true;
@@ -1041,7 +897,7 @@ export class ChatPlanReviewPart extends Disposable implements IChatContentPart {
 		}
 		this._isSubmitting = true;
 		try {
-			if (!await this.ensurePlanFileSynced()) {
+			if (!await this.savePlanFile()) {
 				return false;
 			}
 

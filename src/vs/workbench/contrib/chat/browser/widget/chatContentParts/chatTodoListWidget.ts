@@ -91,7 +91,7 @@ class TodoListRenderer implements IListRenderer<IChatTodo, ITodoListTemplate> {
 			case 'completed':
 				return 'codicon-pass';
 			case 'in-progress':
-				return 'codicon-loading codicon-modifier-spin';
+				return 'codicon-record';
 			case 'not-started':
 			default:
 				return 'codicon-circle-outline';

@@ -20,28 +20,3 @@ body {
 	width: 100%;
 	overflow: scroll;
 }
-
-/*
- * Animated activity indicator for in-progress plan tasks (`- [>] ...` / `- [~] ...`).
- * The markdown editor only renders checkboxes for `[ ]`/`[x]` markers, so
- * `markdown-editor-src/editor.ts` tags in-progress list items with
- * `md-task-in-progress` and this rule draws a spinning ring next to them.
- */
-.md-task-in-progress::after {
-	content: '';
-	display: inline-block;
-	width: 10px;
-	height: 10px;
-	margin-left: 6px;
-	border: 2px solid currentColor;
-	border-top-color: transparent;
-	border-radius: 50%;
-	vertical-align: -1px;
-	animation: md-task-in-progress-spin 0.8s linear infinite;
-}
-
-@keyframes md-task-in-progress-spin {
-	to {
-		transform: rotate(360deg);
-	}
-}

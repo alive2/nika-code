@@ -14,29 +14,13 @@ import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
 import { localize } from '../../../../../../nls.js';
-import { IEnvironmentService } from '../../../../../../platform/environment/common/environment.js';
-import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
-import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IChatPlanApprovalAction, IChatPlanReviewResult, IChatService } from '../../chatService/chatService.js';
 import { IChatRequestModel } from '../../model/chatModel.js';
 import { ChatPlanReviewData } from '../../model/chatProgressTypes/chatPlanReviewData.js';
 import { CountTokensCallback, IPreparedToolInvocation, IToolData, IToolImpl, IToolInvocation, IToolInvocationPreparationContext, IToolResult, ToolDataSource, ToolProgress } from '../languageModelToolsService.js';
 
 export const ReviewPlanToolId = 'vscode_reviewPlan';
-
-/**
- * The extension that owns the memory tool. Session-scoped memory files live
- * under this extension's workspace storage directory (mirrors
- * `extensions/copilot/src/extension/tools/node/memoryTool.tsx`).
- */
-const MEMORY_TOOL_EXTENSION_ID = 'GitHub.copilot-chat';
-
-/** Directory holding memory files under the extension's workspace storage. */
-const MEMORY_BASE_DIR = 'memory-tool/memories';
-
-/** Conventional name of the plan document persisted in session memory. */
-const MEMORY_PLAN_FILE_NAME = 'plan.md';
 
 export interface IReviewPlanParams {
 	readonly title?: string;
@@ -80,7 +64,7 @@ export function createReviewPlanToolData(): IToolData {
 			},
 			plan: {
 				type: 'string',
-				description: 'Optional URI of an editable plan file. An Edit button in the widget header opens it in the editor. When omitted, the current chat session\'s memory plan file (`/memories/session/plan.md`) is used if one exists.'
+				description: 'Optional URI of an editable plan file. An Edit button in the widget header opens it in the editor.'
 			},
 			content: {
 				type: 'string',
@@ -120,9 +104,6 @@ export class ReviewPlanTool extends Disposable implements IToolImpl {
 	constructor(
 		@IChatService private readonly chatService: IChatService,
 		@ILogService private readonly logService: ILogService,
-		@IEnvironmentService private readonly environmentService: IEnvironmentService,
-		@IFileService private readonly fileService: IFileService,
-		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 	}
@@ -152,15 +133,6 @@ export class ReviewPlanTool extends Disposable implements IToolImpl {
 					planUri = undefined;
 				}
 			}
-		}
-
-		// Planning agents (e.g. the Plan agent) persist their plan through the
-		// memory tool rather than an SDK plan file, so their review arrives
-		// without a `plan` URI. Fall back to the session's memory plan
-		// document so the review card can offer the View Plan / Review
-		// entry points backed by the real file.
-		if (!planUri) {
-			planUri = await this.resolveMemoryPlanUri(invocation.context?.sessionResource);
 		}
 
 		const reviewData = new ChatPlanReviewData(
@@ -198,54 +170,6 @@ export class ReviewPlanTool extends Disposable implements IToolImpl {
 		return {
 			content: [{ kind: 'text', value: JSON.stringify(result) }]
 		};
-	}
-
-	/**
-	 * Resolves the session's memory plan document (`/memories/session/plan.md`)
-	 * when the model didn't pass an explicit plan file. The memory tool stores
-	 * session-scoped files under the copilot extension's workspace storage:
-	 * `{workspaceStorageHome}/{workspaceId}/GitHub.copilot-chat/memory-tool/
-	 * memories/{sessionDir}/plan.md`, where `sessionDir` is derived from the
-	 * chat session resource the same way the memory tool derives it. Returns
-	 * `undefined` when no such file exists.
-	 */
-	private async resolveMemoryPlanUri(sessionResource: URI | undefined): Promise<URI | undefined> {
-		if (!sessionResource) {
-			return undefined;
-		}
-
-		// Mirror `extractSessionId` in the memory tool: the last path segment
-		// of the session resource, sanitized to safe directory characters.
-		const segments = sessionResource.path.replace(/^\//, '').split('/');
-		const raw = segments[segments.length - 1] || sessionResource.authority || '';
-		const sessionDir = raw.replace(/[^a-zA-Z0-9_.-]/g, '_');
-		if (!sessionDir) {
-			return undefined;
-		}
-
-		const workspace = this.workspaceContextService.getWorkspace();
-		if (!workspace.id) {
-			return undefined;
-		}
-
-		const planUri = URI.joinPath(
-			this.environmentService.workspaceStorageHome,
-			workspace.id,
-			MEMORY_TOOL_EXTENSION_ID,
-			MEMORY_BASE_DIR,
-			sessionDir,
-			MEMORY_PLAN_FILE_NAME,
-		);
-
-		try {
-			const stat = await this.fileService.stat(planUri);
-			if (stat.isFile) {
-				return planUri;
-			}
-		} catch {
-			// No memory plan for this session — leave the review without a plan file.
-		}
-		return undefined;
 	}
 
 	private getRequest(chatSessionResource: URI | undefined, chatRequestId: string | undefined): { request: IChatRequestModel | undefined } {
