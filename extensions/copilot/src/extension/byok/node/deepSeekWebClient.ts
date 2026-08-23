@@ -288,6 +288,17 @@ export class DeepSeekWebClient {
 	}
 
 	/**
+	 * Deletes a chat session on the server (the webapp's
+	 * `/api/v0/chat_session/delete`, verified live). Returns true when the
+	 * server confirmed the deletion (`code` and `biz_code` are 0).
+	 */
+	async deleteChatSession(sessionId: string): Promise<boolean> {
+		const response = await this._postJson('/chat_session/delete', { chat_session_id: sessionId });
+		const body = await response.json() as { code?: unknown; data?: { biz_code?: unknown } };
+		return body?.code === 0 && (body?.data?.biz_code === undefined || body?.data?.biz_code === 0);
+	}
+
+	/**
 	 * Streams a chat completion. Yields text chunks until the server signals
 	 * `FINISHED`; throws on error envelopes or non-OK responses.
 	 */

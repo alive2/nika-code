@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as vscode from 'vscode';
 import { BYOKKnownModels, BYOKModelCapabilities, resolveModelInfo, resolveModelTokenLimits } from '../common/byokProvider';
 import { NIKA_DEEPSEEK_WEB_MODEL_PREFIX, NIKA_PROVIDER_NAME } from './nikaModels';
 import { DeepSeekWebClient } from '../node/deepSeekWebClient';
@@ -134,6 +135,18 @@ getKnownModels(): BYOKKnownModels {
 		const trimmed = text.trim();
 		if (!trimmed) {
 			throw new Error('DeepSeek Web vision returned no description.');
+		}
+		// Privacy by default: once the description is in hand, remove the web
+		// chat session from chat.deepseek.com so image conversations do not
+		// linger in the account's chat history.
+		const deleteSessions = vscode.workspace.getConfiguration('nika').get<boolean>('deepseekWeb.deleteSessionsAfterVision', true);
+		if (deleteSessions) {
+			try {
+				await client.deleteChatSession(sessionId);
+			} catch {
+				// Best-effort cleanup; the idle-TTL cache sweep handles leftovers.
+			}
+			this._sessions.delete('__vision__');
 		}
 		return trimmed;
 	}

@@ -149,6 +149,35 @@ describe('DeepSeekWebClient', () => {
 		await expect(client.createChatSession()).rejects.toThrow('Invalid or expired DeepSeek web authentication token');
 	});
 
+	it('deletes a chat session when the server confirms it', async () => {
+		let capturedInit: RequestInit | undefined;
+		const fetcher = fakeFetcher([
+			['/chat_session/delete', (init) => {
+				capturedInit = init;
+				return fakeResponse(200, { code: 0, msg: '', data: { biz_code: 0, biz_msg: '', biz_data: null } });
+			}],
+		]);
+		const client = new DeepSeekWebClient('token', fetcher);
+		await expect(client.deleteChatSession('session-1')).resolves.toBe(true);
+		expect(JSON.parse(capturedInit!.body as string)).toEqual({ chat_session_id: 'session-1' });
+	});
+
+	it('reports failure when the server rejects the deletion', async () => {
+		const fetcher = fakeFetcher([
+			['/chat_session/delete', () => fakeResponse(200, { code: 1, data: { biz_code: 1, biz_msg: 'not found' } })],
+		]);
+		const client = new DeepSeekWebClient('token', fetcher);
+		await expect(client.deleteChatSession('session-1')).resolves.toBe(false);
+	});
+
+	it('throws on HTTP errors while deleting a session', async () => {
+		const fetcher = fakeFetcher([
+			['/chat_session/delete', () => fakeResponse(500, {})],
+		]);
+		const client = new DeepSeekWebClient('token', fetcher);
+		await expect(client.deleteChatSession('session-1')).rejects.toThrow('HTTP 500');
+	});
+
 	it('streams content, handles continuations, and stops on FINISHED', async () => {
 		const fetcher = fakeFetcher([
 			['/chat/create_pow_challenge', () => fakeResponse(200, FAKE_CHALLENGE)],
