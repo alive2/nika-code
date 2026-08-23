@@ -8,9 +8,10 @@ import { IVSCodeExtensionContext } from '../../../platform/extContext/common/ext
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
-import { NIKA_CURSOR_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, getNikaModelProvider } from './nikaModels';
+import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, getNikaModelProvider } from './nikaModels';
 import { CURSOR_BASE_URL } from './nikaCursorProvider';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
+import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
 
 const NIKA_VISION_REPLAY_MIME = 'application/vnd.nika.vision-replay+json';
 
@@ -40,6 +41,7 @@ export class NikaAttachmentProcessor {
 
 	constructor(
 		private readonly _settingsEditor: NikaSettingsEditor,
+		private readonly _deepSeekWebProvider: NikaDeepSeekWebProvider,
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 	) { }
@@ -245,6 +247,13 @@ export class NikaAttachmentProcessor {
 					const key = await this._context.secrets.get(NIKA_CURSOR_SECRET);
 					if (!key) { throw new Error(vscode.l10n.t('Configure a Cursor key for the selected vision backend.')); }
 					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, `${CURSOR_BASE_URL}/v1/chat/completions`, 'nika-cursor-vision', 'Cursor', token);
+				}
+				case 'deepseekweb': {
+					// Images are uploaded to chat.deepseek.com and analyzed by the
+					// web vision model natively (no OpenAI-compatible surface).
+					const key = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
+					if (!key) { throw new Error(vscode.l10n.t('Configure a DeepSeek web token for the selected vision backend.')); }
+					return this._deepSeekWebProvider.describeImage(data, mimeType, prompt, key);
 				}
 				case 'deepseek':
 					break; // text-only models cannot describe images

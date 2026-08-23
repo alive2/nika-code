@@ -6,6 +6,7 @@
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, DisposableMap, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
+import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IAgentNetworkFilterService } from '../../../../../platform/networkFilter/common/networkFilterService.js';
 import { IPlaywrightService } from '../../../../../platform/browserView/common/playwrightService.js';
@@ -30,11 +31,28 @@ import { ScreenshotBrowserTool, ScreenshotBrowserToolData } from './screenshotBr
 import { TypeBrowserTool, TypeBrowserToolData } from './typeBrowserTool.js';
 
 
+/**
+ * Arguments for `workbench.action.browser.evaluateJavascript`. The command
+ * runs {@link expression} (as a Playwright `page.evaluate` body) against the
+ * first integrated-browser tab whose URL contains {@link urlPrefix}.
+ */
+interface IBrowserEvaluateJavascriptArgs {
+	readonly urlPrefix?: string;
+	readonly expression?: string;
+}
+
+interface IBrowserEvaluateJavascriptResult {
+	/** True when a tab with a matching URL was found and evaluated. */
+	readonly matched: boolean;
+	/** The JSON-serializable value returned by the evaluated expression. */
+	readonly value?: unknown;
+	readonly error?: string;
+}
+
 class BrowserChatAgentToolsContribution extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'browserView.chatAgentTools';
 	private static readonly CONTEXT_ID = 'browserView.trackedPages';
-
 	private readonly _toolsStore = this._register(new DisposableStore());
 	private readonly _modelListeners = this._register(new DisposableMap<string, DisposableStore>());
 	private readonly _browserToolSet: ToolSet;
@@ -74,6 +92,74 @@ class BrowserChatAgentToolsContribution extends Disposable implements IWorkbench
 				void this.playwrightService.disposeSession(resource.toString()).catch(() => { });
 			}
 		}));
+
+		// Internal command used by extensions (e.g. the Nika DeepSeek Web
+		// token import) to evaluate JavaScript in a user's integrated-browser
+		// tab. Only pages the user has open in the workbench are targeted, so
+		// the page's own persistent session (cookies/localStorage) is used.
+		this._register(CommandsRegistry.registerCommand({
+			id: 'workbench.action.browser.evaluateJavascript',
+			handler: (_accessor, args?: IBrowserEvaluateJavascriptArgs) => this._evaluateJavascript(args),
+		}));
+	}
+
+	private async _evaluateJavascript(args?: IBrowserEvaluateJavascriptArgs): Promise<IBrowserEvaluateJavascriptResult> {
+		const urlPrefix = args?.urlPrefix ?? '';
+		const expression = args?.expression ?? '';
+		const sessionId = 'workbench-browser-evaluate';
+		const playwrightService = this.playwrightService;
+
+		// Fast path: pages already tracked by a Playwright session.
+		const matchUrl = `async (page, [prefix]) => (page.url() || '').includes(prefix)`;
+		let pageId: string | undefined;
+		for (const trackedId of await playwrightService.getTrackedPages()) {
+			try {
+				if (await playwrightService.invokeFunctionRaw<boolean>(sessionId, trackedId, matchUrl, urlPrefix)) {
+					pageId = trackedId;
+					break;
+				}
+			} catch {
+				// Not reachable from this session; try the next page.
+			}
+		}
+
+		// Fall back to the user's workbench browser tabs: track the first tab
+		// whose URL matches so our session can drive it (it keeps its own
+		// persistent session, so cookies/localStorage are the user's).
+		if (!pageId) {
+			for (const [viewId, input] of this.browserViewService.getKnownBrowserViews()) {
+				if ((input.url ?? '').includes(urlPrefix)) {
+					try {
+						if (!(await playwrightService.isPageTracked(viewId))) {
+							await playwrightService.startTrackingPage(viewId);
+						}
+						pageId = viewId;
+						break;
+					} catch {
+						// Try the next matching tab.
+					}
+				}
+			}
+		}
+
+		if (!pageId) {
+			return {
+				matched: false,
+				error: `No integrated browser page is open at "${urlPrefix}". Open the page in the integrated browser first.`,
+			};
+		}
+
+		try {
+			const value = await playwrightService.invokeFunctionRaw<unknown>(
+				sessionId,
+				pageId,
+				`async (page, [expr]) => page.evaluate(expr)`,
+				expression,
+			);
+			return { matched: true, value };
+		} catch (error) {
+			return { matched: true, error: error instanceof Error ? error.message : String(error) };
+		}
 	}
 
 	private _updateToolRegistrations(): void {

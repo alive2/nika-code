@@ -81,8 +81,8 @@ describe('DeepSeekWebEndpoint', () => {
 
 	afterEach(() => disposables.clear());
 
-	function createEndpoint(client: DeepSeekWebClient, cache: DeepSeekWebSessionCache, sessionKey = 'chat-key'): DeepSeekWebEndpoint {
-		return instantiationService.createInstance(DeepSeekWebEndpoint, metadata(), client, cache, sessionKey);
+	function createEndpoint(client: DeepSeekWebClient, cache: DeepSeekWebSessionCache, sessionKey = 'chat-key', modelId = 'deepseekweb/deepseek-chat'): DeepSeekWebEndpoint {
+		return instantiationService.createInstance(DeepSeekWebEndpoint, metadata(modelId), client, cache, sessionKey);
 	}
 
 	it('flattens roles and text into a transcript', async () => {
@@ -139,10 +139,35 @@ describe('DeepSeekWebEndpoint', () => {
 		const streamOptions = client.streamCompletion.mock.calls[0][0] as DeepSeekWebCompletionOptions;
 		expect(streamOptions.chatSessionId).toBe('session-1');
 		expect(streamOptions.thinkingEnabled).toBe(true);
+		// Instant (default) mode.
+		expect(streamOptions.modelType).toBe('default');
 		// Finished callback receives cumulative text with deltas.
 		expect(finishedCb).toHaveBeenCalledTimes(2);
 		expect(finishedCb.mock.calls[0][0]).toBe('a');
 		expect(finishedCb.mock.calls[1][0]).toBe('ab');
+	});
+
+	it('maps expert and vision models to their web model types', async () => {
+		const chat = stubClient();
+		await createEndpoint(chat, sessionCache()).makeChatRequest2(requestOptions(), CancellationToken.None);
+		expect((chat.streamCompletion.mock.calls[0][0] as DeepSeekWebCompletionOptions).modelType).toBe('default');
+
+		const expertClient = stubClient();
+		await createEndpoint(expertClient, sessionCache(), 'chat-key', 'deepseekweb/deepseek-expert').makeChatRequest2(requestOptions(), CancellationToken.None);
+		expect((expertClient.streamCompletion.mock.calls[0][0] as DeepSeekWebCompletionOptions).modelType).toBe('expert');
+
+		const visionClient = stubClient();
+		await createEndpoint(visionClient, sessionCache(), 'chat-key', 'deepseekweb/deepseek-vision').makeChatRequest2(requestOptions(), CancellationToken.None);
+		expect((visionClient.streamCompletion.mock.calls[0][0] as DeepSeekWebCompletionOptions).modelType).toBe('vision');
+	});
+
+	it('rejects image parts in expert mode', async () => {
+		const endpoint = createEndpoint(stubClient(), sessionCache(), 'chat-key', 'deepseekweb/deepseek-expert');
+		await expect((endpoint as unknown as { _buildPrompt(messages: Raw.ChatMessage[]): Promise<{ prompt: string; refFileIds: string[] }> })._buildPrompt([
+			{ role: Raw.ChatRole.User, content: [
+				{ type: ChatCompletionContentPartKind.Image, imageUrl: { url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==' } },
+			] },
+		])).rejects.toThrow('DeepSeek Web Expert mode does not accept images; use the Chat or Vision model instead.');
 	});
 
 	it('disables thinking when reasoning effort is none', async () => {

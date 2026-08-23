@@ -148,6 +148,14 @@ export function parseDeepSeekWebChunk(line: string, lastPath: string | undefined
 	return undefined;
 }
 
+/**
+ * The webapp's model modes, mirrored from its feature-store config: `default`
+ * is the "Instant" radio, `expert` the "Expert" radio, and `vision` the
+ * "Vision" radio (image understanding). DeepThink is the separate
+ * `thinking_enabled` toggle, not a model type.
+ */
+export type DeepSeekWebModelType = 'default' | 'expert' | 'vision';
+
 /** Options for a single chat completion call. */
 export interface DeepSeekWebCompletionOptions {
 	readonly chatSessionId: string;
@@ -156,8 +164,11 @@ export interface DeepSeekWebCompletionOptions {
 	readonly thinkingEnabled?: boolean;
 	readonly searchEnabled?: boolean;
 	readonly refFileIds?: readonly string[];
-	/** Forces `model_type: 'vision'` (required for image completions). */
-	readonly modelType?: string;
+	/**
+	 * The webapp model mode. When omitted, image completions force `'vision'`
+	 * (required for ref files) and text completions default to `'default'`.
+	 */
+	readonly modelType?: DeepSeekWebModelType;
 }
 
 /**
@@ -284,8 +295,9 @@ export class DeepSeekWebClient {
 		const powResponse = await this._solvePow();
 		const hifLeim = await this.getHifLeim();
 		// Vision requires the explicit 'vision' model type in the JSON body
-		// (reverse-engineered from the webapp's "Send to Vision." flow).
-		const modelType = options.modelType ?? ((options.refFileIds?.length ?? 0) > 0 ? 'vision' : undefined);
+		// (reverse-engineered from the webapp's "Send to Vision." flow); the
+		// webapp's default mode sends 'default' rather than null.
+		const modelType = options.modelType ?? ((options.refFileIds?.length ?? 0) > 0 ? 'vision' : 'default');
 		const response = await this._fetcherService.fetch(`${DEEP_SEEK_WEB_BASE_URL}/chat/completion`, {
 			method: 'POST',
 			headers: this._headers(powResponse, hifLeim),

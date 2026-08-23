@@ -8,6 +8,7 @@ import { NIKA_DEEPSEEK_WEB_MODEL_PREFIX, NIKA_PROVIDER_NAME } from './nikaModels
 import { DeepSeekWebClient } from '../node/deepSeekWebClient';
 import { DeepSeekWebEndpoint } from '../node/deepSeekWebEndpoint';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
+import { CancellationToken } from '../../../util/vs/base/common/cancellation';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 
@@ -43,31 +44,48 @@ export class NikaDeepSeekWebProvider extends Disposable {
 		super();
 	}
 
-	/**
-	 * The single web chat model exposed through the Nika group:
-	 * `deepseekweb/deepseek-chat` (DeepSeek's web chat model with automatic
-	 * vision when images are attached).
-	 */
-	getKnownModels(): BYOKKnownModels {
-		const limits = resolveModelTokenLimits({
-			contextWindow: DEEP_SEEK_WEB_CONTEXT_WINDOW,
-			maxInputTokens: DEEP_SEEK_WEB_CONTEXT_WINDOW - DEEP_SEEK_WEB_MAX_OUTPUT_TOKENS,
-			maxOutputTokens: DEEP_SEEK_WEB_MAX_OUTPUT_TOKENS,
-		});
-		const capabilities: BYOKModelCapabilities = {
-			name: 'DeepSeek Chat (Web)',
-			contextWindow: limits.contextWindow,
-			maxInputTokens: limits.maxInputTokens,
-			maxOutputTokens: limits.maxOutputTokens,
-			// The web API has no tool-calling surface; agents fall back to
-			// text-only conversation with this model.
-			toolCalling: false,
+/**
+ * The web chat models exposed through the Nika group, mirroring the three
+ * radios on chat.deepseek.com: Instant (`model_type: default`), Expert
+ * (`model_type: expert`; no file uploads), and Vision (`model_type: vision`;
+ * image understanding). DeepThink is the thinking toggle, which Nika controls
+ * through the reasoning-effort setting instead of a model choice.
+ */
+getKnownModels(): BYOKKnownModels {
+	const limits = resolveModelTokenLimits({
+		contextWindow: DEEP_SEEK_WEB_CONTEXT_WINDOW,
+		maxInputTokens: DEEP_SEEK_WEB_CONTEXT_WINDOW - DEEP_SEEK_WEB_MAX_OUTPUT_TOKENS,
+		maxOutputTokens: DEEP_SEEK_WEB_MAX_OUTPUT_TOKENS,
+	});
+	const base: Omit<BYOKModelCapabilities, 'name' | 'vision'> = {
+		contextWindow: limits.contextWindow,
+		maxInputTokens: limits.maxInputTokens,
+		maxOutputTokens: limits.maxOutputTokens,
+		// The web API has no tool-calling surface; agents fall back to
+		// text-only conversation with this model.
+		toolCalling: false,
+		thinking: true,
+	};
+	return {
+		[NIKA_DEEPSEEK_WEB_MODEL_PREFIX + 'deepseek-chat']: {
+			...base,
+			name: 'DeepSeek Web (Instant)',
 			// Images are uploaded to DeepSeek's servers and analyzed natively.
 			vision: true,
-			thinking: true,
-		};
-		return { [NIKA_DEEPSEEK_WEB_MODEL_PREFIX + 'deepseek-chat']: capabilities };
-	}
+		},
+		[NIKA_DEEPSEEK_WEB_MODEL_PREFIX + 'deepseek-expert']: {
+			...base,
+			name: 'DeepSeek Web (Expert)',
+			// Expert mode accepts no file uploads on the webapp.
+			vision: false,
+		},
+		[NIKA_DEEPSEEK_WEB_MODEL_PREFIX + 'deepseek-vision']: {
+			...base,
+			name: 'DeepSeek Web (Vision)',
+			vision: true,
+		},
+	};
+}
 
 	/**
 	 * Builds a chat endpoint for a web model id. The token is required (the
@@ -89,6 +107,37 @@ export class NikaDeepSeekWebProvider extends Disposable {
 		this._clients.clear();
 		this._sessions.clear();
 	}
+
+	/**
+	 * Describes an image through the web vision model, used when a DeepSeek
+	 * Web model is picked as the Nika image-description backend (the
+	 * `nika.visionModel` setting). Uploads the image, streams one vision
+	 * completion, and returns the trimmed answer.
+	 */
+	async describeImage(data: Uint8Array, mimeType: string, prompt: string, token: string): Promise<string> {
+		const client = this._clientFor(token);
+		const extension = mimeType.includes('jpeg') ? 'jpg' : mimeType.includes('webp') ? 'webp' : mimeType.includes('gif') ? 'gif' : 'png';
+		const fileId = await client.uploadFile(data, `vision-${Date.now()}.${extension}`, mimeType);
+		// Descriptions share one web chat session so repeated image asks do not
+		// create a new DeepSeek conversation every time.
+		const sessionId = await this._getOrCreateSession(client, '__vision__');
+		let text = '';
+		for await (const chunk of client.streamCompletion({
+			chatSessionId: sessionId,
+			prompt,
+			thinkingEnabled: true,
+			refFileIds: [fileId],
+			modelType: 'vision',
+		}, CancellationToken.None)) {
+			text += chunk;
+		}
+		const trimmed = text.trim();
+		if (!trimmed) {
+			throw new Error('DeepSeek Web vision returned no description.');
+		}
+		return trimmed;
+	}
+
 
 	private _clientFor(token: string): DeepSeekWebClient {
 		let client = this._clients.get(token);

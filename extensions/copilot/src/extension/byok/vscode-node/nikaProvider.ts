@@ -117,7 +117,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._deepSeekWebProvider = this._register(this._instantiationService.createInstance(NikaDeepSeekWebProvider));
 		this.usageTracker = this._register(this._instantiationService.createInstance(NikaUsageTracker));
 		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider, this._llamaCppProvider, this._geminiCatalogProvider, this._cursorProvider, this._deepSeekWebProvider));
-		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor);
+		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor, this._deepSeekWebProvider);
 		this._register(this._instantiationService.createInstance(NikaIndexingStatus, this.settingsEditor));
 		this._register(this._instantiationService.createInstance(NikaUsageStatus, this.settingsEditor, this.usageTracker));
 
@@ -288,7 +288,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 						// natively; no vision-backend preprocessing is needed.
 						capabilities: {
 							...base.capabilities,
-							imageInput: true,
+							imageInput: capabilities.vision ?? false,
 						},
 						isBYOK: true,
 						isDefault: id === defaultModel,

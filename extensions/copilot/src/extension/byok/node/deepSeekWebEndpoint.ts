@@ -18,7 +18,7 @@ import { IChatWebSocketManager } from '../../../platform/networking/node/chatWeb
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
 import { ITokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
-import { DeepSeekWebClient } from './deepSeekWebClient';
+import { DeepSeekWebClient, DeepSeekWebModelType } from './deepSeekWebClient';
 
 /**
  * Resolves (creating on first use) the web chat session id for a Nika chat
@@ -51,6 +51,8 @@ function imageDataUrl(part: Raw.ChatCompletionContentPart): string | undefined {
  * stream. `makeChatRequest2` implements that flow end-to-end.
  */
 export class DeepSeekWebEndpoint extends ChatEndpoint {
+	private readonly _modelId: string;
+
 	constructor(
 		modelMetadata: IChatModelInformation,
 		private readonly _client: DeepSeekWebClient,
@@ -76,6 +78,23 @@ export class DeepSeekWebEndpoint extends ChatEndpoint {
 			chatWebSocketService,
 			logService,
 		);
+		this._modelId = modelMetadata.id;
+	}
+
+	/**
+	 * The webapp model mode for this endpoint, derived from the model id:
+	 * `deepseek-chat` is the "Instant" radio, `deepseek-expert` the "Expert"
+	 * radio, `deepseek-vision` the "Vision" radio.
+	 */
+	private _webModelType(): DeepSeekWebModelType {
+		const id = this._modelId;
+		if (id.endsWith('deepseek-expert')) {
+			return 'expert';
+		}
+		if (id.endsWith('deepseek-vision')) {
+			return 'vision';
+		}
+		return 'default';
 	}
 
 	/**
@@ -86,6 +105,7 @@ export class DeepSeekWebEndpoint extends ChatEndpoint {
 		const parts: string[] = [];
 		const refFileIds: string[] = [];
 		let imageIndex = 0;
+		const modelType = this._webModelType();
 		for (const message of messages) {
 			const role = message.role === Raw.ChatRole.System ? 'System'
 				: message.role === Raw.ChatRole.Assistant ? 'Assistant'
@@ -96,6 +116,10 @@ export class DeepSeekWebEndpoint extends ChatEndpoint {
 			for (const part of message.content) {
 				const dataUrl = imageDataUrl(part);
 				if (dataUrl) {
+					if (modelType === 'expert') {
+						// The webapp's Expert mode does not accept file uploads.
+						throw new Error('DeepSeek Web Expert mode does not accept images; use the Chat or Vision model instead.');
+					}
 					const commaIndex = dataUrl.indexOf(',');
 					const mime = commaIndex > 0 ? dataUrl.slice(5, dataUrl.indexOf(';')) : 'image/png';
 					const bytes = Buffer.from(dataUrl.slice(commaIndex + 1), 'base64');
@@ -137,6 +161,7 @@ export class DeepSeekWebEndpoint extends ChatEndpoint {
 				prompt,
 				thinkingEnabled,
 				refFileIds,
+				modelType: this._webModelType(),
 			}, token)) {
 				fullText += chunk;
 				if (finishedCb) {

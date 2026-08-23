@@ -194,8 +194,25 @@ describe('DeepSeekWebClient', () => {
 		expect(body.prompt).toBe('hi');
 		expect(body.thinking_enabled).toBe(false);
 		expect(body.ref_file_ids).toEqual([]);
-		// No images: model_type stays null.
-		expect(body.model_type).toBeNull();
+		// No images: the webapp's default mode is `default` (Instant).
+		expect(body.model_type).toBe('default');
+	});
+
+	it('passes an explicit model type through (expert / vision)', async () => {
+		const bodies: string[] = [];
+		const fetcher = fakeFetcher([
+			['/chat/create_pow_challenge', () => fakeResponse(200, FAKE_CHALLENGE)],
+			['hif-leim', () => fakeResponse(200, { data: { biz_data: { value: 'leim-value' } } })],
+			['/chat/completion', (init) => {
+				bodies.push(init.body as string);
+				return fakeResponse(200, {}, 'data: {"p":"response/status","o":"SET","v":"FINISHED"}\n');
+			}],
+		]);
+		const client = new DeepSeekWebClient('token', fetcher);
+		for await (const _ of client.streamCompletion({ chatSessionId: 's', prompt: 'a', modelType: 'expert' }, CancellationToken.None)) { /* drain */ }
+		for await (const _ of client.streamCompletion({ chatSessionId: 's', prompt: 'b', modelType: 'vision' }, CancellationToken.None)) { /* drain */ }
+		expect(JSON.parse(bodies[0]).model_type).toBe('expert');
+		expect(JSON.parse(bodies[1]).model_type).toBe('vision');
 	});
 
 	it('forces model_type vision when ref files are present', async () => {

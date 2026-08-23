@@ -32,6 +32,8 @@ const SETTINGS = new Set([
 	'logLevel', 'releaseCheckEnabled', 'safetyRules.enabled', 'github.enabled', 'indexing.scheme', 'usage.enabled',
 ]);
 
+const DEEP_SEEK_WEB_URL = 'https://chat.deepseek.com/';
+
 const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb', string> = {
 	deepseek: NIKA_DEEPSEEK_SECRET,
 	gemini: NIKA_GEMINI_SECRET,
@@ -110,6 +112,8 @@ export class NikaSettingsEditor extends Disposable {
 		this._register(vscode.commands.registerCommand('nika.checkForUpdates', () => this.checkForUpdates(true)));
 		this._register(vscode.commands.registerCommand('nika.openLogs', () => this._output.show(true)));
 		this._register(vscode.commands.registerCommand('nika.exportDiagnostics', () => this.exportDiagnostics()));
+		this._register(vscode.commands.registerCommand('nika.deepseekWeb.signIn', () => this._deepSeekWebSignIn()));
+		this._register(vscode.commands.registerCommand('nika.deepseekWeb.importToken', () => this._deepSeekWebImportToken()));
 		this._register(this._indexingSchemeManager.onDidChangeState(() => {
 			void this._render(this._activeSection);
 		}));
@@ -796,21 +800,27 @@ export class NikaSettingsEditor extends Disposable {
 					}
 					break;
 				case 'saveSecret':
-					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor') && typeof message.value === 'string') {
+					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb') && typeof message.value === 'string') {
 						await this._saveSecret(message.provider, message.value);
 					}
 					break;
 				case 'removeSecret':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb') {
 						await this._context.secrets.delete(SECRET_KEYS[message.provider]);
 						this._connections.delete(message.provider);
 						void vscode.window.showInformationMessage(vscode.l10n.t('{0} key removed.', providerDisplayName(message.provider)));
 					}
 					break;
 				case 'testConnection':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb') {
 						await this.testConnection(message.provider);
 					}
+					break;
+				case 'deepSeekWebSignIn':
+					await this._deepSeekWebSignIn();
+					break;
+				case 'deepSeekWebImportToken':
+					await this._deepSeekWebImportToken();
 					break;
 				case 'saveProviderConfig':
 					if (typeof message.provider === 'string' && Array.isArray(message.models)) {
@@ -1025,6 +1035,53 @@ export class NikaSettingsEditor extends Disposable {
 	}
 
 	/**
+	 * Opens chat.deepseek.com in the integrated browser (falling back to the
+	 * system browser) so the user can sign in and get a fresh `userToken`.
+	 */
+	private async _deepSeekWebSignIn(): Promise<void> {
+		try {
+			await vscode.commands.executeCommand('workbench.action.browser.open', {
+				url: DEEP_SEEK_WEB_URL,
+				reuseUrlFilter: 'https://chat.deepseek.com/**',
+			});
+			void vscode.window.showInformationMessage(vscode.l10n.t('DeepSeek opened in the integrated browser. Log in, then run “Nika: DeepSeek Web — Import Token”.'));
+		} catch {
+			await vscode.env.openExternal(vscode.Uri.parse(DEEP_SEEK_WEB_URL));
+			void vscode.window.showInformationMessage(vscode.l10n.t('DeepSeek opened in your browser. Log in, then run “Nika: DeepSeek Web — Import Token”.'));
+		}
+	}
+
+	/**
+	 * Reads `localStorage.userToken` from the user's chat.deepseek.com tab in
+	 * the integrated browser and stores it as the DeepSeek Web secret. The
+	 * token is the webapp's auth value (`{ value, __version }` in storage);
+	 * no part of it is logged or shown beyond a masked preview.
+	 */
+	private async _deepSeekWebImportToken(): Promise<void> {
+		const result = await vscode.commands.executeCommand<{ matched: boolean; value?: unknown; error?: string }>(
+			'workbench.action.browser.evaluateJavascript',
+			{
+				urlPrefix: 'chat.deepseek.com',
+				expression: `(() => { const raw = localStorage.getItem('userToken'); if (!raw) { return null; } try { return JSON.parse(raw)?.value ?? raw; } catch { return raw; } })()`,
+			},
+		);
+		if (!result?.matched) {
+			throw new Error(vscode.l10n.t('No chat.deepseek.com tab is open in the integrated browser. Run “Nika: DeepSeek Web — Sign In” first.'));
+		}
+		if (result.error) {
+			throw new Error(vscode.l10n.t('Could not read the DeepSeek token from the browser page: {0}', result.error));
+		}
+		const token = typeof result.value === 'string' && result.value.length > 0 ? result.value : undefined;
+		if (!token) {
+			throw new Error(vscode.l10n.t('No userToken was found on the page. Sign in at chat.deepseek.com in the integrated browser and try again.'));
+		}
+		await this._context.secrets.store(NIKA_DEEPSEEK_WEB_SECRET, token);
+		this._deepSeekWebProvider.invalidateCache();
+		this._connections.delete('deepseekweb');
+		void vscode.window.showInformationMessage(vscode.l10n.t('DeepSeek Web token imported ({0}…{1}).', token.slice(0, 6), token.slice(-4)));
+	}
+
+	/**
 	 * Removes a provider from the managed `nika.providers` config. Its models
 	 * stop appearing in chat, Agents, and the dropdowns immediately. The API
 	 * key (if any) is kept in Secret Storage so re-adding the provider does
@@ -1046,8 +1103,7 @@ export class NikaSettingsEditor extends Disposable {
 		let result: ConnectionResult;
 		try {
 			let response: { ok: boolean; status: number } | undefined;
-			if (provider === 'deepseekweb') {
-				const token = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
+			if (provider === 'deepseekweb') {				const token = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
 				if (!token) { throw new Error(vscode.l10n.t('No DeepSeek web token is configured.')); }
 				// A chat-session round trip proves the token and the PoW path
 				// work end to end. The orphan session is harmless.
@@ -1323,7 +1379,10 @@ function wizardStepHtml(){
       html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp host')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server (default http://localhost:8080).')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" value="'+esc(state.llamaCppBaseUrl||'http://localhost:8080')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
       html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Leave empty for no authentication.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste your API key')+'"></div></div>';
     }else{
-      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':(w.provider==='deepseekweb'?'Sign in at chat.deepseek.com, open the browser console, and copy the userToken value from localStorage. Stored securely; never read back into this page.':'Stored securely in Secret Storage; never read back into this page.'))+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc('Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':(w.provider==='deepseekweb'?'Sign in at chat.deepseek.com in the integrated browser, then use Import token to fetch your userToken automatically. Stored securely; never read back into this page.':'Stored securely in Secret Storage; never read back into this page.'))+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc('Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+      if(w.provider==='deepseekweb'){
+        html+='<div class="actions"><button class="action secondary" data-wizard-web-signin>'+esc('Sign in in browser')+'</button><button class="action secondary" data-wizard-web-import>'+esc('Import token from browser')+'</button></div>';
+      }
     }
     html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button></div>';
     return html;
@@ -1371,6 +1430,10 @@ document.addEventListener('click',e=>{
   }
   const test=e.target.closest('[data-wizard-test]');
   if(test){const w=wizardState();if(w){post({type:'testConnection',provider:w.provider});}return;}
+  const signin=e.target.closest('[data-wizard-web-signin]');
+  if(signin){post({type:'deepSeekWebSignIn'});return;}
+  const webimport=e.target.closest('[data-wizard-web-import]');
+  if(webimport){post({type:'deepSeekWebImportToken'});return;}
   const done=e.target.closest('[data-wizard-done]');
   if(done){const w=wizardState();if(!w)return;
     const boxes=document.querySelectorAll('[data-wizard-model]:checked');

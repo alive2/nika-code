@@ -9,8 +9,18 @@ import { NikaAttachmentProcessor } from '../nikaAttachments';
 
 vi.mock('vscode', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('vscode')>();
+	// These are type-only exports in the test shim, so the spread below cannot
+	// copy them — but `vscodeTypes.ts` re-exports them at module load, which
+	// would throw on the mock's proxy. Define them explicitly (value is
+	// `undefined`, but the property then exists).
+	const typeOnly = (key: string) => (actual as Record<string, unknown>)[key];
 	return {
 		...actual,
+		ChatHookType: typeOnly('ChatHookType'),
+		ChatRequest: typeOnly('ChatRequest'),
+		LanguageModelToolInformation: typeOnly('LanguageModelToolInformation'),
+		Extension: typeOnly('Extension'),
+		ChatMcpToolInvocationData: typeOnly('ChatMcpToolInvocationData'),
 		workspace: {
 			...actual.workspace,
 			getConfiguration: vi.fn(() => ({ get: (_key: string, fallback: unknown) => fallback })),
@@ -20,6 +30,11 @@ vi.mock('vscode', async (importOriginal) => {
 		},
 	};
 });
+
+/** Stub for the DeepSeek Web provider, which powers the `deepseekweb` vision backend. */
+function deepSeekWebProviderStub(describeImage = vi.fn()): ConstructorParameters<typeof NikaAttachmentProcessor>[1] {
+	return { describeImage } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[1];
+}
 
 describe('Nika attachment preprocessing', () => {
 	it('replays a cached image description without calling a vision backend', async () => {
@@ -32,8 +47,9 @@ describe('Nika attachment preprocessing', () => {
 		);
 		const processor = new NikaAttachmentProcessor(
 			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
-			{ secrets: { get: vi.fn() } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[1],
-			{ fetch: vi.fn(), makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn() } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: vi.fn(), makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
 		);
 		const tokenSource = new vscode.CancellationTokenSource();
 		const result = await processor.process([
@@ -50,8 +66,9 @@ describe('Nika attachment preprocessing', () => {
 		const log = vi.fn();
 		const processor = new NikaAttachmentProcessor(
 			{ log } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
-			{ secrets: { get: vi.fn() } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[1],
-			{ fetch: vi.fn(), makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn() } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: vi.fn(), makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
 		);
 		const result = await processor.process([
 			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(new Uint8Array([9]), 'image/png')]),
@@ -68,8 +85,9 @@ describe('Nika attachment preprocessing', () => {
 		const fetch = vi.fn();
 		const processor = new NikaAttachmentProcessor(
 			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
-			{ secrets } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[1],
-			{ fetch, makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			deepSeekWebProviderStub(),
+			{ secrets } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch, makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
 		);
 		const image = new Uint8Array([1, 2, 3]);
 		const result = await processor.process([
@@ -100,8 +118,9 @@ describe('Nika OpenRouter vision', () => {
 		} as never);
 		const processor = new NikaAttachmentProcessor(
 			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
-			{ secrets: { get: vi.fn().mockResolvedValue('sk-or-1') } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[1],
-			{ fetch: fetchMock, makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn().mockResolvedValue('sk-or-1') } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: fetchMock, makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
 		);
 		const image = new Uint8Array([1, 2, 3]);
 		const result = await processor.process([
@@ -130,12 +149,61 @@ describe('Nika OpenRouter vision', () => {
 		vi.mocked(vscode.window.showWarningMessage).mockImplementation(showWarningMessage);
 		const processor = new NikaAttachmentProcessor(
 			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
-			{ secrets: { get: vi.fn().mockResolvedValue('sk-or-1') } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[1],
-			{ fetch: vi.fn(), makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn().mockResolvedValue('sk-or-1') } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: vi.fn(), makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
 		);
 
 		const result = await processor.process([
 			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(new Uint8Array([9]), 'image/png')]),
+		], new vscode.CancellationTokenSource().token);
+
+		const text = result.messages[0].content[0] as vscode.LanguageModelTextPart;
+		expect(text.value).toContain('Image processing failed');
+		expect(showWarningMessage).toHaveBeenCalled();
+	});
+});
+
+describe('Nika DeepSeek Web vision', () => {
+	it('describes an image through the DeepSeek Web provider using the stored token', async () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => key === 'visionModel' ? 'nika/deepseekweb/deepseek-vision' : fallback,
+		} as never);
+		const describeImage = vi.fn().mockResolvedValue('A cat sitting on a keyboard.');
+		const secrets = { get: vi.fn().mockResolvedValue('web-token-1') };
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			deepSeekWebProviderStub(describeImage),
+			{ secrets } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: vi.fn(), makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
+		);
+
+		const image = new Uint8Array([7, 8, 9]);
+		const result = await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(image, 'image/png')]),
+		], new vscode.CancellationTokenSource().token);
+
+		const text = result.messages[0].content.find(part => part instanceof vscode.LanguageModelTextPart) as vscode.LanguageModelTextPart;
+		expect(text.value).toContain('A cat sitting on a keyboard.');
+		expect(secrets.get).toHaveBeenCalledWith('nika.deepseekWeb.token');
+		expect(describeImage).toHaveBeenCalledWith(image, 'image/png', expect.any(String), 'web-token-1');
+	});
+
+	it('fails loudly when no DeepSeek Web token is stored', async () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => key === 'visionModel' ? 'nika/deepseekweb/deepseek-vision' : fallback,
+		} as never);
+		const showWarningMessage = vi.fn();
+		vi.mocked(vscode.window.showWarningMessage).mockImplementation(showWarningMessage);
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn().mockResolvedValue(undefined) } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: vi.fn(), makeAbortController: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
+		);
+
+		const result = await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(new Uint8Array([3]), 'image/png')]),
 		], new vscode.CancellationTokenSource().token);
 
 		const text = result.messages[0].content[0] as vscode.LanguageModelTextPart;
