@@ -110,7 +110,10 @@ class BrowserChatAgentToolsContribution extends Disposable implements IWorkbench
 		const playwrightService = this.playwrightService;
 
 		// Fast path: pages already tracked by a Playwright session.
-		const matchUrl = `async (page, [prefix]) => (page.url() || '').includes(prefix)`;
+		// Note: `invokeFunctionRaw` delivers the args spread as individual
+		// parameters (the compiled wrapper is `(page, ...args)`), so fnDefs
+		// must not array-destructure their second parameter.
+		const matchUrl = `async (page, prefix) => (page.url() || '').includes(prefix)`;
 		let pageId: string | undefined;
 		for (const trackedId of await playwrightService.getTrackedPages()) {
 			try {
@@ -153,7 +156,7 @@ class BrowserChatAgentToolsContribution extends Disposable implements IWorkbench
 			const value = await playwrightService.invokeFunctionRaw<unknown>(
 				sessionId,
 				pageId,
-				`async (page, [expr]) => page.evaluate(expr)`,
+				`async (page, expr) => page.evaluate(expr)`,
 				expression,
 			);
 			return { matched: true, value };

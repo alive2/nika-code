@@ -17,6 +17,7 @@
 	"nika.config.visionOpenRouterModel": "The OpenRouter model id used for image descriptions when the vision backend is set to OpenRouter.",
 	"nika.config.ollamaBaseUrl": "The Ollama host used for Gemma 4 chat and vision.",
 	"nika.config.llamaCppBaseUrl": "The llama.cpp server base URL. Models are discovered from its OpenAI-compatible /v1/models endpoint and served through /v1/chat/completions. Leave empty to hide llama.cpp models.",
+	"nika.config.deepseekWeb.deleteSessionsAfterVision": "Delete the chat.deepseek.com chat session created for an image description after it completes successfully. When on, image descriptions never leave history entries on chat.deepseek.com.",
 	"nika.config.providers": "Provider model selections managed by the Providers wizard in Nika Settings. Each provider maps to the models that are enabled in chat, Agents, and model pickers. Managed automatically; edit with the Add Provider wizard.",
 	"nika.config.pdfMaxFileSizeMB": "The maximum PDF attachment size in megabytes. This limit does not change the global filesystem read limit.",
 	"nika.config.pdfMaxPages": "The maximum number of pages extracted when a prompt does not include an explicit page range.",

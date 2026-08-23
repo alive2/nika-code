@@ -3293,6 +3293,11 @@
             "default": "http://localhost:8080",
             "markdownDescription": "%nika.config.llamaCppBaseUrl%"
           },
+          "nika.deepseekWeb.deleteSessionsAfterVision": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%nika.config.deepseekWeb.deleteSessionsAfterVision%"
+          },
           "nika.providers": {
             "type": "object",
             "default": {},
