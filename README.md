@@ -1,5 +1,7 @@
 # NikaCode
 
+NikaCode is a fork of [Visual Studio Code - Open Source ("Code - OSS")](https://github.com/microsoft/vscode).
+
 <p align="center">
   <img alt="NikaCode" src="resources/nika/nika-icon.png" width="128">
 </p>

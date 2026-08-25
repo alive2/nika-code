@@ -62,6 +62,7 @@ export interface IAgentSessionsControlOptions {
 	readonly itemHeight?: number;
 	readonly sectionHeight?: number;
 
+	createNewChat(): void;
 	getHoverPosition(): HoverPosition;
 	trackActiveEditorSession(): boolean;
 	collapseOlderSections?(): boolean;
@@ -118,7 +119,6 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
-		@ICommandService private readonly commandService: ICommandService,
 		@IMenuService private readonly menuService: IMenuService,
 		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
@@ -600,7 +600,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 		this._register(list.onMouseDblClick(({ element }) => {
 			if (element === null) {
-				this.commandService.executeCommand(ACTION_ID_NEW_CHAT);
+				this.options.createNewChat();
 			}
 		}));
 

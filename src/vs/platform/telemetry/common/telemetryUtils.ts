@@ -155,6 +155,8 @@ export function getTelemetryLevel(configurationService: IConfigurationService): 
 			return TelemetryLevel.CRASH;
 		case TelemetryConfiguration.OFF:
 			return TelemetryLevel.NONE;
+		default:
+			return TelemetryLevel.NONE;
 	}
 }
 

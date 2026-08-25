@@ -22,6 +22,10 @@
 # Excluded from CONTENT scan only (path block below always applies)
 EXCLUDE_CONTENT='(^|/)(test|tests|__tests__|fixtures?)/|\.(spec|test)\.ts$|/testdata/'
 
+# Files that legitimately contain private-key / credential DETECTION patterns
+# (e.g. regexes for SSH key parsing) and would false-positive the content scan.
+EXCLUDE_CONTENT_SAFELIST='sshRemoteAgentHostService\.ts$|secretFilter\.spec\.ts$'
+
 blocked_paths() {
 	git diff --cached --name-only -z | tr '\0' '\n' | grep -E '(^|/)\.local/(webhooks|config|secrets|credentials)'
 }
@@ -45,6 +49,11 @@ git diff --cached --name-only -z | tr '\0' '\n' | while IFS= read -r file; do
 
 	# Skip known fake-secret test fixtures
 	if printf '%s' "$file" | grep -qE "$EXCLUDE_CONTENT"; then
+		continue
+	fi
+
+	# Skip files that legitimately contain credential DETECTION patterns
+	if printf '%s' "$file" | grep -qE "$EXCLUDE_CONTENT_SAFELIST"; then
 		continue
 	fi
 

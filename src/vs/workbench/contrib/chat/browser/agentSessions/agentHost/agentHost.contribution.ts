@@ -24,6 +24,8 @@ import { AgentHostCopilotCliSettingsContribution } from './agentHostCopilotCliSe
 import { AgentHostNikaGithubEnabledContribution } from './agentHostNikaGithubEnabledContribution.js';
 import { AgentHostOpenSessionLinkOpenerContribution } from './openSessionLinkOpener.contribution.js';
 import { AgentHostSessionListContribution } from './agentHostSessionListContribution.js';
+import { AgentHostSdkSetupNotificationContribution } from './agentHostSdkSetupNotification.js';
+import { AgentHostSignedOutModelsNotificationContribution } from './agentHostSignedOutModelsNotification.js';
 import { AgentHostTerminalContribution } from './agentHostTerminalContribution.js';
 import { CopilotConfigSlashSubmitHandlerContribution } from './copilotConfigSlashSubmitHandler.js';
 import './agentHostSettings.contribution.js';
@@ -37,5 +39,7 @@ registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTermin
 registerWorkbenchContribution2(AgentHostCopilotCliSettingsContribution.ID, AgentHostCopilotCliSettingsContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostAllowSignedOutWhenUsableContribution.ID, AgentHostAllowSignedOutWhenUsableContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostNikaGithubEnabledContribution.ID, AgentHostNikaGithubEnabledContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(AgentHostSignedOutModelsNotificationContribution.ID, AgentHostSignedOutModelsNotificationContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(AgentHostSdkSetupNotificationContribution.ID, AgentHostSdkSetupNotificationContribution, WorkbenchPhase.AfterRestored);
 
 registerSingleton(IAgentHostByokLmHandler, AgentHostByokLmHandler, InstantiationType.Delayed);

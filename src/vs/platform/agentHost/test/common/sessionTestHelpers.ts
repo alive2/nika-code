@@ -10,7 +10,8 @@ import { Event } from '../../../../base/common/event.js';
 import type { IDetailedDiffResult, IDiffComputeService, IDiffCountResult } from '../../common/diffComputeService.js';
 import type { IFileEditContent, IFileEditRecord, ILocalTurnRecord, IReviewedFileRecord, ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
 import type { IAgentHostCheckpointService } from '../../common/agentHostCheckpointService.js';
-import type { Message } from '../../common/state/sessionState.js';
+import type { IAgentHostGitStateService } from '../../common/agentHostGitStateService.js';
+import type { ISessionGitHubState, Message } from '../../common/state/sessionState.js';
 
 export class TestSessionDatabase implements ISessionDatabase {
 	private readonly _edits: (IFileEditRecord & IFileEditContent)[] = [];
@@ -80,6 +81,31 @@ export class TestSessionDatabase implements ISessionDatabase {
 	async setMetadata(key: string, value: string): Promise<void> {
 		this.setMetadataCalls.push({ key, value });
 		this._metadata.set(key, value);
+	}
+
+	async setMetadataValues(values: Readonly<Record<string, string>>): Promise<void> {
+		for (const [key, value] of Object.entries(values)) {
+			this.setMetadataCalls.push({ key, value });
+			this._metadata.set(key, value);
+		}
+	}
+
+	async setMetadataValuesIfAbsent(key: string, values: Readonly<Record<string, string>>, copies: Readonly<Record<string, string>> = {}): Promise<boolean> {
+		if (this._metadata.has(key)) {
+			return false;
+		}
+		for (const [targetKey, value] of Object.entries(values)) {
+			this.setMetadataCalls.push({ key: targetKey, value });
+			this._metadata.set(targetKey, value);
+		}
+		for (const [targetKey, sourceKey] of Object.entries(copies)) {
+			const value = this._metadata.get(sourceKey);
+			if (value !== undefined) {
+				this.setMetadataCalls.push({ key: targetKey, value });
+				this._metadata.set(targetKey, value);
+			}
+		}
+		return true;
 	}
 
 	async setChatDraft(chat: URI, draft: Message | undefined): Promise<void> {
@@ -284,6 +310,7 @@ export function createNoopGitService(): import('../../common/agentHostGitService
 		branchExists: async () => false,
 		hasUncommittedChanges: async () => false,
 		commitAll: async () => { },
+		mergeBranch: async () => '',
 		restore: async () => { },
 		hasUpstream: async () => false,
 		pull: async () => { },
@@ -339,6 +366,20 @@ export function createNoopChangesetService(): import('../../common/agentHostChan
 	};
 }
 
+export function createNoopGitStateService(): IAgentHostGitStateService {
+	return {
+		_serviceBrand: undefined,
+		onDidRefreshSessionGitState: Event.None,
+		onDidChangeSessionGitHubState: Event.None,
+		refreshSessionGitState: async (_sessionKey: string, _workingDirectory?: URI) => { },
+		resolveSessionBaseBranchName: async (_sessionKey: string) => undefined,
+		setSessionGitHubState: async (_sessionKey: string, _state: ISessionGitHubState) => { },
+		recordSessionMerge: async (_sessionKey: string, _commit: string) => { },
+		attachSessionGitHubPullRequest: async (_sessionKey: string, _workingDirectory?: URI) => { },
+		attachSessionGitHubReferences: async (_sessionKey: string, _text: string) => { },
+	};
+}
+
 function createReference<T>(object: T): IReference<T> {
 	return {
 		object,
@@ -359,7 +400,10 @@ export class RecordingCheckpointService implements IAgentHostCheckpointService {
 	async captureBaselineCheckpoint(sessionUri: URI, workingDirectories: readonly URI[] | undefined): Promise<void> {
 		this.baselineCalls.push({ session: sessionUri.toString(), workingDirectories: workingDirectories?.map(w => w.toString()) });
 	}
+	async captureTurnStartCheckpoint(): Promise<void> { }
 	async captureTurnCheckpoint(): Promise<void> { }
+	async discardTurnStartCheckpoint(): Promise<void> { }
+	async discardChatTurnStartCheckpoints(): Promise<void> { }
 	async getTurnCheckpointPair(): Promise<{ parent: string; current: string } | undefined> { return undefined; }
 	async getBaselineCheckpoint(): Promise<string | undefined> { return undefined; }
 	async deleteCheckpoints(): Promise<void> { }

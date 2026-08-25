@@ -4,20 +4,21 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { Event } from '../../../../base/common/event.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { runWithFakedTimers } from '../../../../base/test/common/timeTravelScheduler.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { IAgentHostGitService } from '../../common/agentHostGitService.js';
-import type { IAgentService } from '../../common/agentService.js';
-import { getSessionRelatedPullRequestUrls, hasSessionPullRequestForBranch, readSessionGitHubState, readSessionGitState, SESSION_META_GITHUB_KEY, withInitialSessionPullRequest, withMostRecentRelatedSessionPullRequest, withMostRecentSessionPullRequest, withSessionGitHubState, withSessionGitState, SessionStatus, type ISessionGitHubState, type ISessionGitState, type SessionSummary } from '../../common/state/sessionState.js';
-import { META_GIT_STATE, META_GITHUB_STATE } from '../../common/agentHostGitStateService.js';
+import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../../common/agentHostGitService.js';
+import { getSessionRelatedPullRequestUrls, hasSessionPullRequestForBranch, readSessionGitHubState, readSessionGitState, readSessionSourceControlState, SESSION_META_GITHUB_KEY, SessionSourceControlOutcome, withInitialSessionPullRequest, withMostRecentRelatedSessionPullRequest, withMostRecentSessionPullRequest, withSessionGitHubState, withSessionGitState, SessionStatus, type ISessionGitHubState, type ISessionGitState, type SessionSummary } from '../../common/state/sessionState.js';
+import { META_GIT_STATE, META_GITHUB_STATE, META_SOURCE_CONTROL_STATE } from '../../common/agentHostGitStateService.js';
 import { AgentHostGitStateService } from '../../node/agentHostGitStateService.js';
 import { createTestGitHubEndpointService } from './testGitHubEndpointService.js';
 import { AgentHostStateManager } from '../../node/agentHostStateManager.js';
 import type { CreatedPullRequest, IAgentHostOctoKitService } from '../../node/shared/agentHostOctoKitService.js';
 import { TestSessionDatabase, createNoopGitService, createSessionDataService } from '../common/sessionTestHelpers.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
+import type { IAgentHostAuthenticationService } from '../../node/agentHostAuthenticationService.js';
 
 const SESSION = 'mock:/session-1';
 const WORKING_DIRECTORY = 'file:///wd';
@@ -135,19 +136,21 @@ suite('AgentHostGitStateService', () => {
 		]);
 	});
 
-	function createHarness(options?: { octoKitService?: IAgentHostOctoKitService; agentService?: IAgentService; enterpriseUri?: string }) {
+	function createHarness(options?: { octoKitService?: IAgentHostOctoKitService; authenticationService?: IAgentHostAuthenticationService; enterpriseUri?: string }) {
 		const stateManager = disposables.add(new AgentHostStateManager(new NullLogService()));
 		const db = new TestSessionDatabase();
 		const sessionDataService = createSessionDataService(db);
 
 		const gitCalls: string[] = [];
+		const gitBaseBranches: Array<string | undefined> = [];
 		let gitResult: ISessionGitState | undefined;
 		let gitError: Error | undefined;
 		let headSha: string | undefined;
 		const gitService: IAgentHostGitService = {
 			...createNoopGitService(),
-			getSessionGitState: async (workingDirectory: URI) => {
+			getSessionGitState: async (workingDirectory: URI, baseBranchName?: string) => {
 				gitCalls.push(workingDirectory.toString());
+				gitBaseBranches.push(baseBranchName);
 				if (gitError) {
 					throw gitError;
 				}
@@ -172,13 +175,17 @@ suite('AgentHostGitStateService', () => {
 				return pullRequestsBySha.get(sha);
 			},
 		} as unknown as IAgentHostOctoKitService;
-		const agentService = { getAuthToken: () => 'token' } as unknown as IAgentService;
+		const authenticationService: IAgentHostAuthenticationService = {
+			_serviceBrand: undefined,
+			onDidChangeAuthToken: Event.None,
+			getAuthToken: () => 'token',
+		};
 
 		const service = disposables.add(new AgentHostGitStateService(
 			stateManager,
 			gitService,
 			options?.octoKitService ?? octoKitService,
-			options?.agentService ?? agentService,
+			options?.authenticationService ?? authenticationService,
 			createTestGitHubEndpointService(options?.enterpriseUri),
 			new NullLogService(),
 			sessionDataService,
@@ -186,13 +193,17 @@ suite('AgentHostGitStateService', () => {
 
 		const runEvents: string[] = [];
 		disposables.add(service.onDidRefreshSessionGitState(key => runEvents.push(key)));
+		const gitHubStateEvents: string[] = [];
+		disposables.add(service.onDidChangeSessionGitHubState(key => gitHubStateEvents.push(key)));
 
 		return {
 			stateManager,
 			db,
 			service,
 			gitCalls,
+			gitBaseBranches,
 			runEvents,
+			gitHubStateEvents,
 			pullRequestCalls,
 			pullRequestShaCalls,
 			setGitResult: (state: ISessionGitState | undefined) => { gitResult = state; },
@@ -204,7 +215,7 @@ suite('AgentHostGitStateService', () => {
 		};
 	}
 
-	function seedSession(stateManager: AgentHostStateManager, options?: { workingDirectory?: string; gitState?: ISessionGitState; gitHubState?: ISessionGitHubState; isolation?: 'folder' | 'worktree'; createdAt?: number }): void {
+	function seedSession(stateManager: AgentHostStateManager, options?: { workingDirectory?: string; project?: string; gitState?: ISessionGitState; gitHubState?: ISessionGitHubState; isolation?: 'folder' | 'worktree'; baseBranch?: string; createNewBranch?: boolean; createdAt?: number }): void {
 		const summary: SessionSummary = {
 			resource: SESSION,
 			provider: 'mock',
@@ -213,6 +224,7 @@ suite('AgentHostGitStateService', () => {
 			createdAt: new Date(options?.createdAt ?? 0).toISOString(),
 			modifiedAt: new Date(0).toISOString(),
 			workingDirectories: options?.workingDirectory ? [options.workingDirectory] : undefined,
+			project: options?.project ? { uri: options.project, displayName: 'Project' } : undefined,
 		};
 		// `restoreSession` materializes the session in `ready` lifecycle so the
 		// persistence path (which skips `creating` sessions) actually runs.
@@ -220,7 +232,11 @@ suite('AgentHostGitStateService', () => {
 		if (options?.isolation) {
 			stateManager.setSessionConfig(SESSION, {
 				schema: { type: 'object', properties: {} },
-				values: { [SessionConfigKey.Isolation]: options.isolation },
+				values: {
+					[SessionConfigKey.Isolation]: options.isolation,
+					...(options.baseBranch ? { [SessionConfigKey.Branch]: options.baseBranch } : {}),
+					...(options.createNewBranch !== undefined ? { [SessionConfigKey.WorktreeCreateNewBranch]: options.createNewBranch } : {}),
+				},
 			});
 		}
 		if (options?.gitState) {
@@ -230,6 +246,50 @@ suite('AgentHostGitStateService', () => {
 			stateManager.setSessionMeta(SESSION, withSessionGitHubState(stateManager.getSessionState(SESSION)?._meta, options.gitHubState));
 		}
 	}
+
+	test('preserves merge provenance when a later pull request becomes the latest outcome', async () => {
+		const h = createHarness();
+		seedSession(h.stateManager, { workingDirectory: WORKING_DIRECTORY });
+
+		await h.service.recordSessionMerge(SESSION, 'merge-commit');
+		const afterMerge = readSessionSourceControlState(h.stateManager.getSessionState(SESSION)?._meta);
+		const persistedAfterMerge = await h.db.getMetadata(META_SOURCE_CONTROL_STATE);
+
+		await h.service.setSessionGitHubState(SESSION, {
+			owner: 'microsoft',
+			repo: 'vscode',
+			pullRequestUrls: ['https://github.com/microsoft/vscode/pull/42'],
+			pullRequestBranchName: 'feature',
+		});
+		const afterPullRequest = readSessionSourceControlState(h.stateManager.getSessionState(SESSION)?._meta);
+		const persistedAfterPullRequest = await h.db.getMetadata(META_SOURCE_CONTROL_STATE);
+
+		assert.deepStrictEqual({
+			afterMerge,
+			persistedAfterMerge: persistedAfterMerge ? JSON.parse(persistedAfterMerge) : undefined,
+			afterPullRequest,
+			gitHubStateEvents: h.gitHubStateEvents,
+			persistedAfterPullRequest: persistedAfterPullRequest ? JSON.parse(persistedAfterPullRequest) : undefined,
+		}, {
+			afterMerge: {
+				merge: { commit: 'merge-commit' },
+				latestOutcome: SessionSourceControlOutcome.Merge,
+			},
+			persistedAfterMerge: {
+				merge: { commit: 'merge-commit' },
+				latestOutcome: SessionSourceControlOutcome.Merge,
+			},
+			afterPullRequest: {
+				merge: { commit: 'merge-commit' },
+				latestOutcome: SessionSourceControlOutcome.PullRequest,
+			},
+			gitHubStateEvents: [SESSION],
+			persistedAfterPullRequest: {
+				merge: { commit: 'merge-commit' },
+				latestOutcome: SessionSourceControlOutcome.PullRequest,
+			},
+		});
+	});
 
 	test('does nothing when no working directory can be resolved', async () => {
 		const h = createHarness();
@@ -245,6 +305,53 @@ suite('AgentHostGitStateService', () => {
 			runEvents: []
 		});
 	});
+
+	test('uses the selected worktree base branch when refreshing git state', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const h = createHarness();
+		seedSession(h.stateManager, {
+			workingDirectory: WORKING_DIRECTORY,
+			isolation: 'worktree',
+			baseBranch: 'release',
+		});
+		h.setGitResult({ branchName: 'agents/session', baseBranchName: 'release' });
+
+		await h.service.refreshSessionGitState(SESSION, undefined);
+
+		assert.deepStrictEqual(h.gitBaseBranches, ['release']);
+	}));
+
+	test('uses the persisted base branch when the selected branch is checked out directly', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const h = createHarness();
+		seedSession(h.stateManager, {
+			workingDirectory: WORKING_DIRECTORY,
+			project: 'file:///repo',
+			isolation: 'worktree',
+			baseBranch: 'feature/pr',
+			createNewBranch: false,
+		});
+		await h.db.setMetadata(META_DIFF_BASE_BRANCH, 'origin/main');
+		h.setGitResult({ branchName: 'feature/pr', baseBranchName: 'main' });
+
+		await h.service.refreshSessionGitState(SESSION, undefined);
+
+		assert.deepStrictEqual(h.gitBaseBranches, ['main']);
+	}));
+
+	test('uses the persisted worktree base branch for an adopted linked worktree', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const h = createHarness();
+		seedSession(h.stateManager, {
+			workingDirectory: WORKING_DIRECTORY,
+			project: 'file:///repo',
+			isolation: 'folder',
+			gitState: { branchName: 'agents/session', baseBranchName: 'main' },
+		});
+		await h.db.setMetadata(META_DIFF_BASE_BRANCH, 'origin/release');
+		h.setGitResult({ branchName: 'agents/session', baseBranchName: 'release' });
+
+		await h.service.refreshSessionGitState(SESSION, undefined);
+
+		assert.deepStrictEqual(h.gitBaseBranches, ['release']);
+	}));
 
 	test('refreshes git state in memory while a session is creating', async () => {
 		await runWithFakedTimers({ useFakeTimers: true }, async () => {
@@ -314,6 +421,30 @@ suite('AgentHostGitStateService', () => {
 		});
 	});
 
+	test('unchanged git state backfills missing GitHub state', async () => {
+		await runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const gitState: ISessionGitState = {
+				branchName: 'feature',
+				githubOwner: 'microsoft',
+				githubRepo: 'vscode',
+			};
+			const h = createHarness();
+			seedSession(h.stateManager, { workingDirectory: WORKING_DIRECTORY, gitState });
+			h.setGitResult(gitState);
+
+			await h.service.refreshSessionGitState(SESSION, undefined);
+
+			const persistedGitHubState = await h.db.getMetadata(META_GITHUB_STATE);
+			assert.deepStrictEqual({
+				github: readSessionGitHubState(h.stateManager.getSessionState(SESSION)?._meta),
+				persistedGitHub: persistedGitHubState ? JSON.parse(persistedGitHubState) : undefined,
+			}, {
+				github: { owner: 'microsoft', repo: 'vscode' },
+				persistedGitHub: { owner: 'microsoft', repo: 'vscode' },
+			});
+		});
+	});
+
 	test('changed git state updates the session meta and fires the run-refresh event', async () => {
 		await runWithFakedTimers({ useFakeTimers: true }, async () => {
 			const h = createHarness();
@@ -361,8 +492,12 @@ suite('AgentHostGitStateService', () => {
 					return { url: 'https://github.com/microsoft/vscode/pull/1', number: 1 };
 				},
 			} as unknown as IAgentHostOctoKitService;
-			const agentService = { getAuthToken: () => 'token' } as unknown as IAgentService;
-			const h = createHarness({ octoKitService, agentService });
+			const authenticationService: IAgentHostAuthenticationService = {
+				_serviceBrand: undefined,
+				onDidChangeAuthToken: Event.None,
+				getAuthToken: () => 'token',
+			};
+			const h = createHarness({ octoKitService, authenticationService });
 			seedSession(h.stateManager, {
 				workingDirectory: WORKING_DIRECTORY,
 				gitState: {

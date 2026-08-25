@@ -54,3 +54,8 @@ dist
 .agents/skills/*/.local/
 .github/skills/.local/
 .github/skills/*/.local/
+
+# Throwaway Code OSS dev profiles created by the launch skill
+.v[0-9]*/
+# Local agent validation evidence
+.agent-validation/
