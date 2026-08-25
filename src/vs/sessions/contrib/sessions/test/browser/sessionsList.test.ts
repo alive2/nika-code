@@ -1018,6 +1018,9 @@ suite('Sessions - SessionsList', () => {
 			const filtered = filterSessionsToNikaAndWorkspace(sessions, folderB);
 
 			assert.deepStrictEqual(filtered, []);
+		});
+	});
+
 	suite('open trust gate', () => {
 
 		function findSessionRow(container: HTMLElement, title: string): HTMLElement {

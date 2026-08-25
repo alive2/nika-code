@@ -198,7 +198,10 @@ export class CopilotCLIPromptResolver {
 			if (ref.value instanceof ChatReferenceBinaryData) {
 				if (ref.value.mimeType === 'application/pdf') {
 					try {
-						const data = await raceCancellation(ref.value.data(), token);
+						const data = await raceCancellation(Promise.resolve(ref.value.data()), token);
+						if (!data) {
+							return;
+						}
 						if (!isPdfData(data)) {
 							this.logService.error('[CopilotCLISession] Ignoring PDF attachment without PDF magic bytes');
 							return;
@@ -294,6 +297,9 @@ export class CopilotCLIPromptResolver {
 				}
 				if (type === 'file' && isPdfUri(uri)) {
 					const data = await raceCancellation(this.fileSystemService.readFile(uri, true), token);
+					if (!data) {
+						return;
+					}
 					if (!isPdfData(data)) {
 						this.logService.error(`[CopilotCLISession] Ignoring PDF attachment without PDF magic bytes (${uri.fsPath})`);
 						return;

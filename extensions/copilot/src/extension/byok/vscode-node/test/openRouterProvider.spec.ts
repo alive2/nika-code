@@ -5,7 +5,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { BYOKModelCapabilities } from '../../common/byokProvider';
-import { ModelSupportedEndpoint } from '../../../../platform/endpoint/common/endpointProvider';
+import { IChatModelInformation, ModelSupportedEndpoint } from '../../../../platform/endpoint/common/endpointProvider';
+import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { createOpenRouterEndpoint, isAnthropicModelId, OpenRouterLMProvider } from '../openRouterProvider';
 
 /**
@@ -191,8 +192,8 @@ describe('OpenRouter discovery and endpoint routing', () => {
 	});
 
 	it('routes Anthropic models through the native Messages API', () => {
-		const instantiationService = { createInstance: vi.fn(() => ({})) } as never;
-		const modelInfo = { id: 'openrouter/anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' } as never;
+		const instantiationService = { createInstance: vi.fn(() => ({})) } as unknown as IInstantiationService;
+		const modelInfo = { id: 'openrouter/anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' } as unknown as IChatModelInformation;
 
 		createOpenRouterEndpoint(instantiationService, modelInfo, 'key', 'anthropic/claude-sonnet-4', 'https://openrouter.ai/api/v1');
 
@@ -205,8 +206,8 @@ describe('OpenRouter discovery and endpoint routing', () => {
 	});
 
 	it('routes non-Anthropic models through chat/completions', () => {
-		const instantiationService = { createInstance: vi.fn(() => ({})) } as never;
-		const modelInfo = { id: 'openrouter/deepseek/deepseek-chat', name: 'DeepSeek Chat' } as never;
+		const instantiationService = { createInstance: vi.fn(() => ({})) } as unknown as IInstantiationService;
+		const modelInfo = { id: 'openrouter/deepseek/deepseek-chat', name: 'DeepSeek Chat' } as unknown as IChatModelInformation;
 
 		createOpenRouterEndpoint(instantiationService, modelInfo, 'key', 'deepseek/deepseek-chat', 'https://openrouter.ai/api/v1');
 

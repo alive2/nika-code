@@ -15,7 +15,7 @@ import { IEditorService } from '../../../../services/editor/common/editorService
 import { IChatContextService } from '../../../chat/browser/contextContrib/chatContextService.js';
 import { IChatService } from '../../../chat/common/chatService/chatService.js';
 import { ILanguageModelToolsService, ToolDataSource, ToolSet } from '../../../chat/common/tools/languageModelToolsService.js';
-import { IBrowserViewWorkbenchService } from '../../common/browserView.js';
+import { BrowserViewSharingState, IBrowserViewWorkbenchService } from '../../common/browserView.js';
 import { getBrowserPagesContext } from './browserToolHelpers.js';
 import { ClickBrowserTool, ClickBrowserToolData } from './clickBrowserTool.js';
 import { DragElementTool, DragElementToolData } from './dragElementTool.js';
@@ -109,16 +109,17 @@ class BrowserChatAgentToolsContribution extends Disposable implements IWorkbench
 		const sessionId = 'workbench-browser-evaluate';
 		const playwrightService = this.playwrightService;
 
-		// Fast path: pages already tracked by a Playwright session.
-		// Note: `invokeFunctionRaw` delivers the args spread as individual
-		// parameters (the compiled wrapper is `(page, ...args)`), so fnDefs
-		// must not array-destructure their second parameter.
+		// Fast path: pages already shared with this agent session. A page is
+		// reachable from a session only when its audience includes the session.
+		// `invokeFunctionRaw` delivers the args spread as individual parameters
+		// (the compiled wrapper is `(page, ...args)`), so fnDefs must not
+		// array-destructure their second parameter.
 		const matchUrl = `async (page, prefix) => (page.url() || '').includes(prefix)`;
 		let pageId: string | undefined;
-		for (const trackedId of await playwrightService.getTrackedPages()) {
+		for (const [viewId] of this.browserViewService.getKnownBrowserViews()) {
 			try {
-				if (await playwrightService.invokeFunctionRaw<boolean>(sessionId, trackedId, matchUrl, urlPrefix)) {
-					pageId = trackedId;
+				if (await playwrightService.invokeFunctionRaw<boolean>(sessionId, viewId, matchUrl, urlPrefix)) {
+					pageId = viewId;
 					break;
 				}
 			} catch {
@@ -126,15 +127,19 @@ class BrowserChatAgentToolsContribution extends Disposable implements IWorkbench
 			}
 		}
 
-		// Fall back to the user's workbench browser tabs: track the first tab
+		// Fall back to the user's workbench browser tabs: share the first tab
 		// whose URL matches so our session can drive it (it keeps its own
-		// persistent session, so cookies/localStorage are the user's).
+		// persistent session, so cookies/localStorage are the user's). Sharing
+		// asks for the user's consent the first time.
 		if (!pageId) {
 			for (const [viewId, input] of this.browserViewService.getKnownBrowserViews()) {
 				if ((input.url ?? '').includes(urlPrefix)) {
 					try {
-						if (!(await playwrightService.isPageTracked(viewId))) {
-							await playwrightService.startTrackingPage(viewId);
+						const model = await input.resolve();
+						if (model.sharingState === BrowserViewSharingState.NotShared) {
+							if (!(await model.setSharedWithAgent(true))) {
+								continue; // User declined; try the next matching tab.
+							}
 						}
 						pageId = viewId;
 						break;

@@ -39,6 +39,10 @@ class TestableAuthenticationService extends BaseAuthenticationService {
 		return Promise.resolve(this._anyGitHubSession);
 	}
 
+	override getAnyAdoSession(): Promise<AuthenticationSession | undefined> {
+		return Promise.resolve(undefined);
+	}
+
 	override getAdoAccessTokenBase64(): Promise<string | undefined> {
 		return Promise.resolve(undefined);
 	}

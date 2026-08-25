@@ -95,6 +95,17 @@ export interface NikaWorkspaceSummary {
 	cost: number;
 }
 
+/** Per-day aggregation returned by {@link NikaUsageTracker.getDailySummary}. */
+export interface NikaDailySummary {
+	/** UTC date key in `YYYY-MM-DD` form. */
+	date: string;
+	requests: number;
+	promptTokens: number;
+	completionTokens: number;
+	totalTokens: number;
+	cost: number;
+}
+
 /**
  * Wraps the `Progress` reporter handed to the LM provider. It forwards every
  * part verbatim while (a) accumulating streamed text/thinking characters for a
