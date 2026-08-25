@@ -4818,6 +4818,10 @@ suite('CopilotAgent', () => {
 			.find(resource => resource.resource === GITHUB_COPILOT_PROTECTED_RESOURCE.resource)?.required !== false;
 
 		try {
+			// NikaCode: GitHub is optional by default (`nikaGithubEnabled` is off).
+			// Turn it on so this test exercises the upstream signed-out opt-out
+			// flow; the Nika defaults themselves are covered by the tests above.
+			configurationService.updateRootConfig({ [AgentHostConfigKey.NikaGithubEnabled]: true });
 			const initiallyRequired = copilotRequired();
 			configurationService.updateRootConfig({ [AgentHostConfigKey.AllowSignedOutWhenUsable]: true });
 			const requiredWithoutByok = copilotRequired();
