@@ -27,7 +27,8 @@ suite('TelemetryUtils', () => {
 				}
 			}()),
 		], [
-			TelemetryLevel.USAGE,
+			// NikaCode: telemetry defaults to off, so an unset config resolves to NONE (upstream: USAGE).
+			TelemetryLevel.NONE,
 			TelemetryLevel.USAGE,
 			TelemetryLevel.ERROR,
 			TelemetryLevel.CRASH,

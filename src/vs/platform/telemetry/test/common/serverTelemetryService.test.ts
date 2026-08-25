@@ -8,7 +8,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { TestConfigurationService } from '../../../configuration/test/common/testConfigurationService.js';
 import product from '../../../product/common/product.js';
 import { IProductService } from '../../../product/common/productService.js';
-import { TelemetryLevel } from '../../common/telemetry.js';
+import { TelemetryConfiguration, TelemetryLevel, TELEMETRY_SETTING_ID } from '../../common/telemetry.js';
 import { ServerTelemetryService } from '../../common/serverTelemetryService.js';
 import { NullAppender } from '../../common/telemetryUtils.js';
 
@@ -17,10 +17,11 @@ suite('ServerTelemetryService', () => {
 	const productService: IProductService = { _serviceBrand: undefined, ...product };
 
 	test('exposes and preserves the most restrictive injected telemetry level', async () => {
+		// NikaCode: telemetry defaults to off, so opt in explicitly so the injected level is exercised.
 		const service = disposables.add(new ServerTelemetryService(
 			{ appenders: [NullAppender] },
 			TelemetryLevel.ERROR,
-			new TestConfigurationService(),
+			new TestConfigurationService({ [TELEMETRY_SETTING_ID]: TelemetryConfiguration.ON }),
 			productService,
 		));
 

@@ -340,7 +340,8 @@ suite('AgentHostProtocolClient', () => {
 
 	test('initialize sends the local client telemetry identity only for usage telemetry', async () => {
 		const transport = disposables.add(new TestProtocolTransport(AgentHostClientConnectionKind.RemoteExtensionHost));
-		const { client } = createClientForIdentity('test.example:1234', transport, createPermissionService(), undefined, new NullLogService(), new TestConfigurationService(), undefined, agentsWindowAgentHostClientInfo, new TestClientIdentityTelemetryService());
+		// NikaCode: telemetry defaults to off, so opt in explicitly to exercise the identity path.
+		const { client } = createClientForIdentity('test.example:1234', transport, createPermissionService(), undefined, new NullLogService(), new TestConfigurationService({ [TELEMETRY_SETTING_ID]: TelemetryConfiguration.ON }), undefined, agentsWindowAgentHostClientInfo, new TestClientIdentityTelemetryService());
 		const connectPromise = client.connect();
 		const initialize = transport.sentMessages[0] as JsonRpcRequest;
 
@@ -994,7 +995,8 @@ suite('AgentHostProtocolClient', () => {
 	test('initialize handshake includes protocol version and client info', async () => {
 		const transport = disposables.add(new TestClientProtocolTransport(AgentHostClientConnectionKind.DevTunnel));
 		const clientInfo = agentsWindowAgentHostClientInfo;
-		const { client } = createClientForIdentity('test.example:1234', transport, createPermissionService(), undefined, new NullLogService(), new TestConfigurationService(), 'renderer-client-id', clientInfo, new TestClientIdentityTelemetryService());
+		// NikaCode: telemetry defaults to off, so opt in explicitly to exercise the identity path.
+		const { client } = createClientForIdentity('test.example:1234', transport, createPermissionService(), undefined, new NullLogService(), new TestConfigurationService({ [TELEMETRY_SETTING_ID]: TelemetryConfiguration.ON }), 'renderer-client-id', clientInfo, new TestClientIdentityTelemetryService());
 		const connectPromise = client.connect();
 
 		transport.connectDeferred.complete();
@@ -2120,8 +2122,12 @@ suite('AgentHostProtocolClient', () => {
 				transports.push(t);
 				return t;
 			};
+			// NikaCode: telemetry defaults to off, so opt in explicitly when identity is expected.
+			const configurationService = telemetryService === NullTelemetryService
+				? new TestConfigurationService()
+				: new TestConfigurationService({ [TELEMETRY_SETTING_ID]: TelemetryConfiguration.ON });
 			const client = disposables.add(new AgentHostProtocolClient(
-				'test.example:1234', factory, undefined, undefined, clientInfo, new NullLogService(), permissionService, new TestConfigurationService(), telemetryService,
+				'test.example:1234', factory, undefined, undefined, clientInfo, new NullLogService(), permissionService, configurationService, telemetryService,
 			));
 			return { client, transports };
 		}
