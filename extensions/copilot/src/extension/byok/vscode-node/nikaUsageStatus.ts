@@ -14,9 +14,9 @@ const usageStatusBarItemId = 'nika.usageStatus';
 
 /**
  * Status bar item for Nika. Shows how long the current DeepSeek rate period
- * lasts AND when the opposite rate starts (e.g. `PEAK 2h 13m · OFF-PEAK 1h 47m`).
- * Today's token totals and cost are available in the tooltip. Clicking opens
- * Nika Settings on the `usage` section.
+ * lasts (e.g. `PEAK 2h 13m` or `OFF-PEAK 1h 47m`). Today's token totals and
+ * cost are available in the tooltip, along with both rate-period end times.
+ * Clicking opens Nika Settings on the `usage` section.
  */
 export class NikaUsageStatus extends Disposable {
 	/**
@@ -121,16 +121,14 @@ export class NikaUsageStatus extends Disposable {
 }
 
 /**
- * The always-visible status bar label: how long the current rate period lasts
- * and how long until the opposite rate begins, e.g. `PEAK 2h 13m · OFF-PEAK 1h 47m`.
+ * The always-visible status bar label: how long the current rate period
+ * lasts, e.g. `PEAK 2h 13m` or `OFF-PEAK 1h 47m`. Only the active period is
+ * shown so the bar stays compact.
  */
 function countdownLabel(): string {
 	const { peak, peakEndsAt, offPeakEndsAt } = getDeepSeekRateCountdowns();
-	const peakLeft = formatDuration(peakEndsAt - Date.now());
-	const offPeakLeft = formatDuration(offPeakEndsAt - Date.now());
-	return peak
-		? `PEAK ${peakLeft} · OFF-PEAK ${offPeakLeft}`
-		: `OFF-PEAK ${offPeakLeft} · PEAK ${peakLeft}`;
+	const left = formatDuration((peak ? peakEndsAt : offPeakEndsAt) - Date.now());
+	return peak ? `PEAK ${left}` : `OFF-PEAK ${left}`;
 }
 
 /** Absolute UTC times for the tooltip, e.g. `PEAK ends 04:00 UTC · OFF-PEAK ends 06:00 UTC`. */
