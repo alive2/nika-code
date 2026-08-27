@@ -15,6 +15,7 @@
 	"nika.config.visionModel": "The model used to describe images for text-only DeepSeek models.",
 	"nika.config.visionVSCodeModel": "The qualified identifier of another image-capable VS Code language model used for image descriptions.",
 	"nika.config.visionOpenRouterModel": "The OpenRouter model id used for image descriptions when the vision backend is set to OpenRouter.",
+	"nika.config.visionPreprocessingEnabled": "Master switch for image preprocessing. When on (default), images attached to text-only models are described by the configured vision backend first. When off, images are sent to the model as-is: native-vision models receive them directly, while text-only models may reject them.",
 	"nika.config.ollamaBaseUrl": "The Ollama host used for Gemma 4 chat and vision.",
 	"nika.config.llamaCppBaseUrl": "The llama.cpp server base URL. Models are discovered from its OpenAI-compatible /v1/models endpoint and served through /v1/chat/completions. Leave empty to hide llama.cpp models.",
 	"nika.config.deepseekWeb.deleteSessionsAfterVision": "Delete the chat.deepseek.com chat session created for an image description after it completes successfully. When on, image descriptions never leave history entries on chat.deepseek.com.",

@@ -120,6 +120,24 @@ describe('NikaUsageTracker', () => {
 		expect(event.cost).toBeCloseTo(0.022, 6); // half of 0.044 peak
 	});
 
+	it('records OpenAI cost from the static price table', () => {
+		const { tracker } = createTracker();
+		tracker.record({ provider: 'openai', model: 'gpt-5', promptTokens: 400_000, completionTokens: 200_000, totalTokens: 600_000, cachedTokens: 100_000, reasoningTokens: 0, sessionId: 's' });
+		const event = tracker.events[0];
+		expect(event.peak).toBe(false); // OpenAI has no peak/off-peak split
+		// 0.3M miss * 1.25 + 0.1M cache * 0.125 + 0.2M out * 10 = 0.375 + 0.0125 + 2
+		expect(event.cost).toBeCloseTo(2.3875, 6);
+	});
+
+	it('records Anthropic cost from the static price table', () => {
+		const { tracker } = createTracker();
+		tracker.record({ provider: 'anthropic', model: 'claude-sonnet-4', promptTokens: 400_000, completionTokens: 200_000, totalTokens: 600_000, cachedTokens: 100_000, reasoningTokens: 0, sessionId: 's' });
+		const event = tracker.events[0];
+		expect(event.peak).toBe(false);
+		// 0.3M miss * 3 + 0.1M cache * 0.3 + 0.2M out * 15 = 0.9 + 0.03 + 3
+		expect(event.cost).toBeCloseTo(3.93, 6);
+	});
+
 	it('does not record when tracking is disabled', () => {
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValueOnce({
 			get: (_key: string, fallback: unknown) => false,
@@ -216,6 +234,18 @@ describe('NikaUsageTracker', () => {
 		expect(tracker.events[0].cost).toBe(0);
 		expect(tracker.events[1].cost).toBe(0);
 		expect(tracker.events[0].provider).toBe('gemini');
+	});
+
+	it('tracks subscription events at zero cost (plan quota) with full token counts', () => {
+		const { tracker } = createTracker();
+		tracker.record({ model: 'chatgpt/gpt-5-codex', sessionId: 's1', provider: 'chatgpt', promptTokens: 50_000, completionTokens: 20_000, totalTokens: 70_000, cachedTokens: 0, reasoningTokens: 3_000 });
+		tracker.record({ model: 'claude/claude-opus-4-5', sessionId: 's2', provider: 'claude', promptTokens: 40_000, completionTokens: 10_000, totalTokens: 50_000, cachedTokens: 5_000, reasoningTokens: 0 });
+		expect(tracker.events[0].provider).toBe('chatgpt');
+		expect(tracker.events[0].cost).toBe(0);
+		expect(tracker.events[0].totalTokens).toBe(70_000);
+		expect(tracker.events[1].provider).toBe('claude');
+		expect(tracker.events[1].cost).toBe(0);
+		expect(tracker.events[1].totalTokens).toBe(50_000);
 	});
 
 	it('defaults legacy persisted events to the deepseek provider', () => {

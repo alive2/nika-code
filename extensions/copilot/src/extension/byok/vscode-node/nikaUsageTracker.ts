@@ -8,13 +8,13 @@ import { CustomDataPartMimeTypes } from '../../../platform/endpoint/common/endpo
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { APIUsage, isApiUsage } from '../../../platform/networking/common/openai';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getDeepSeekTokenCost, getOpenRouterTokenCost, isDeepSeekPeakHour, OpenRouterModelPricing } from './nikaPricing';
+import { getAnthropicTokenCost, getDeepSeekTokenCost, getOpenAITokenCost, getOpenRouterTokenCost, isDeepSeekPeakHour, OpenRouterModelPricing } from './nikaPricing';
 
 /**
  * Which Nika provider produced a usage event. Legacy events (recorded before
  * provider tracking existed) default to `'deepseek'` when loaded.
  */
-export type NikaUsageProvider = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb';
+export type NikaUsageProvider = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude';
 
 /**
  * A single recorded DeepSeek request. Persisted in extension `globalState` so
@@ -288,13 +288,25 @@ export class NikaUsageTracker extends Disposable {
 					outputTokens: options.completionTokens,
 				})
 				: 0
-			: provider === 'deepseek'
-				? getDeepSeekTokenCost(options.model, {
-					inputTokens: options.promptTokens,
-					outputTokens: options.completionTokens,
+			: provider === 'openai'
+				? getOpenAITokenCost(options.model, {
 					cachedTokens: options.cachedTokens,
-				}, new Date(t))?.cost ?? 0
-				: 0;
+					cacheMissTokens: Math.max(0, options.promptTokens - options.cachedTokens),
+					outputTokens: options.completionTokens,
+				})
+				: provider === 'anthropic'
+					? getAnthropicTokenCost(options.model, {
+						cachedTokens: options.cachedTokens,
+						cacheMissTokens: Math.max(0, options.promptTokens - options.cachedTokens),
+						outputTokens: options.completionTokens,
+					})
+					: provider === 'deepseek'
+						? getDeepSeekTokenCost(options.model, {
+							inputTokens: options.promptTokens,
+							outputTokens: options.completionTokens,
+							cachedTokens: options.cachedTokens,
+						}, new Date(t))?.cost ?? 0
+						: 0;
 
 		const event: NikaUsageEvent = {
 			id: this._nextId++,

@@ -32,7 +32,9 @@ export class NodeFetcher implements IFetcher {
 		if (!headers['User-Agent']) {
 			headers['User-Agent'] = `GitHubCopilotChat/${this._envService.getVersion()}`;
 		}
-		headers[userAgentLibraryHeader] = this._userAgentLibraryUpdate ? this._userAgentLibraryUpdate(this.getUserAgentLibrary()) : this.getUserAgentLibrary();
+		if (!options.suppressUserAgentLibrary) {
+			headers[userAgentLibraryHeader] = this._userAgentLibraryUpdate ? this._userAgentLibraryUpdate(this.getUserAgentLibrary()) : this.getUserAgentLibrary();
+		}
 
 		let body = options.body;
 		if (options.json) {

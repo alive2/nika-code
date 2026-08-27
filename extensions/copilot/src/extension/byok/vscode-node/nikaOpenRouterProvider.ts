@@ -90,6 +90,16 @@ export class NikaOpenRouterProvider extends Disposable {
 	}
 
 	/**
+	 * Resolved capabilities for a raw catalog id from the cached catalog, or
+	 * `undefined` when the catalog has not been fetched yet. Never triggers a
+	 * fetch — hot paths (e.g. request-time warnings) use this to avoid adding
+	 * latency; the request branch fetches the catalog anyway.
+	 */
+	getCachedCapabilities(modelId: string): BYOKModelCapabilities | undefined {
+		return this._catalogCache?.models.get(modelId)?.capabilities;
+	}
+
+	/**
 	 * Build an OpenRouter request endpoint for a raw catalog id, routing
 	 * Anthropic models through the native Messages API. Capabilities resolve
 	 * from the cached catalog when available so the wire model matches the

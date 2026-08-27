@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { BYOKModelCapabilities } from '../../common/byokProvider';
-import { byokKnownModelToAPIInfoWithEffort } from '../byokModelInfo';
+import { byokKnownModelToAPIInfoWithEffort, byokKnownModelToAPIInfoWithEffortAndSpeed } from '../byokModelInfo';
 
 describe('byokKnownModelToAPIInfoWithEffort', () => {
 	const baseCapabilities: BYOKModelCapabilities = {
@@ -69,5 +69,25 @@ describe('byokKnownModelToAPIInfoWithEffort', () => {
 		});
 
 		expect((info as { configurationSchema?: { properties: { reasoningEffort: { default?: string } } } }).configurationSchema?.properties.reasoningEffort.default).toBe('high');
+	});
+});
+
+describe('byokKnownModelToAPIInfoWithEffortAndSpeed', () => {
+	const baseCapabilities: BYOKModelCapabilities = {
+		name: 'GPT-5.6 Sol',
+		maxInputTokens: 1000,
+		maxOutputTokens: 100,
+		toolCalling: true,
+		vision: true,
+		supportsReasoningEffort: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+	};
+
+	it('adds the codex Speed picker (Standard / Fast) next to the Thinking Effort picker', () => {
+		const info = byokKnownModelToAPIInfoWithEffortAndSpeed('Nika', 'chatgpt/gpt-5.6-sol', baseCapabilities);
+
+		expect(info.configurationSchema?.properties).toMatchObject({
+			reasoningEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], group: 'navigation' },
+			speed: { type: 'string', enum: ['standard', 'fast'], default: 'standard', group: 'navigation' },
+		});
 	});
 });

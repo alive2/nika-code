@@ -146,6 +146,42 @@ suite('CopilotLanguageModelWrapper', () => {
 		});
 	});
 
+	suite('undersized model budget', () => {
+		let wrapper: CopilotLanguageModelWrapper;
+		let endpoint: IChatEndpoint;
+		setup(async () => {
+			createAccessor();
+			const realEndpoint = await accessor.get(IEndpointProvider).getChatEndpoint('copilot-utility');
+			// Simulate a model whose prompt budget collapsed (e.g. a llama.cpp
+			// server with a context window smaller than the reserved output
+			// budget): prompt-tsx then trims the whole tree while rendering and
+			// throws BudgetExceededError, which must surface as the clear
+			// "Message exceeds token limit." error instead of the opaque
+			// "No lowest priority node found (path: ...)".
+			endpoint = { ...realEndpoint, modelMaxPromptTokens: 0 };
+			wrapper = instaService.createInstance(CopilotLanguageModelWrapper);
+		});
+
+		test('translates BudgetExceededError into a clear token-limit error', async () => {
+			await assert.rejects(
+				() => wrapper.provideLanguageModelResponse(
+					endpoint,
+					[vscode.LanguageModelChatMessage.User('hello')],
+					{ requestInitiator: 'unknown', toolMode: vscode.LanguageModelChatToolMode.Auto },
+					vscode.extensions.all[0].id,
+					{ report: () => { } },
+					CancellationToken.None
+				),
+				err => {
+					assert.ok(err instanceof Error, 'expected an Error');
+					assert.ok(err.message.startsWith('Message exceeds token limit.'), `unexpected message: ${err.message}`);
+					assert.ok(err.message.includes('0'), 'message should mention the model budget');
+					return true;
+				}
+			);
+		});
+	});
+
 	suite('length finish reason', () => {
 		let wrapper: CopilotLanguageModelWrapper;
 		let endpoint: IChatEndpoint;

@@ -5,6 +5,7 @@
 
 
 import { Raw } from '@vscode/prompt-tsx';
+import { BudgetExceededError } from '@vscode/prompt-tsx/dist/base/materialized';
 import * as vscode from 'vscode';
 import { IAuthenticationService } from '../../../platform/authentication/common/authentication';
 import { CopilotToken } from '../../../platform/authentication/common/copilotToken';
@@ -703,7 +704,12 @@ export class CopilotLanguageModelWrapper extends Disposable {
 		}
 
 		const toolTokenCount = _options.tools ? await this.countToolTokens(_endpoint, _options.tools) : 0;
-		const baseCount = await PromptRenderer.create(this._instantiationService, _endpoint, LanguageModelAccessPrompt, { noSafety: false, messages: [] }).countTokens();
+		// Safety/editor rules are only rendered into the prompt when `noSafety` is
+		// false, so the reservation must match: otherwise the budget silently
+		// shrinks by the rules' token count on every request (matters most for
+		// small-context local models).
+		const noSafety = extensionId === this._envService.extensionId;
+		const baseCount = await PromptRenderer.create(this._instantiationService, _endpoint, LanguageModelAccessPrompt, { noSafety, messages: [] }).countTokens();
 		const tokenLimit = _endpoint.modelMaxPromptTokens - baseCount - BaseTokensPerCompletion - toolTokenCount;
 
 		this.validateRequest(_messages);
@@ -714,7 +720,17 @@ export class CopilotLanguageModelWrapper extends Disposable {
 		const { messages, tokenCount } = await PromptRenderer.create(this._instantiationService, {
 			..._endpoint,
 			modelMaxPromptTokens: tokenLimit
-		}, LanguageModelAccessPrompt, { noSafety: extensionId === this._envService.extensionId, messages: _messages }).render();
+		}, LanguageModelAccessPrompt, { noSafety, messages: _messages }).render().catch((error) => {
+			if (error instanceof BudgetExceededError) {
+				// prompt-tsx throws BudgetExceededError — user-visible as an opaque
+				// "No lowest priority node found (path: ...)" — when the model's
+				// budget is too small for even the base prompt to fit. Surface the
+				// same clear message as the token-limit check below, plus the
+				// model's budget so the user can act on it.
+				throw new Error(vscode.l10n.t('Message exceeds token limit. This model only accepts up to {0} prompt tokens — the request (including workspace instructions, conversation history and tool definitions) is larger. Try a model with a larger context, or for local llama.cpp/Ollama servers increase the context size (e.g. --ctx-size) and restart the server.', _endpoint.modelMaxPromptTokens));
+			}
+			throw error;
+		});
 
 		/* __GDPR__
 			"languagemodelrequest" : {
@@ -816,6 +832,7 @@ export class CopilotLanguageModelWrapper extends Disposable {
 			modelCapabilities: {
 				enableThinking: internalModelOptions?._enableThinking,
 				reasoningEffort: typeof _options.modelConfiguration?.reasoningEffort === 'string' ? _options.modelConfiguration.reasoningEffort : undefined,
+				speed: typeof _options.modelConfiguration?.speed === 'string' ? _options.modelConfiguration.speed : undefined,
 			},
 		}, token);
 

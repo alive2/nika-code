@@ -9,9 +9,14 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaModelId, NikaProviderConfig, NikaProviderId, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
-import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour } from './nikaPricing';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaTokenLimits, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
+import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour, NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
+import { NikaOpenAIProvider } from './nikaOpenAIProvider';
+import { NikaAnthropicProvider } from './nikaAnthropicProvider';
+import { BYOKKnownModels } from '../common/byokProvider';
+import { NikaChatGptSubProvider } from './nikaChatGptSubProvider';
+import { NikaClaudeSubProvider } from './nikaClaudeSubProvider';
 import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, NikaLlamaCppProvider } from './nikaLlamaCppProvider';
 import { NikaCursorProvider } from './nikaCursorProvider';
 import { NikaGeminiProvider } from './nikaGeminiProvider';
@@ -25,7 +30,7 @@ type ConnectionResult = { readonly ok: boolean; readonly message: string; readon
 
 const SETTINGS = new Set([
 	'defaultModel', 'outputTokens', 'contextWindow', 'temperature', 'thinkingEffort', 'openrouterFloor',
-	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'ollamaBaseUrl', 'llamaCppBaseUrl', 'deepseekWeb.deleteSessionsAfterVision',
+	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'visionPreprocessingEnabled', 'ollamaBaseUrl', 'llamaCppBaseUrl', 'deepseekWeb.deleteSessionsAfterVision',
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
@@ -34,13 +39,17 @@ const SETTINGS = new Set([
 
 const DEEP_SEEK_WEB_URL = 'https://chat.deepseek.com/';
 
-const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb', string> = {
+const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude', string> = {
 	deepseek: NIKA_DEEPSEEK_SECRET,
 	gemini: NIKA_GEMINI_SECRET,
 	openrouter: NIKA_OPENROUTER_SECRET,
 	llamacpp: NIKA_LLAMACPP_SECRET,
 	cursor: NIKA_CURSOR_SECRET,
 	deepseekweb: NIKA_DEEPSEEK_WEB_SECRET,
+	openai: NIKA_OPENAI_SECRET,
+	anthropic: NIKA_ANTHROPIC_SECRET,
+	chatgpt: NIKA_CHATGPT_SUB_SECRET,
+	claude: NIKA_CLAUDE_SUB_SECRET,
 };
 
 function providerDisplayName(provider: NikaConnection): string {
@@ -52,6 +61,10 @@ function providerDisplayName(provider: NikaConnection): string {
 		case 'llamacpp': return 'llama.cpp';
 		case 'cursor': return 'Cursor';
 		case 'deepseekweb': return 'DeepSeek Web';
+		case 'openai': return 'OpenAI';
+		case 'anthropic': return 'Anthropic';
+		case 'chatgpt': return 'ChatGPT';
+		case 'claude': return 'Claude';
 	}
 }
 
@@ -94,6 +107,8 @@ export class NikaSettingsEditor extends Disposable {
 	private _geminiKey: string | undefined;
 	private readonly _output = this._register(vscode.window.createOutputChannel(vscode.l10n.t('Nika')));
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
+	/** Cancels an in-flight device-code sign-in when a new one starts. */
+	private _subSignInSource: vscode.CancellationTokenSource | undefined;
 
 	constructor(
 		private readonly _usageTracker: NikaUsageTracker,
@@ -102,6 +117,10 @@ export class NikaSettingsEditor extends Disposable {
 		private readonly _geminiCatalogProvider: NikaGeminiProvider,
 		private readonly _cursorProvider: NikaCursorProvider,
 		private readonly _deepSeekWebProvider: NikaDeepSeekWebProvider,
+		private readonly _openAIProvider: NikaOpenAIProvider,
+		private readonly _anthropicProvider: NikaAnthropicProvider,
+		private readonly _chatGptSubProvider: NikaChatGptSubProvider,
+		private readonly _claudeSubProvider: NikaClaudeSubProvider,
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 		@ILogService private readonly _logService: ILogService,
@@ -128,7 +147,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET) {
 				void this._render(this._activeSection);
 			}
 		}));
@@ -249,7 +268,11 @@ export class NikaSettingsEditor extends Disposable {
 			{ enableScripts: true, retainContextWhenHidden: true },
 		);
 		this._register(this._panel.webview.onDidReceiveMessage(message => this._onMessage(message)));
-		this._panel.onDidDispose(() => { this._panel = undefined; });
+		this._panel.onDidDispose(() => {
+			this._panel = undefined;
+			this._subSignInSource?.cancel();
+			this._subSignInSource = undefined;
+		});
 		void this._render(this._activeSection);
 	}
 
@@ -264,34 +287,44 @@ export class NikaSettingsEditor extends Disposable {
 
 	private async _state(): Promise<Record<string, unknown>> {
 		const config = vscode.workspace.getConfiguration('nika');
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, chatGptSubSecret, claudeSubSecret] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
 			this._context.secrets.get(NIKA_CURSOR_SECRET),
 			this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET),
+			this._context.secrets.get(NIKA_OPENAI_SECRET),
+			this._context.secrets.get(NIKA_ANTHROPIC_SECRET),
+			this._context.secrets.get(NIKA_CHATGPT_SUB_SECRET),
+			this._context.secrets.get(NIKA_CLAUDE_SUB_SECRET),
 		]);
+		const chatGptSubToken = parseNikaChatGptSubscriptionToken(chatGptSubSecret);
+		const claudeSubToken = parseNikaClaudeSubscriptionToken(claudeSubSecret);
 		// Cache the key presence so view-model helpers (modelChoices) can gate
 		// model visibility without re-reading secrets for every dropdown.
 		this._deepSeekKey = deepseekKey;
 		this._geminiKey = geminiKey;
 		const value = <T>(key: string, fallback: T): T => config.get<T>(key, fallback);
+		const limits = resolveNikaTokenLimits(
+			config.get<string>('contextWindow', '128K'),
+			config.get<string>('outputTokens', '8K'),
+		);
 		const openRouterCatalog = openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [];
 		const llamaCppBaseUrl = this._llamaCppBaseUrl();
 		const llamaCppCatalog = llamaCppBaseUrl ? await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined) : [];
 		const ollamaCatalog = await this._ollamaCatalogState(value('ollamaBaseUrl', 'http://localhost:11434'));
 		const geminiCatalog = geminiKey ? await this._geminiCatalogState(geminiKey) : [];
 		const cursorCatalog = cursorKey ? await this._cursorCatalogState(cursorKey) : [];
+		const openAICatalog = openAIKey ? await this._openAICatalogState(openAIKey, limits) : [];
+		const anthropicCatalog = anthropicKey ? await this._anthropicCatalogState(anthropicKey, limits) : [];
+		const chatGptSubModels = this._subModelEntries('chatgpt', chatGptSubToken ? await this._chatGptSubProvider.getLiveKnownModels(chatGptSubToken, limits) : {});
+		const claudeSubModels = this._subModelEntries('claude', claudeSubToken ? this._claudeSubProvider.getKnownModels(limits) : {});
 		// Wizard-driven provider selection. Absent = legacy mode (classic
 		// key-based visibility); present = managed mode (only the selected
 		// models of added providers are visible anywhere).
 		const providers = parseNikaProviderConfig(config.get('providers'));
 		const providersManaged = providers !== undefined;
-		const limits = resolveNikaTokenLimits(
-			config.get<string>('contextWindow', '128K'),
-			config.get<string>('outputTokens', '8K'),
-		);
 		const nativeModelEntry = (id: NikaModelId, provider: NikaProviderId): Record<string, unknown> => {
 			const capabilities = getNikaModelCapabilities(id, limits);
 			return {
@@ -321,13 +354,23 @@ export class NikaSettingsEditor extends Disposable {
 			llamacppModels: llamaCppCatalog,
 			cursorConfigured: !!cursorKey,
 			deepseekwebConfigured: !!deepSeekWebToken,
+			openaiConfigured: !!openAIKey,
+			openaiModels: openAICatalog,
+			anthropicConfigured: !!anthropicKey,
+			anthropicModels: anthropicCatalog,
+			chatgptConfigured: !!chatGptSubToken,
+			claudeConfigured: !!claudeSubToken,
+			// Subscription status rows (plan type / display name) for the
+			// provider cards and the overview page.
+			chatgptStatus: { planType: chatGptSubToken?.planType, displayName: chatGptSubToken?.accountId ? `ChatGPT ${chatGptSubToken.accountId.slice(0, 6)}` : undefined },
+			claudeStatus: { planType: claudeSubToken?.planType, displayName: claudeSubToken?.displayName },
 			providers,
 			providersManaged,
 			// Per-provider configured flag for status pills. Legacy mode keeps
 			// the classic rules; managed mode reflects the added providers.
 			providersConfigured: providersManaged
-				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb }
-				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken },
+				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb, openai: !!providers.openai, anthropic: !!providers.anthropic, chatgpt: !!providers.chatgpt, claude: !!providers.claude }
+				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken, openai: !!openAIKey, anthropic: !!anthropicKey, chatgpt: !!chatGptSubToken, claude: !!claudeSubToken },
 			// Available models per provider for the wizard's selection step.
 			// Native entries are bare ids; catalog families carry their prefix
 			// so the wizard stores exactly what the picker gates on.
@@ -343,6 +386,8 @@ export class NikaSettingsEditor extends Disposable {
 				openrouter: prefixCatalog(openRouterCatalog, NIKA_OPENROUTER_MODEL_PREFIX),
 				llamacpp: prefixCatalog(llamaCppCatalog, NIKA_LLAMACPP_MODEL_PREFIX),
 				cursor: prefixCatalog(cursorCatalog, NIKA_CURSOR_MODEL_PREFIX),
+				openai: prefixCatalog(openAICatalog, NIKA_OPENAI_MODEL_PREFIX),
+				anthropic: prefixCatalog(anthropicCatalog, NIKA_ANTHROPIC_MODEL_PREFIX),
 				// The web model ids already carry their `deepseekweb/` prefix
 				// (see NikaDeepSeekWebProvider.getKnownModels), so they persist
 				// verbatim — exactly what the picker gates on.
@@ -355,11 +400,15 @@ export class NikaSettingsEditor extends Disposable {
 					reasoning: (capabilities.supportsReasoningEffort?.length ?? 0) > 0,
 					efforts: getNikaEffortOptionsForModel(id),
 				})),
+				// Subscription catalogs use the `chatgpt/` / `claude/` prefixes
+				// so the wizard persists exactly what the picker gates on.
+				chatgpt: chatGptSubModels,
+				claude: claudeSubModels,
 			},
 			// Flattened, selection-gated model list for the Models / Agents /
 			// Vision dropdowns (native + Ollama + OpenRouter + llama.cpp +
-			// Gemini catalog + Cursor).
-			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, providers),
+			// Gemini catalog + Cursor + OpenAI + Anthropic).
+			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, openAICatalog, anthropicCatalog, chatGptSubModels, claudeSubModels, providers),
 			hasOllama: true,
 			ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 			llamaCppBaseUrl,
@@ -372,10 +421,12 @@ export class NikaSettingsEditor extends Disposable {
 				contextWindow: value('contextWindow', '128K'),
 				temperature: value('temperature', 0.7),
 				thinkingEffort: value('thinkingEffort', 'high'),
+				codexSpeed: value('codexSpeed', 'standard'),
 				openrouterFloor: value('openrouterFloor', false),
 				visionModel: value('visionModel', 'gemini-2.5-flash'),
 				visionVSCodeModel: value('visionVSCodeModel', ''),
 				visionOpenRouterModel: value('visionOpenRouterModel', ''),
+				visionPreprocessingEnabled: value('visionPreprocessingEnabled', true),
 				ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 				pdfMaxFileSizeMB: value('pdfMaxFileSizeMB', 100),
 				pdfMaxPages: value('pdfMaxPages', 60),
@@ -405,6 +456,24 @@ export class NikaSettingsEditor extends Disposable {
 			},
 			usage: this._usageState(),
 		};
+	}
+
+	/**
+	 * Serializes a subscription catalog for the wizard. Entries carry the
+	 * provider prefix (`chatgpt/` / `claude/`) so the wizard persists exactly
+	 * what the picker gates on.
+	 */
+	private _subModelEntries(provider: 'chatgpt' | 'claude', catalog: BYOKKnownModels): Record<string, unknown>[] {
+		const prefix = provider === 'chatgpt' ? NIKA_CHATGPT_MODEL_PREFIX : NIKA_CLAUDE_SUB_MODEL_PREFIX;
+		return Object.entries(catalog).map(([id, capabilities]) => ({
+			id: `${prefix}${id}`,
+			name: capabilities.name,
+			provider,
+			vision: capabilities.vision ?? false,
+			toolCalling: capabilities.toolCalling ?? false,
+			reasoning: (capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+			efforts: capabilities.supportsReasoningEffort ?? [],
+		}));
 	}
 
 	/**
@@ -577,6 +646,72 @@ export class NikaSettingsEditor extends Disposable {
 	}
 
 	/**
+	 * Serialized OpenAI model list for the wizard and the Models section.
+	 * Mirrors {@link _openRouterCatalogState}: the list travels through state
+	 * because the webview CSP forbids fetch calls. A key that is invalid (or
+	 * an API outage) degrades to an empty list rather than breaking the whole
+	 * settings page. Price labels come from the static OpenAI price table.
+	 */
+	private async _openAICatalogState(apiKey: string, limits: NikaTokenLimits): Promise<unknown[]> {
+		try {
+			const catalog = await this._openAIProvider.getCatalog(apiKey, limits);
+			return [...catalog.values()].map(model => {
+				const pricing = NIKA_OPENAI_PRICES[model.id];
+				return {
+					id: model.id,
+					name: model.name,
+					contextWindow: model.contextWindow,
+					vision: model.capabilities.vision,
+					toolCalling: model.capabilities.toolCalling,
+					reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+					// OpenAI models accept `low`/`medium`/`high`.
+					efforts: model.capabilities.supportsReasoningEffort ?? [],
+					provider: 'openai',
+					priceLabel: pricing ? formatOpenRouterPriceLabel(pricing) : '',
+					free: false,
+				};
+			});
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('OpenAI catalog unavailable: {0}', detail));
+			return [];
+		}
+	}
+
+	/**
+	 * Serialized Anthropic model list for the wizard and the Models section.
+	 * Mirrors {@link _openAICatalogState}: the list travels through state
+	 * because the webview CSP forbids fetch calls. A key that is invalid (or
+	 * an API outage) degrades to an empty list rather than breaking the whole
+	 * settings page. Price labels come from the static Anthropic price table.
+	 */
+	private async _anthropicCatalogState(apiKey: string, limits: NikaTokenLimits): Promise<unknown[]> {
+		try {
+			const catalog = await this._anthropicProvider.getCatalog(apiKey, limits);
+			return [...catalog.values()].map(model => {
+				const pricing = NIKA_ANTHROPIC_PRICES[model.id];
+				return {
+					id: model.id,
+					name: model.name,
+					contextWindow: model.contextWindow,
+					vision: model.capabilities.vision,
+					toolCalling: model.capabilities.toolCalling,
+					// Claude has no reasoning-effort control.
+					reasoning: false,
+					efforts: [],
+					provider: 'anthropic',
+					priceLabel: pricing ? formatOpenRouterPriceLabel(pricing) : '',
+					free: false,
+				};
+			});
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('Anthropic catalog unavailable: {0}', detail));
+			return [];
+		}
+	}
+
+	/**
 	 * Flattened, selection-gated model list for the settings dropdowns (Models
 	 * page, Agents page, vision defaults). Mirrors the chat model picker's
 	 * visibility rules in `nikaProvider.provideLanguageModelChatInformation`:
@@ -587,7 +722,7 @@ export class NikaSettingsEditor extends Disposable {
 	 * family, capabilities (vision, effort levels), and optional
 	 * context/pricing for the catalog rows.
 	 */
-	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[], llamaCppCatalog: unknown[], ollamaCatalog: unknown[], geminiCatalog: unknown[], cursorCatalog: unknown[], providerConfig: NikaProviderConfig | undefined): Promise<unknown[]> {
+	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[], llamaCppCatalog: unknown[], ollamaCatalog: unknown[], geminiCatalog: unknown[], cursorCatalog: unknown[], openAICatalog: unknown[], anthropicCatalog: unknown[], chatGptSubModels: unknown[], claudeSubModels: unknown[], providerConfig: NikaProviderConfig | undefined): Promise<unknown[]> {
 		const limits = resolveNikaTokenLimits(
 			config.get<string>('contextWindow', '128K'),
 			config.get<string>('outputTokens', '8K'),
@@ -698,6 +833,48 @@ export class NikaSettingsEditor extends Disposable {
 					contextWindow: entry.contextWindow,
 				};
 			});
+		const openAISelected = getNikaSelectedModels(providerConfig, 'openai');
+		const openAIChoices = (openAICatalog as unknown[])
+			.filter(model => {
+				if (openAISelected === undefined) {
+					return providerConfig === undefined;
+				}
+				return openAISelected.includes(`${NIKA_OPENAI_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number; priceLabel: string; free: boolean };
+				return {
+					id: `nika/${NIKA_OPENAI_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'openai',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+					priceLabel: entry.priceLabel,
+					free: entry.free,
+				};
+			});
+		const anthropicSelected = getNikaSelectedModels(providerConfig, 'anthropic');
+		const anthropicChoices = (anthropicCatalog as unknown[])
+			.filter(model => {
+				if (anthropicSelected === undefined) {
+					return providerConfig === undefined;
+				}
+				return anthropicSelected.includes(`${NIKA_ANTHROPIC_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number; priceLabel: string; free: boolean };
+				return {
+					id: `nika/${NIKA_ANTHROPIC_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'anthropic',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+					priceLabel: entry.priceLabel,
+					free: entry.free,
+				};
+			});
 		// The web model is static: no catalog fetch needed. Managed mode gates
 		// on the wizard selection; legacy mode shows it whenever a token
 		// exists (mirroring the classic key-based visibility rules).
@@ -711,7 +888,37 @@ export class NikaSettingsEditor extends Disposable {
 				vision: capabilities.vision ?? false,
 				efforts: getNikaEffortOptionsForModel(id),
 			}));
-		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices];
+		// Subscription catalogs only ever appear in managed mode: legacy mode
+		// surfaces the curated static lineup instead (seeded by
+		// `_legacyProviderSeed`). Entries already carry their `chatgpt/` /
+		// `claude/` prefix, so the gating test is a direct `includes`.
+		const chatGptSelected = getNikaSelectedModels(providerConfig, 'chatgpt');
+		const chatGptChoices = (chatGptSubModels as unknown[])
+			.filter(model => chatGptSelected !== undefined && chatGptSelected.includes((model as { id: string }).id))
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[] };
+				return {
+					id: `nika/${entry.id}`,
+					displayName: entry.name,
+					provider: 'chatgpt',
+					vision: entry.vision,
+					efforts: entry.efforts,
+				};
+			});
+		const claudeSelected = getNikaSelectedModels(providerConfig, 'claude');
+		const claudeChoices = (claudeSubModels as unknown[])
+			.filter(model => claudeSelected !== undefined && claudeSelected.includes((model as { id: string }).id))
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[] };
+				return {
+					id: `nika/${entry.id}`,
+					displayName: entry.name,
+					provider: 'claude',
+					vision: entry.vision,
+					efforts: entry.efforts,
+				};
+			});
+		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices, ...openAIChoices, ...anthropicChoices, ...chatGptChoices, ...claudeChoices];
 	}
 
 	private _llamaCppBaseUrl(): string {
@@ -803,19 +1010,19 @@ export class NikaSettingsEditor extends Disposable {
 					}
 					break;
 				case 'saveSecret':
-					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb') && typeof message.value === 'string') {
+					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic') && typeof message.value === 'string') {
 						await this._saveSecret(message.provider, message.value);
 					}
 					break;
 				case 'removeSecret':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic') {
 						await this._context.secrets.delete(SECRET_KEYS[message.provider]);
 						this._connections.delete(message.provider);
 						void vscode.window.showInformationMessage(vscode.l10n.t('{0} key removed.', providerDisplayName(message.provider)));
 					}
 					break;
 				case 'testConnection':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic') {
 						await this.testConnection(message.provider);
 					}
 					break;
@@ -824,6 +1031,23 @@ export class NikaSettingsEditor extends Disposable {
 					break;
 				case 'deepSeekWebImportToken':
 					await this._deepSeekWebImportToken();
+					break;
+				case 'chatGptSubSignIn':
+					await this._chatGptSubSignIn();
+					break;
+				case 'claudeSubSignIn':
+					await this._claudeSubSignIn();
+					break;
+				case 'subCopyCode':
+					if (typeof message.code === 'string' && message.code) {
+						await vscode.env.clipboard.writeText(message.code);
+						void vscode.window.showInformationMessage(vscode.l10n.t('Device code copied to the clipboard.'));
+					}
+					break;
+				case 'subSignOut':
+					if (message.provider === 'chatgpt' || message.provider === 'claude') {
+						await this._subSignOut(message.provider);
+					}
 					break;
 				case 'saveProviderConfig':
 					if (typeof message.provider === 'string' && Array.isArray(message.models)) {
@@ -894,6 +1118,9 @@ export class NikaSettingsEditor extends Disposable {
 		if ((key === 'thinkingEffort' || key.endsWith('ThinkingEffort')) && !isNikaThinkingEffort(value)) {
 			throw new Error(vscode.l10n.t('Thinking effort must be None, Low, Medium, High, or Max.'));
 		}
+		if (key === 'codexSpeed' && value !== 'standard' && value !== 'fast') {
+			throw new Error(vscode.l10n.t('Speed must be Standard or Fast.'));
+		}
 		// Clamp an effort value that the associated model does not support to
 		// the nearest supported level (e.g. `max` → `high` for OpenRouter /
 		// Gemini, or `medium` → `high` for DeepSeek). This keeps the stored
@@ -957,7 +1184,7 @@ export class NikaSettingsEditor extends Disposable {
 		await this._indexingSchemeManager.clear();
 	}
 
-	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb', value: string): Promise<void> {
+	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic', value: string): Promise<void> {
 		const trimmed = value.trim();
 		// Local llama.cpp servers often use short tokens; any non-empty value
 		// is accepted there. Cloud providers need a real key.
@@ -996,13 +1223,15 @@ export class NikaSettingsEditor extends Disposable {
 	 */
 	private async _legacyProviderSeed(): Promise<NikaProviderConfig> {
 		const seed: NikaProviderConfig = {};
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
 			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
 			this._context.secrets.get(NIKA_CURSOR_SECRET),
 			this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET),
+			this._context.secrets.get(NIKA_OPENAI_SECRET),
+			this._context.secrets.get(NIKA_ANTHROPIC_SECRET),
 		]);
 		if (deepseekKey) {
 			seed.deepseek = { models: [...NIKA_DEEPSEEK_MODEL_IDS] };
@@ -1033,6 +1262,38 @@ export class NikaSettingsEditor extends Disposable {
 		}
 		if (deepSeekWebToken) {
 			seed.deepseekweb = { models: Object.keys(this._deepSeekWebProvider.getKnownModels()) };
+		}
+		if (openAIKey) {
+			const catalog = await this._openAICatalogState(openAIKey, resolveNikaTokenLimits(
+				vscode.workspace.getConfiguration('nika').get<string>('contextWindow', '128K'),
+				vscode.workspace.getConfiguration('nika').get<string>('outputTokens', '8K'),
+			));
+			seed.openai = { models: (catalog as { id: string }[]).map(model => `${NIKA_OPENAI_MODEL_PREFIX}${model.id}`) };
+		}
+		if (anthropicKey) {
+			const catalog = await this._anthropicCatalogState(anthropicKey, resolveNikaTokenLimits(
+				vscode.workspace.getConfiguration('nika').get<string>('contextWindow', '128K'),
+				vscode.workspace.getConfiguration('nika').get<string>('outputTokens', '8K'),
+			));
+			seed.anthropic = { models: (catalog as { id: string }[]).map(model => `${NIKA_ANTHROPIC_MODEL_PREFIX}${model.id}`) };
+		}
+		// Legacy mode surfaces the full static subscription catalogs whenever
+		// a sign-in is present, mirroring the classic key-based visibility.
+		const chatGptSubSecret = await this._context.secrets.get(NIKA_CHATGPT_SUB_SECRET);
+		if (parseNikaChatGptSubscriptionToken(chatGptSubSecret)) {
+			const limits = resolveNikaTokenLimits(
+				vscode.workspace.getConfiguration('nika').get<string>('contextWindow', '128K'),
+				vscode.workspace.getConfiguration('nika').get<string>('outputTokens', '8K'),
+			);
+			seed.chatgpt = { models: Object.keys(this._chatGptSubProvider.getKnownModels(limits)).map(id => `${NIKA_CHATGPT_MODEL_PREFIX}${id}`) };
+		}
+		const claudeSubSecret = await this._context.secrets.get(NIKA_CLAUDE_SUB_SECRET);
+		if (parseNikaClaudeSubscriptionToken(claudeSubSecret)) {
+			const limits = resolveNikaTokenLimits(
+				vscode.workspace.getConfiguration('nika').get<string>('contextWindow', '128K'),
+				vscode.workspace.getConfiguration('nika').get<string>('outputTokens', '8K'),
+			);
+			seed.claude = { models: Object.keys(this._claudeSubProvider.getKnownModels(limits)).map(id => `${NIKA_CLAUDE_SUB_MODEL_PREFIX}${id}`) };
 		}
 		return seed;
 	}
@@ -1121,7 +1382,9 @@ export class NikaSettingsEditor extends Disposable {
 	 * Removes a provider from the managed `nika.providers` config. Its models
 	 * stop appearing in chat, Agents, and the dropdowns immediately. The API
 	 * key (if any) is kept in Secret Storage so re-adding the provider does
-	 * not require re-entering it.
+	 * not require re-entering it. Subscription providers additionally revoke
+	 * their token (best effort) and delete the stored secret — a sign-out,
+	 * not just a config removal.
 	 */
 	private async _removeProvider(provider: NikaProviderId): Promise<void> {
 		const config = vscode.workspace.getConfiguration('nika');
@@ -1132,7 +1395,152 @@ export class NikaSettingsEditor extends Disposable {
 		const { [provider]: _removed, ...rest } = current;
 		await config.update('providers', rest, vscode.ConfigurationTarget.Global);
 		this._connections.delete(provider);
+		if (provider === 'chatgpt' || provider === 'claude') {
+			await this._subSignOut(provider);
+		}
 		void vscode.window.showInformationMessage(vscode.l10n.t('{0} removed. Its models no longer appear in chat or agents.', providerDisplayName(provider)));
+	}
+
+	/**
+	 * Signs out of a subscription provider: revokes the token (best effort),
+	 * deletes the stored secret, and cancels any in-flight sign-in. Used by
+	 * the sign-out button in the wizard and by `_removeProvider`.
+	 */
+	private async _subSignOut(provider: 'chatgpt' | 'claude'): Promise<void> {
+		const raw = await this._context.secrets.get(SECRET_KEYS[provider]);
+		const token = provider === 'chatgpt'
+			? parseNikaChatGptSubscriptionToken(raw)
+			: parseNikaClaudeSubscriptionToken(raw);
+		if (token) {
+			try {
+				// Only ChatGPT has a pinned revoke endpoint; Claude's token is
+				// simply discarded locally (it stays valid server-side until
+				// it expires or is revoked at the provider).
+				if (provider === 'chatgpt') {
+					await this._chatGptSubProvider.revoke(token as NikaChatGptSubscriptionToken);
+				}
+			} catch {
+				// Best effort: the local sign-out must not fail on a network error.
+			}
+		}
+		await this._context.secrets.delete(SECRET_KEYS[provider]);
+		this._connections.delete(provider);
+		this._panel?.webview.postMessage({ type: 'subSignedOut', provider });
+	}
+
+	/**
+	 * Starts the ChatGPT device-code sign-in from the wizard. A single flow
+	 * can run at a time; starting a new one cancels the previous.
+	 */
+	private async _chatGptSubSignIn(): Promise<void> {
+		this._subSignInSource?.cancel();
+		this._subSignInSource = new vscode.CancellationTokenSource();
+		const flow = this._chatGptSubProvider.signIn(
+			this._subSignInSource.token,
+			message => this._postSubStatus('chatgpt', message),
+			start => this._panel?.webview.postMessage({ type: 'subDeviceCodeStart', provider: 'chatgpt', verificationUrl: start.verificationUrl, userCode: start.userCode }),
+		);
+		const result = await this._runSubSignIn('chatgpt', flow) as NikaChatGptSubscriptionToken | undefined;
+		if (result) {
+			await this._context.secrets.store(NIKA_CHATGPT_SUB_SECRET, JSON.stringify(result));
+			this._connections.delete('chatgpt');
+			this._panel?.webview.postMessage({ type: 'subSignedIn', provider: 'chatgpt' });
+		}
+	}
+
+	/**
+	 * Starts the Claude device-code sign-in from the wizard. A single flow
+	 * can run at a time; starting a new one cancels the previous.
+	 */
+	private async _claudeSubSignIn(): Promise<void> {
+		this._subSignInSource?.cancel();
+		this._subSignInSource = new vscode.CancellationTokenSource();
+		const flow = this._claudeSubProvider.signIn(
+			this._subSignInSource.token,
+			message => this._postSubStatus('claude', message),
+			start => this._panel?.webview.postMessage({ type: 'subDeviceCodeStart', provider: 'claude', verificationUrl: start.verificationUrl, userCode: start.userCode }),
+		);
+		const result = await this._runSubSignIn('claude', flow) as NikaClaudeSubscriptionToken | undefined;
+		if (result) {
+			// Enrich with the account status (plan type / display name) when
+			// reachable; the poll result is stored regardless.
+			let planType = result.planType;
+			let displayName = result.displayName;
+			try {
+				const status = await this._claudeSubProvider.fetchAccountStatus(result.accessToken);
+				planType = status?.planType ?? planType;
+				displayName = status?.displayName ?? displayName;
+			} catch {
+				// Account-status lookup is best effort.
+			}
+			await this._context.secrets.store(NIKA_CLAUDE_SUB_SECRET, JSON.stringify({ ...result, planType, displayName }));
+			this._connections.delete('claude');
+			this._panel?.webview.postMessage({ type: 'subSignedIn', provider: 'claude' });
+		}
+	}
+
+	/** Posts a device-flow status line to the wizard (no-op when closed). */
+	private _postSubStatus(provider: 'chatgpt' | 'claude', message: string): void {
+		this._panel?.webview.postMessage({ type: 'subDeviceCodeStatus', provider, message });
+	}
+
+	/**
+	 * Awaits a device-code flow and reports failures to the wizard. Returns
+	 * the stored token payload, or `undefined` when the flow was cancelled.
+	 */
+	private async _runSubSignIn(provider: 'chatgpt' | 'claude', flow: Promise<{ token: NikaChatGptSubscriptionToken | NikaClaudeSubscriptionToken }>): Promise<NikaChatGptSubscriptionToken | NikaClaudeSubscriptionToken | undefined> {
+		try {
+			const result = await flow;
+			return result.token;
+		} catch (error) {
+			if (error instanceof vscode.CancellationError) {
+				return undefined;
+			}
+			const proxy = this._proxyContext();
+			const detail = (error instanceof Error ? error.message : String(error)) + (proxy ? `\nProxy context: ${proxy}` : '');
+			this.log('ERROR', `Subscription sign-in (${provider}) failed: ${detail}`);
+			this._panel?.webview.postMessage({ type: 'subDeviceCodeError', provider, message: detail });
+			return undefined;
+		}
+	}
+
+	/**
+	 * Snapshots the proxy configuration the extension host would use for the
+	 * device-flow request (VS Code `http.*` settings plus sanitized proxy env
+	 * vars), so a 403 from the sign-in endpoint can be traced to a proxy
+	 * egress. Credentials in proxy URLs are stripped.
+	 */
+	private _proxyContext(): string {
+		const parts: string[] = [];
+		try {
+			const http = vscode.workspace.getConfiguration('http');
+			parts.push(`proxySupport=${http.get<string>('proxySupport', 'override')}`);
+			for (const key of ['proxy', 'httpsProxy', 'proxyStrictSSL', 'systemCertificates'] as const) {
+				const value = http.get<string | boolean>(key);
+				if (value !== undefined) {
+					parts.push(`${key}=${JSON.stringify(value)}`);
+				}
+			}
+		} catch {
+			// Configuration read failed — env vars below still apply.
+		}
+		const sanitize = (url: string): string => {
+			try {
+				const parsed = new URL(url);
+				parsed.username = '';
+				parsed.password = '';
+				return parsed.href;
+			} catch {
+				return url;
+			}
+		};
+		for (const name of ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'all_proxy', 'no_proxy']) {
+			const value = process.env[name];
+			if (value) {
+				parts.push(`${name}=${sanitize(value)}`);
+			}
+		}
+		return parts.join(' ');
 	}
 
 	async testConnection(provider: NikaConnection): Promise<boolean> {
@@ -1166,6 +1574,35 @@ export class NikaSettingsEditor extends Disposable {
 				const key = await this._context.secrets.get(NIKA_CURSOR_SECRET);
 				if (!key) { throw new Error(vscode.l10n.t('No Cursor key is configured.')); }
 				response = await this._fetcherService.fetch('https://api.cursor.com/v1/models', { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-cursor-test' });
+			} else if (provider === 'openai') {
+				const key = await this._context.secrets.get(NIKA_OPENAI_SECRET);
+				if (!key) { throw new Error(vscode.l10n.t('No OpenAI key is configured.')); }
+				response = await this._fetcherService.fetch('https://api.openai.com/v1/models', { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-openai-test' });
+			} else if (provider === 'anthropic') {
+				const key = await this._context.secrets.get(NIKA_ANTHROPIC_SECRET);
+				if (!key) { throw new Error(vscode.l10n.t('No Anthropic key is configured.')); }
+				response = await this._fetcherService.fetch('https://api.anthropic.com/v1/models', { method: 'GET', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, callSite: 'nika-anthropic-test' });
+			} else if (provider === 'chatgpt') {
+				// A refresh round trip proves the stored token works and rotates
+				// the access token in the same pass (codex does the same).
+				const raw = await this._context.secrets.get(NIKA_CHATGPT_SUB_SECRET);
+				const token = parseNikaChatGptSubscriptionToken(raw);
+				if (!token) { throw new Error(vscode.l10n.t('No ChatGPT sign-in is configured.')); }
+				const refreshed = await this._chatGptSubProvider.refreshToken(token);
+				await this._context.secrets.store(NIKA_CHATGPT_SUB_SECRET, JSON.stringify(refreshed));
+				response = { ok: true, status: 200 };
+			} else if (provider === 'claude') {
+				const raw = await this._context.secrets.get(NIKA_CLAUDE_SUB_SECRET);
+				const token = parseNikaClaudeSubscriptionToken(raw);
+				if (!token) { throw new Error(vscode.l10n.t('No Claude sign-in is configured.')); }
+				// Prefer the account-status GET; fall back to a refresh when it
+				// fails (stale access token or blocked status endpoint).
+				const status = await this._claudeSubProvider.fetchAccountStatus(token.accessToken);
+				if (!status) {
+					const refreshed = await this._claudeSubProvider.refreshToken(token);
+					await this._context.secrets.store(NIKA_CLAUDE_SUB_SECRET, JSON.stringify(refreshed));
+				}
+				response = { ok: true, status: 200 };
 			} else {
 				const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 				response = await this._fetcherService.fetch(`${url}/api/version`, { method: 'GET', callSite: 'nika-ollama-test' });
@@ -1285,6 +1722,10 @@ export class NikaSettingsEditor extends Disposable {
 			geminiConfigured: state.geminiConfigured,
 			openrouterConfigured: state.openrouterConfigured,
 			llamacppConfigured: state.llamacppConfigured,
+			chatgptConfigured: state.chatgptConfigured,
+			claudeConfigured: state.claudeConfigured,
+			chatgptStatus: state.chatgptStatus,
+			claudeStatus: state.claudeStatus,
 			providersManaged: state.providersManaged,
 			providers: state.providers,
 			openrouterModelCount: (state.openrouterModels as unknown[]).length,
@@ -1324,7 +1765,7 @@ export class NikaSettingsEditor extends Disposable {
 nav button{display:block;width:100%;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);padding:9px 10px;text-align:left;cursor:pointer}nav button:hover,nav button.active{background:var(--vscode-list-hoverBackground)}
 main{padding:38px 46px 80px}section{display:none}section.active{display:block}h1{font-size:26px;margin:0 0 8px}h2{font-size:16px;margin:30px 0 8px}.lead{color:var(--vscode-descriptionForeground);margin:0 0 28px;line-height:1.55}
 .card{padding:18px;border:1px solid var(--vscode-panel-border);border-radius:10px;margin:12px 0;background:color-mix(in srgb,var(--vscode-editor-background) 94%,var(--vscode-sideBar-background))}.row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(210px,1fr);gap:22px;align-items:center;padding:11px 0}.row+.row{border-top:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent)}label strong{display:block;margin-bottom:4px}.hint,.status{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}.agent-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px}
-input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}input[type="checkbox"]{width:auto;min-height:auto;accent-color:var(--vscode-button-background)}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls input[type="checkbox"]{flex:0}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+input,select{width:100%;min-height:30px;padding:5px 8px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);border-radius:3px}input:focus,select:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}input[type="checkbox"]{width:auto;min-height:auto;accent-color:var(--vscode-button-background)}.controls{display:flex;gap:7px;align-items:center}.controls.wrap{flex-wrap:wrap}.controls input{flex:1}.controls input[type="checkbox"]{flex:0}.controls button,.action{white-space:nowrap;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;padding:6px 11px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);cursor:pointer}.secondary{background:var(--vscode-button-secondaryBackground)!important;color:var(--vscode-button-secondaryForeground)!important}.danger{background:transparent!important;color:var(--vscode-errorForeground)!important;border-color:var(--vscode-errorForeground)!important}.pill{display:inline-flex;gap:6px;align-items:center;padding:3px 8px;border-radius:999px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);font-size:11px}.pill.warn{background:color-mix(in srgb,var(--vscode-inputValidation-errorBackground) 55%,transparent);color:var(--vscode-errorForeground);border:1px solid var(--vscode-inputValidation-errorBorder);font-weight:600}.dot{width:7px;height:7px;border-radius:50%;background:#ef4444}.ok .dot{background:#22c55e}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
 .chart{margin:8px 0 4px}.chart svg{display:block;width:100%;height:auto}.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0 4px}.kpi .k{color:var(--vscode-descriptionForeground);font-size:11px;text-transform:uppercase;letter-spacing:.05em}.kpi .v{font-size:21px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums}table.usage{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;table-layout:fixed}table.usage th,table.usage td{text-align:left;padding:6px 10px;border-bottom:1px solid color-mix(in srgb,var(--vscode-panel-border) 65%,transparent);vertical-align:top;overflow-wrap:break-word;word-break:break-word}table.usage th{color:var(--vscode-descriptionForeground);font-weight:600;white-space:nowrap}table.usage td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}table.usage tr:last-child td{border-bottom:0}table.usage [data-openrouter-default]{white-space:normal;text-align:left;word-break:break-word}.peak-badge{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:color-mix(in srgb,var(--vscode-badge-background) 55%,transparent)}.peak-badge .dot{background:#22c55e}.peak-badge.peak .dot{background:#ef4444}.empty{color:var(--vscode-descriptionForeground);font-style:italic;padding:10px 0}@media(max-width:720px){.shell{display:block}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--vscode-panel-border)}nav{display:flex;overflow:auto}.brand{margin-bottom:14px}main{padding:28px 20px}.row{grid-template-columns:1fr;gap:8px}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand"><svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#000"/><path fill="#fff" d="M510 650 163 894V670c0-18 9-35 24-45l139-92 184 117Z"/><path fill="#fff" d="M163 197 330 92v416c0 21 11 40 29 51l151 96-27 18-298-190c-14-9-22-24-22-41V197Z"/><path fill="#fff" d="m710 530 151 91v209L710 932V530Z"/><path fill="#fff" d="M330 303 710 530v252L359 568c-18-11-29-30-29-51V303Z"/><path fill="#fff" d="m601 270 260 148c0 17-9 33-24 42l-127 70-109-64V270Z"/><path fill="#fff" d="M601 270c0-7 4-14 10-18l250-144v310L601 270Z"/></svg>NikaCode</div><nav>
 ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Providers')], ['models', vscode.l10n.t('Models')], ['vision', vscode.l10n.t('Vision')], ['pdf', vscode.l10n.t('PDF')], ['agents', vscode.l10n.t('Agents')], ['indexing', vscode.l10n.t('Indexing')], ['usage', vscode.l10n.t('Usage')], ['diagnostics', vscode.l10n.t('Diagnostics')]].map(([id, label], i) => `<button class="${i === 0 ? 'active' : ''}" data-section="${id}">${label}</button>`).join('')}
@@ -1342,9 +1783,10 @@ ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Provide
 </section>
 <section id="models"><h1>${vscode.l10n.t('Models')}</h1><p class="lead">${vscode.l10n.t('Choose defaults and request budgets. A conversation-level picker selection always wins.')}</p><div class="card">
 ${this._modelSelectRow('defaultModel', vscode.l10n.t('Default model for new chats'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL))}
-${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._effortSelectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL), String((state.settings as Record<string, unknown>).thinkingEffort ?? 'high'))}${this._checkboxRow('openrouterFloor', vscode.l10n.t('Use floor pricing for OpenRouter models'))}</div>
+${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._effortSelectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL), String((state.settings as Record<string, unknown>).thinkingEffort ?? 'high'))}${this._selectRow('codexSpeed', vscode.l10n.t('ChatGPT request speed'), [['standard', vscode.l10n.t('Standard')], ['fast', vscode.l10n.t('Fast')]])}${this._checkboxRow('openrouterFloor', vscode.l10n.t('Use floor pricing for OpenRouter models'))}</div>
 ${(state.openrouterModels as unknown[]).length > 0 ? `<div class="card" style="min-width:0"><h2>${vscode.l10n.t('OpenRouter catalog')}</h2><p class="hint">${vscode.l10n.t('Search the full catalog and pick a default. The chat model picker always shows the complete list with live prices.')}</p><div class="controls"><input type="text" data-openrouter-filter placeholder="${vscode.l10n.t('Filter by model id or name…')}"></div><div data-openrouter-catalog style="min-width:0"></div></div>` : ''}</section>
 <section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only models. Provider credentials are managed on the Providers page.')}</p><div class="card">
+${this._checkboxRow('visionPreprocessingEnabled', vscode.l10n.t('Describe images before sending them to the model'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When on, images attached to text-only models are described by the backend below first. When off, images are sent to the model as-is: models with native vision receive them directly, while text-only models may reject them.')}</span></label></div>
 ${this._visionBackendRow(state, String((state.settings as Record<string, unknown>).visionModel ?? 'gemini-2.5-flash'))}<div class="row"><label for="deepseekWeb.deleteSessionsAfterVision"><strong>${vscode.l10n.t('Delete DeepSeek Web sessions after each description')}</strong><span class="hint">${vscode.l10n.t('Removes the chat session from chat.deepseek.com after a successful image description, so image conversations do not linger in your DeepSeek history.')}</span></label><input id="deepseekWeb.deleteSessionsAfterVision" data-setting="deepseekWeb.deleteSessionsAfterVision" type="checkbox"></div>${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}
 <div class="row"><label for="visionOpenRouterModel"><strong>${vscode.l10n.t('OpenRouter vision model')}</strong><span class="hint">${vscode.l10n.t('A vision-capable OpenRouter model id, e.g. google/gemini-2.5-flash.')}</span></label><input id="visionOpenRouterModel" data-setting="visionOpenRouterModel" type="text" list="openrouter-vision-models"></div><datalist id="openrouter-vision-models"></datalist>
 </div></section>
@@ -1368,19 +1810,24 @@ ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', 
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});const good=result?result.ok:configured;document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(good?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}
 // --- Provider wizard (Add Provider flow + provider cards) ---
-const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor',deepseekweb:'DeepSeek Web'};
-const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor','deepseekweb'];
-const providerHints={deepseek:'Flash, Pro, and experimental Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically'};
+const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor',deepseekweb:'DeepSeek Web',openai:'OpenAI',anthropic:'Anthropic',chatgpt:'ChatGPT',claude:'Claude'};
+const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor','deepseekweb','openai','anthropic','chatgpt','claude'];
+const providerHints={deepseek:'Flash, Pro, and experimental Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota'};
 const providerModels=state.providerModels||{};
 const providerConfig=state.providers||{};
 const providersManaged=!!state.providersManaged;
 const providersConfigured=state.providersConfigured||{};
 providerOrder.forEach(id=>status(id,!!providersConfigured[id]));
+// Subscription device-flow state, fed by window messages from the extension
+// side (start / status / error / signed-in / signed-out). Declared before the
+// first renderWizard call below: a saved wizard on a chatgpt/claude step
+// would otherwise hit the const's temporal dead zone and kill the script.
+const subFlowState={};
 function wizardState(){return (vscode.getState()||{}).wizard||null;}
 function setWizard(w){const saved=vscode.getState()||{};vscode.setState({...saved,wizard:w});}
 function modelNameFor(provider,id){
   let key=id;
-  ['deepseekweb/','gemini/','cursor/','openrouter/','ollama/','llamacpp/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
+  ['deepseekweb/','gemini/','cursor/','openrouter/','ollama/','llamacpp/','openai/','anthropic/','chatgpt/','claude/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
   const list=providerModels[provider]||[];
   const entry=list.find(m=>m.id===key)||list.find(m=>m.id===id);
   return entry?(entry.name||key):id;
@@ -1402,10 +1849,16 @@ function renderProviderCards(){
 function wizardStepHtml(){
   const w=wizardState();if(!w){return '';}
   const label=providerLabels[w.provider]||'';
-  let html='<h2>'+esc(w.step==='pick'?'Add Provider':(w.step==='models'?label+' &middot; Select models':label))+'</h2>';
+  let html='<h2>'+esc(w.step==='pick'?'Add Provider':(w.step==='models'?label+' · Select models':label))+'</h2>';
   if(w.step==='pick'){
     const available=providerOrder.filter(id=>!providersManaged||!providerConfig[id]);
-    html+=available.length?available.map(id=>'<div class="row"><label><strong>'+esc(providerLabels[id])+'</strong><span class="hint">'+esc(providerHints[id]||'')+'</span></label><div><button class="action secondary" data-wizard-pick="'+id+'">'+esc('Select')+'</button></div></div>').join(''):'<p class="hint">'+esc('All providers are already added.')+'</p>';
+    const credentialPill={chatgpt:'Subscription',claude:'Subscription',deepseekweb:'Web token',ollama:'Local',llamacpp:'Local'};
+    const riskPill={chatgpt:'&#9888; Risk',claude:'&#9888; Risk'};
+    html+=available.length?available.map(id=>{
+      const pill=credentialPill[id]||'API key';
+      const warn=riskPill[id]?' <span class="pill warn" title="'+esc('Unofficial integration - the provider may detect third-party clients; use at your own risk.')+'">'+riskPill[id]+'</span>':'';
+      return '<div class="row"><label><strong>'+esc(providerLabels[id])+' <span class="pill">'+pill+'</span>'+warn+'</strong><span class="hint">'+esc(providerHints[id]||'')+'</span></label><div><button class="action secondary" data-wizard-pick="'+id+'">'+esc('Select')+'</button></div></div>';
+    }).join(''):'<p class="hint">'+esc('All providers are already added.')+'</p>';
     return html;
   }
   if(w.step==='config'){
@@ -1414,6 +1867,10 @@ function wizardStepHtml(){
     }else if(w.provider==='llamacpp'){
       html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp host')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server (default http://localhost:8080).')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" value="'+esc(state.llamaCppBaseUrl||'http://localhost:8080')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
       html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Leave empty for no authentication.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste your API key')+'"></div></div>';
+    }else if(w.provider==='chatgpt'||w.provider==='claude'){
+      const risk=w.provider==='chatgpt'?'Unofficial integration: signs in with your ChatGPT (Plus/Pro) plan and routes requests through OpenAI’s codex backend. Not an official client — the provider may detect third-party clients; use at your own risk.':'Unofficial integration: signs in with your Claude (Pro/Max) plan and routes requests through Anthropic’s Claude Code OAuth. Not an official client — the provider may detect third-party clients; use at your own risk.';
+      html+='<div class="row"><label><strong>'+esc('Sign in with '+label)+'</strong><span class="hint">'+esc(risk)+'</span></label><div class="controls"><button class="action" data-wizard-sub-signin>'+esc('Start device sign-in')+'</button></div></div>';
+      html+='<div data-sub-flow="'+w.provider+'"></div>';
     }else{
       const manualHint=w.provider==='deepseekweb'?(state.isWeb?'Sign in at chat.deepseek.com in your browser, then paste your userToken here: open the browser console (F12) and run JSON.parse(localStorage.getItem("userToken")).value. Stored securely; never read back into this page.':'Sign in at chat.deepseek.com, then import your userToken: on desktop use “Import token from browser”; on web paste the value from the browser console (JSON.parse(localStorage.getItem("userToken")).value). Stored securely; never read back into this page.'):'Stored securely in Secret Storage; never read back into this page.';
       html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':manualHint)+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc(w.provider==='deepseekweb'?'Paste your userToken':'Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
@@ -1425,10 +1882,13 @@ function wizardStepHtml(){
     return html;
   }
   const list=providerModels[w.provider]||[];
-  if((w.provider==='openrouter'||w.provider==='gemini'||w.provider==='cursor')&&list.length>0){html+='<div class="controls"><input type="text" data-wizard-filter placeholder="'+esc('Filter models…')+'"></div>';}
+  if((w.provider==='openrouter'||w.provider==='gemini'||w.provider==='cursor'||w.provider==='openai'||w.provider==='anthropic'||w.provider==='chatgpt'||w.provider==='claude')&&list.length>0){html+='<div class="controls"><input type="text" data-wizard-filter placeholder="'+esc('Filter models…')+'"></div>';}
   if(!list.length&&w.provider==='openrouter'){html+='<p class="hint">'+esc('No catalog models available. Check that the OpenRouter key is valid.')+'</p>';}
   if(!list.length&&w.provider==='gemini'){html+='<p class="hint">'+esc('No catalog models available. Check that the Gemini API key is valid.')+'</p>';}
   if(!list.length&&w.provider==='cursor'){html+='<p class="hint">'+esc('No catalog models available. Check that the Cursor API key is valid.')+'</p>';}
+  if(!list.length&&w.provider==='openai'){html+='<p class="hint">'+esc('No catalog models available. Check that the OpenAI API key is valid.')+'</p>';}
+  if(!list.length&&w.provider==='anthropic'){html+='<p class="hint">'+esc('No catalog models available. Check that the Anthropic API key is valid.')+'</p>';}
+  if(!list.length&&(w.provider==='chatgpt'||w.provider==='claude')){html+='<p class="hint">'+esc('No models available. Complete the sign-in first.')+'</p>';}
   if(!list.length&&(w.provider==='ollama'||w.provider==='llamacpp')){html+='<p class="hint">'+esc('No models found. Is the server running with models loaded? For Ollama, run ollama pull <model> to add one.')+'</p>';}
   html+='<div data-wizard-model-list></div>';
   html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button><button class="action secondary" data-wizard-test>'+esc('Test connection')+'</button><button class="action" data-wizard-done>'+esc('Done')+'</button></div>';
@@ -1448,6 +1908,7 @@ function renderWizard(){
     const w=wizardState();
     host.innerHTML=w?wizardStepHtml():'';
     if(w&&w.step==='models'){renderWizardModelList('');}
+    if(w&&(w.provider==='chatgpt'||w.provider==='claude')){renderSubFlow(w.provider);}
   });
 }
 renderProviderCards();renderWizard();
@@ -1469,6 +1930,10 @@ document.addEventListener('click',e=>{
   if(test){const w=wizardState();if(w){post({type:'testConnection',provider:w.provider});}return;}
   const signin=e.target.closest('[data-wizard-web-signin]');
   if(signin){post({type:'deepSeekWebSignIn'});return;}
+  const subsignin=e.target.closest('[data-wizard-sub-signin]');
+  if(subsignin){const w=wizardState();if(w){post({type:w.provider==='chatgpt'?'chatGptSubSignIn':'claudeSubSignIn'});}return;}
+  const subcopy=e.target.closest('[data-sub-copy-code]');
+  if(subcopy){post({type:'subCopyCode',code:subcopy.dataset.subCopyCode});return;}
   const webimport=e.target.closest('[data-wizard-web-import]');
   if(webimport){post({type:'deepSeekWebImportToken'});return;}
   const done=e.target.closest('[data-wizard-done]');
@@ -1484,6 +1949,20 @@ document.addEventListener('click',e=>{
   const remove=e.target.closest('[data-remove-provider]');
   if(remove){post({type:'removeProvider',provider:remove.dataset.removeProvider});}
 });
+// Subscription device-flow state is declared above (before the first render);
+// renderSubFlow renders the live flow card for the wizard's config step.
+function renderSubFlow(provider){
+  const data=subFlowState[provider]||{state:'idle'};
+  document.querySelectorAll('[data-sub-flow="'+provider+'"]').forEach(el=>{
+    if(data.state==='idle'){el.innerHTML='';return;}
+    if(data.state==='started'){
+      el.innerHTML='<div class="card"><div class="row"><label><strong>'+esc('Verify')+'</strong><span class="hint">'+esc('Open the URL in your browser and enter the code.')+'</span></label></div><div class="row"><label><strong>'+esc('Verification URL')+'</strong></label><a href="'+esc(data.verificationUrl)+'" target="_blank" rel="noopener">'+esc(data.verificationUrl)+'</a></div><div class="row"><label><strong>'+esc('Code')+'</strong></label><div class="controls"><span class="pill">'+esc(data.userCode)+'</span><button class="action secondary" data-sub-copy-code="'+esc(data.userCode)+'" title="'+esc('Copy the code')+'">'+esc('Copy')+'</button></div></div><div class="row"><label><strong>'+esc('Status')+'</strong></label><span>'+esc(data.status||'Waiting for approval…')+'</span></div></div>';
+      return;
+    }
+    if(data.state==='error'){el.innerHTML='<div class="row"><label><strong>'+esc('Sign-in failed')+'</strong></label><span style="color:var(--vscode-errorForeground)">'+esc(data.message)+'</span></div>';return;}
+    if(data.state==='done'){el.innerHTML='<p class="hint">'+esc('Signed in. Choose your models below.')+'</p>';return;}
+  });
+}
 // Extension-side success signal: the DeepSeek Web token was imported, so the
 // wizard can leave the credential step and move to model selection.
 window.addEventListener('message',function(e){
@@ -1494,6 +1973,26 @@ window.addEventListener('message',function(e){
       setWizard({provider:'deepseekweb',step:'models',models:[]});
       renderWizard();
     }
+  }else if(d.type==='subDeviceCodeStart'){
+    subFlowState[d.provider]={state:'started',verificationUrl:d.verificationUrl,userCode:d.userCode,status:''};
+    renderSubFlow(d.provider);
+  }else if(d.type==='subDeviceCodeStatus'){
+    const f=subFlowState[d.provider];
+    if(f){f.status=d.message;renderSubFlow(d.provider);}
+  }else if(d.type==='subDeviceCodeError'){
+    subFlowState[d.provider]={state:'error',message:d.message};
+    renderSubFlow(d.provider);
+  }else if(d.type==='subSignedIn'){
+    subFlowState[d.provider]={state:'done'};
+    renderSubFlow(d.provider);
+    const w=wizardState();
+    if(w&&w.provider===d.provider&&w.step==='config'){
+      setWizard({provider:d.provider,step:'models',models:[]});
+      renderWizard();
+    }
+  }else if(d.type==='subSignedOut'){
+    subFlowState[d.provider]={state:'idle'};
+    renderSubFlow(d.provider);
   }
 });
 document.addEventListener('change',e=>{
@@ -1540,7 +2039,7 @@ function renderUsage(){
   const lastProvider=u.lastProvider||'deepseek';
   if(peakEl){
     if(lastProvider==='deepseek'){const peak=u.peak;peakEl.innerHTML='<span class="peak-badge'+(peak?' peak':'')+'"><span class="dot"></span>'+(peak?'PEAK':'OFF-PEAK')+'</span>';}
-    else{const label=lastProvider==='openrouter'?'OpenRouter':lastProvider==='gemini'?'Gemini':lastProvider==='llamacpp'?'llama.cpp':lastProvider==='cursor'?'Cursor':'Ollama';peakEl.innerHTML='<span class="peak-badge"><span class="dot"></span>'+label+'</span>';}
+    else{const label=lastProvider==='openrouter'?'OpenRouter':lastProvider==='gemini'?'Gemini':lastProvider==='llamacpp'?'llama.cpp':lastProvider==='cursor'?'Cursor':lastProvider==='openai'?'OpenAI':lastProvider==='anthropic'?'Anthropic':lastProvider==='chatgpt'?'ChatGPT':lastProvider==='claude'?'Claude':lastProvider==='deepseekweb'?'DeepSeek Web':'Ollama';peakEl.innerHTML='<span class="peak-badge"><span class="dot"></span>'+label+'</span>';}
   }
   renderRateCountdown();
   document.getElementById('usage-today-tokens').textContent=fmtTok(u.todayTokens);
@@ -1625,6 +2124,8 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			ollama: [vscode.l10n.t('Ollama'), vscode.l10n.t('Models pulled on the configured host')],
 			llamacpp: [vscode.l10n.t('llama.cpp'), vscode.l10n.t('Models loaded on the configured llama.cpp server')],
 			cursor: [vscode.l10n.t('Cursor'), vscode.l10n.t('Cursor API models billed to your Cursor account')],
+			chatgpt: [vscode.l10n.t('ChatGPT'), vscode.l10n.t('ChatGPT Plus/Pro sign-in; uses your plan quota')],
+			claude: [vscode.l10n.t('Claude'), vscode.l10n.t('Claude Pro/Max sign-in; uses your plan quota')],
 		};
 		const configured = (state.providersConfigured ?? {}) as Record<string, boolean>;
 		const ids = state.providersManaged
@@ -1647,6 +2148,10 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			case 'openrouter': return vscode.l10n.t('OpenRouter');
 			case 'llamacpp': return vscode.l10n.t('llama.cpp');
 			case 'cursor': return vscode.l10n.t('Cursor');
+			case 'openai': return vscode.l10n.t('OpenAI');
+			case 'anthropic': return vscode.l10n.t('Anthropic');
+			case 'chatgpt': return vscode.l10n.t('ChatGPT');
+			case 'claude': return vscode.l10n.t('Claude');
 			default: return provider;
 		}
 	}

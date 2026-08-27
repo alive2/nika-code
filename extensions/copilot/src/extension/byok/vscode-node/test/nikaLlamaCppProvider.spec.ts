@@ -107,6 +107,28 @@ describe('NikaLlamaCppProvider', () => {
 		expect(catalog.get('inline-form')!.contextWindow).toBe(8192);
 	});
 
+	it('never collapses the prompt budget on a small server context', async () => {
+		const { provider } = createProvider({
+			json: {
+				object: 'list',
+				data: [
+					// A 2048-token context must still leave input room: a fixed
+					// 4096-token output reservation would otherwise zero out
+					// maxInputTokens and every request would fail while rendering.
+					{ id: 'tiny-2k', object: 'model', created: 1, owned_by: 'llamacpp', status: { value: 'loaded', args: ['llama-server.exe', '--ctx-size', '2048'] }, meta: { n_ctx: 2048 } },
+					{ id: 'small-4k', object: 'model', created: 2, owned_by: 'llamacpp', status: { value: 'loaded', args: ['llama-server.exe', '--ctx-size', '4096'] }, meta: { n_ctx: 4096 } },
+				],
+			},
+		});
+		const catalog = await provider.getCatalog('http://localhost:8080');
+
+		// Output reservation is capped at half the window; input gets the rest.
+		expect(catalog.get('tiny-2k')!.capabilities.maxOutputTokens).toBe(1024);
+		expect(catalog.get('tiny-2k')!.capabilities.maxInputTokens).toBe(1024);
+		expect(catalog.get('small-4k')!.capabilities.maxOutputTokens).toBe(2048);
+		expect(catalog.get('small-4k')!.capabilities.maxInputTokens).toBe(2048);
+	});
+
 	it('accepts meta.llama.context_length from forks and meta.n_ctx', async () => {
 		const { provider } = createProvider({
 			json: {

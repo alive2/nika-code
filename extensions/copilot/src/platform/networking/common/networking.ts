@@ -130,6 +130,16 @@ export interface IEndpointBody {
 
 export interface IEndpointFetchOptions {
 	suppressIntegrationId?: boolean;
+	/**
+	 * When set, the Copilot platform headers (`X-Request-Id`, `OpenAI-Intent`,
+	 * `X-GitHub-Api-Version`, `X-Interaction-Type`, `X-Agent-Task-Id`, plus any
+	 * `additionalHeaders` such as `X-Interaction-Id` / `X-Initiator`) and the
+	 * fetcher-level `X-VSCode-User-Agent-Library-Version` header are omitted
+	 * from requests to this endpoint. Use for endpoints that must present as
+	 * the official third-party client (e.g. the subscription endpoints that
+	 * mirror the codex CLI wire contract).
+	 */
+	suppressCopilotHeaders?: boolean;
 }
 
 export interface IEndpoint {
@@ -182,6 +192,8 @@ export interface IModelCapabilityOptions {
 	enableThinking?: boolean;
 	/** Reasoning effort level (e.g. 'low', 'medium', 'high'). Only used when enableThinking is true or when the model supports reasoning effort. */
 	reasoningEffort?: string;
+	/** Request speed tier (e.g. 'standard', 'fast'). Used by backends that expose a service-tier knob (codex `service_tier`). */
+	speed?: string;
 	/** Enable the tool search tool for this request. */
 	enableToolSearch?: boolean;
 	/** Enable context editing for this request. */
@@ -505,23 +517,33 @@ function networkRequest(
 		version: '',
 	} satisfies IEndpoint : endpointOrUrl;
 	const agentInteractionType = options.interactionTypeOverride ?? intent;
+	const endpointFetchOptions = endpoint.getEndpointFetchOptions?.();
+
+	// Endpoints that present as a third-party client (the ChatGPT/Claude
+	// subscription endpoints mirror the official codex/Claude CLIs) opt out of
+	// the Copilot platform headers entirely — no official CLI sends them and
+	// they are an instant fingerprint.
+	const suppressCopilotHeaders = !!endpointFetchOptions?.suppressCopilotHeaders;
 
 	const headers: ReqHeaders = {
 		...(secretKey ? { Authorization: `Bearer ${secretKey}` } : {}),
-		'X-Request-Id': requestId,
-		'OpenAI-Intent': intent, // Tells CAPI who flighted this request. Helps find buggy features
-		'X-GitHub-Api-Version': '2026-01-09',
-		...additionalHeaders,
+		...(suppressCopilotHeaders ? {} : {
+			'X-Request-Id': requestId,
+			'OpenAI-Intent': intent, // Tells CAPI who flighted this request. Helps find buggy features
+			'X-GitHub-Api-Version': '2026-01-09',
+			...additionalHeaders,
+		}),
 		...(endpoint.getExtraHeaders ? endpoint.getExtraHeaders(location, options.interactionTypeOverride) : {}),
 	};
-	headers['X-Interaction-Type'] = agentInteractionType;
-	headers['X-Agent-Task-Id'] = requestId;
+	if (!suppressCopilotHeaders) {
+		headers['X-Interaction-Type'] = agentInteractionType;
+		headers['X-Agent-Task-Id'] = requestId;
+	}
 
 	if (endpoint.interceptBody) {
 		endpoint.interceptBody(body);
 	}
 
-	const endpointFetchOptions = endpoint.getEndpointFetchOptions?.();
 	const request: FetchOptions = {
 		callSite: `network-request-${intent}`,
 		method: requestType,
@@ -529,7 +551,8 @@ function networkRequest(
 		json: body,
 		timeout: requestTimeoutMs,
 		useFetcher,
-		suppressIntegrationId: endpointFetchOptions?.suppressIntegrationId
+		suppressIntegrationId: endpointFetchOptions?.suppressIntegrationId,
+		suppressUserAgentLibrary: suppressCopilotHeaders,
 	};
 
 	if (cancelToken) {

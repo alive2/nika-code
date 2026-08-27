@@ -141,10 +141,18 @@ export class NikaLlamaCppProvider extends Disposable {
 			const rawContext = meta?.n_ctx ?? contextFromArgs((entry as { status?: { args?: unknown[] } }).status?.args) ?? meta?.['llama.context_length'] ?? meta?.['context_length'];
 			const parsedContext = typeof rawContext === 'number' ? rawContext : typeof rawContext === 'string' ? Number(rawContext) : undefined;
 			const contextWindow = (parsedContext && parsedContext > 0) ? parsedContext : LLAMACPP_DEFAULT_CONTEXT_WINDOW;
+			// Never let the output reservation eat the whole window: on a server
+			// with a small context (e.g. `--ctx-size 2048`) a fixed 4096-token
+			// output budget collapses `maxInputTokens` to 0, which makes the
+			// language-model wrapper render an empty prompt and fail with an
+			// opaque prompt-tsx `BudgetExceededError` ("No lowest priority node
+			// found"). Cap the reservation to half the window, mirroring the
+			// Ollama provider, so the prompt budget always stays positive.
+			const maxOutputTokens = Math.min(LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, Math.max(1, Math.floor(contextWindow / 2)));
 			const limits = resolveModelTokenLimits({
 				contextWindow,
 				maxInputTokens: contextWindow,
-				maxOutputTokens: LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS,
+				maxOutputTokens,
 			});
 			const capabilities: BYOKModelCapabilities = {
 				name: id,

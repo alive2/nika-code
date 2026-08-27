@@ -15,6 +15,104 @@ export const NIKA_OPENROUTER_SECRET = 'nika.openrouter.apiKey';
 export const NIKA_LLAMACPP_SECRET = 'nika.llamacpp.apiKey';
 export const NIKA_CURSOR_SECRET = 'nika.cursor.apiKey';
 export const NIKA_DEEPSEEK_WEB_SECRET = 'nika.deepseekWeb.token';
+export const NIKA_OPENAI_SECRET = 'nika.openai.apiKey';
+export const NIKA_ANTHROPIC_SECRET = 'nika.anthropic.apiKey';
+
+/**
+ * Secret key holding the ChatGPT subscription (device-code OAuth) token
+ * payload as JSON — see {@link NikaChatGptSubscriptionToken}. Signed in
+ * through the provider wizard's device-code flow; used to call the codex
+ * backend (`chatgpt.com/backend-api/codex/responses`).
+ */
+export const NIKA_CHATGPT_SUB_SECRET = 'nika.chatgpt.subscription';
+
+/**
+ * Secret key holding the Claude subscription (device-code OAuth) token
+ * payload as JSON — see {@link NikaClaudeSubscriptionToken}. Signed in
+ * through the provider wizard's device-code flow; used to call the Anthropic
+ * Messages API with an OAuth bearer token.
+ */
+export const NIKA_CLAUDE_SUB_SECRET = 'nika.claude.subscription';
+
+/**
+ * OAuth access token payload stored under {@link NIKA_CHATGPT_SUB_SECRET}.
+ * `accountId` and `planType` are read from the id_token JWT claims; the chat
+ * call requires `ChatGPT-Account-ID` plus `OAI-Product-Sku: codex`.
+ */
+export interface NikaChatGptSubscriptionToken {
+	readonly accessToken: string;
+	readonly refreshToken: string;
+	readonly idToken?: string;
+	readonly accountId?: string;
+	readonly planType?: string;
+	/** Epoch millis when the access token expires. */
+	readonly expiresAt?: number;
+}
+
+/**
+ * OAuth access token payload stored under {@link NIKA_CLAUDE_SUB_SECRET}.
+ * Chat calls carry it as a Bearer token plus the `oauth-2025-04-20` beta
+ * header; the system prompt must be the exact Claude Code SDK string.
+ */
+export interface NikaClaudeSubscriptionToken {
+	readonly accessToken: string;
+	readonly refreshToken: string;
+	readonly expiresAt?: number;
+	/** `Pro` / `Max` / … as reported by the account endpoint. */
+	readonly planType?: string;
+	readonly displayName?: string;
+}
+
+/**
+ * Validates an unknown secret payload as a ChatGPT subscription token.
+ */
+export function parseNikaChatGptSubscriptionToken(value: unknown): NikaChatGptSubscriptionToken | undefined {
+	if (typeof value !== 'string' || value.length === 0) {
+		return undefined;
+	}
+	try {
+		const parsed = JSON.parse(value) as Partial<NikaChatGptSubscriptionToken>;
+		if (typeof parsed.accessToken !== 'string' || parsed.accessToken.length === 0
+			|| typeof parsed.refreshToken !== 'string' || parsed.refreshToken.length === 0) {
+			return undefined;
+		}
+		return {
+			accessToken: parsed.accessToken,
+			refreshToken: parsed.refreshToken,
+			idToken: typeof parsed.idToken === 'string' ? parsed.idToken : undefined,
+			accountId: typeof parsed.accountId === 'string' ? parsed.accountId : undefined,
+			planType: typeof parsed.planType === 'string' ? parsed.planType : undefined,
+			expiresAt: typeof parsed.expiresAt === 'number' ? parsed.expiresAt : undefined,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Validates an unknown secret payload as a Claude subscription token.
+ */
+export function parseNikaClaudeSubscriptionToken(value: unknown): NikaClaudeSubscriptionToken | undefined {
+	if (typeof value !== 'string' || value.length === 0) {
+		return undefined;
+	}
+	try {
+		const parsed = JSON.parse(value) as Partial<NikaClaudeSubscriptionToken>;
+		if (typeof parsed.accessToken !== 'string' || parsed.accessToken.length === 0
+			|| typeof parsed.refreshToken !== 'string' || parsed.refreshToken.length === 0) {
+			return undefined;
+		}
+		return {
+			accessToken: parsed.accessToken,
+			refreshToken: parsed.refreshToken,
+			expiresAt: typeof parsed.expiresAt === 'number' ? parsed.expiresAt : undefined,
+			planType: typeof parsed.planType === 'string' ? parsed.planType : undefined,
+			displayName: typeof parsed.displayName === 'string' ? parsed.displayName : undefined,
+		};
+	} catch {
+		return undefined;
+	}
+}
 
 /**
  * Provider-group prefix for OpenRouter catalog models contributed through the
@@ -68,6 +166,40 @@ export const NIKA_CURSOR_MODEL_PREFIX = 'cursor/';
 export const NIKA_DEEPSEEK_WEB_MODEL_PREFIX = 'deepseekweb/';
 
 /**
+ * Provider-group prefix for OpenAI catalog models contributed through the
+ * Nika provider. A model with raw catalog id `gpt-5` is exposed to the
+ * workbench as `openai/gpt-5` (and `nika/openai/gpt-5` once
+ * vendor-qualified).
+ */
+export const NIKA_OPENAI_MODEL_PREFIX = 'openai/';
+
+/**
+ * Provider-group prefix for Anthropic catalog models contributed through the
+ * Nika provider. A model with raw catalog id `claude-sonnet-4` is exposed to
+ * the workbench as `anthropic/claude-sonnet-4` (and
+ * `nika/anthropic/claude-sonnet-4` once vendor-qualified).
+ */
+export const NIKA_ANTHROPIC_MODEL_PREFIX = 'anthropic/';
+
+/**
+ * Provider-group prefix for ChatGPT subscription (codex backend) models
+ * contributed through the Nika provider. A model served by the codex
+ * backend under id `gpt-5-codex` is exposed to the workbench as
+ * `chatgpt/gpt-5-codex` (and `nika/chatgpt/gpt-5-codex` once
+ * vendor-qualified).
+ */
+export const NIKA_CHATGPT_MODEL_PREFIX = 'chatgpt/';
+
+/**
+ * Provider-group prefix for Claude subscription (Anthropic OAuth) models
+ * contributed through the Nika provider. A model served by the Messages API
+ * under id `claude-sonnet-4-5` is exposed to the workbench as
+ * `claude/claude-sonnet-4-5` (and `nika/claude/claude-sonnet-4-5` once
+ * vendor-qualified).
+ */
+export const NIKA_CLAUDE_SUB_MODEL_PREFIX = 'claude/';
+
+/**
  * Master switch for GitHub Copilot integration. Off (the default) makes
  * NikaCode run entirely on BYOK models without a GitHub account: no sign-in
  * prompts, no Copilot utility models, no GitHub MCP server. Turn it on to
@@ -88,7 +220,7 @@ export type NikaModelId =
  * The Nika provider families a user can add through the Providers wizard.
  * `gemma` (the legacy bare `gemma4:31b` id) maps to the Ollama connection.
  */
-export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb';
+export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude';
 
 /**
  * Per-provider model selection persisted in the `nika.providers` setting. A
@@ -139,7 +271,7 @@ export const NIKA_OUTPUT_PRESETS = {
 
 export type NikaContextPreset = keyof typeof NIKA_CONTEXT_PRESETS;
 export type NikaOutputPreset = keyof typeof NIKA_OUTPUT_PRESETS;
-export type NikaThinkingEffort = 'none' | 'low' | 'medium' | 'high' | 'max';
+export type NikaThinkingEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export type NikaAgentRole = 'plan' | 'explore' | 'utility' | 'utilitySmall' | 'inlineChat';
 
 export const NIKA_RESPONSES_MODEL = 'nika/deepseek-v4-flash-responses';
@@ -178,7 +310,11 @@ export function isNikaModelId(value: string): boolean {
 		|| isNikaOllamaModel(value)
 		|| isNikaGeminiCatalogModel(value)
 		|| isNikaCursorModel(value)
-		|| isNikaDeepSeekWebModel(value);
+		|| isNikaDeepSeekWebModel(value)
+		|| isNikaOpenAIModel(value)
+		|| isNikaAnthropicModel(value)
+		|| isNikaChatGptSubModel(value)
+		|| isNikaClaudeSubModel(value);
 }
 
 /**
@@ -219,6 +355,40 @@ export function isNikaDeepSeekWebModel(value: string): boolean {
 }
 
 /**
+ * True for OpenAI catalog model ids exposed through the Nika provider
+ * (`openai/<model id>`). The raw id as reported by `api.openai.com/v1/models`
+ * follows the prefix, e.g. `openai/gpt-5`.
+ */
+export function isNikaOpenAIModel(value: string): boolean {
+	return value.startsWith(NIKA_OPENAI_MODEL_PREFIX);
+}
+
+/**
+ * True for Anthropic catalog model ids exposed through the Nika provider
+ * (`anthropic/<model id>`). The raw id as reported by `api.anthropic.com/v1/models`
+ * follows the prefix, e.g. `anthropic/claude-sonnet-4`.
+ */
+export function isNikaAnthropicModel(value: string): boolean {
+	return value.startsWith(NIKA_ANTHROPIC_MODEL_PREFIX);
+}
+
+/**
+ * True for ChatGPT subscription model ids exposed through the Nika provider
+ * (`chatgpt/<model id>`), e.g. `chatgpt/gpt-5-codex`.
+ */
+export function isNikaChatGptSubModel(value: string): boolean {
+	return value.startsWith(NIKA_CHATGPT_MODEL_PREFIX);
+}
+
+/**
+ * True for Claude subscription model ids exposed through the Nika provider
+ * (`claude/<model id>`), e.g. `claude/claude-sonnet-4-5`.
+ */
+export function isNikaClaudeSubModel(value: string): boolean {
+	return value.startsWith(NIKA_CLAUDE_SUB_MODEL_PREFIX);
+}
+
+/**
  * True for OpenRouter catalog model ids exposed through the Nika provider
  * (`openrouter/<vendor>/<model>`). The raw catalog id follows the prefix, e.g.
  * `openrouter/anthropic/claude-sonnet-4`.
@@ -245,7 +415,7 @@ export function isNikaGeminiModel(value: string): value is NikaModelId {
 }
 
 export function isNikaThinkingEffort(value: unknown): value is NikaThinkingEffort {
-	return value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'max';
+	return value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max' || value === 'ultra';
 }
 
 /**
@@ -254,7 +424,7 @@ export function isNikaThinkingEffort(value: unknown): value is NikaThinkingEffor
  * llama.cpp server's OpenAI-compatible endpoint; `ollama/…` ids are the
  * dynamic Ollama catalog form of the same family.
  */
-export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb';
+export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude';
 
 /**
  * Strips the optional `nika/` vendor prefix used in settings values (e.g.
@@ -298,16 +468,29 @@ export function getNikaModelProvider(id: string): NikaModelProvider | undefined 
 	if (isNikaDeepSeekWebModel(value)) {
 		return 'deepseekweb';
 	}
+	if (isNikaOpenAIModel(value)) {
+		return 'openai';
+	}
+	if (isNikaAnthropicModel(value)) {
+		return 'anthropic';
+	}
+	if (isNikaChatGptSubModel(value)) {
+		return 'chatgpt';
+	}
+	if (isNikaClaudeSubModel(value)) {
+		return 'claude';
+	}
 	return undefined;
 }
 
 /**
  * The reasoning-effort levels a Nika model of the given id accepts. DeepSeek
  * supports the full range; Gemini omits `max`; OpenRouter uses `low`-`high`
- * with `medium` (its own magnitude) rather than `none`/`max`; Gemma and
- * llama.cpp have no effort control (empty). For OpenRouter catalog models the
- * narrower per-model list from the catalog's `supportsReasoningEffort` should
- * take precedence when building dropdowns.
+ * with `medium` (its own magnitude) rather than `none`/`max`; the ChatGPT
+ * subscription (codex backend) family accepts the codex range `low`-`ultra`;
+ * Gemma and llama.cpp have no effort control (empty). For OpenRouter catalog
+ * models the narrower per-model list from the catalog's
+ * `supportsReasoningEffort` should take precedence when building dropdowns.
  */
 export function getNikaEffortOptionsForModel(id: string): NikaThinkingEffort[] {
 	switch (getNikaModelProvider(id)) {
@@ -316,12 +499,18 @@ export function getNikaEffortOptionsForModel(id: string): NikaThinkingEffort[] {
 		case 'gemini':
 			return ['none', 'low', 'high'];
 		case 'openrouter':
+		case 'openai':
 			return ['low', 'medium', 'high'];
+		case 'chatgpt':
+			return ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 		case 'llamacpp':
 		case 'ollama':
 		case 'gemma':
 		case 'cursor':
 		case 'deepseekweb':
+		case 'anthropic':
+		case 'claude':
+			return [];
 		default:
 			return [];
 	}
@@ -339,7 +528,7 @@ export function parseNikaProviderConfig(value: unknown): NikaProviderConfig | un
 		return undefined;
 	}
 	const config: NikaProviderConfig = {};
-	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'cursor', 'deepseekweb'] as const) {
+	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'cursor', 'deepseekweb', 'openai', 'anthropic', 'chatgpt', 'claude'] as const) {
 		const entry = (value as Record<string, unknown>)[provider];
 		if (entry === undefined || entry === null || typeof entry !== 'object') {
 			continue;

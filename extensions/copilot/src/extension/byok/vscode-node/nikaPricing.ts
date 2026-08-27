@@ -388,3 +388,52 @@ export function getOpenRouterTokenCost(
 	);
 	return Math.max(0, cost);
 }
+
+/**
+ * Static OpenAI per-1M-token USD prices (no peak/off-peak billing), keyed by
+ * the raw catalog id. Snapshot of api.openai.com pricing; unknown ids cost $0
+ * until added here. Cache reads are 10% of the prompt price.
+ */
+export const NIKA_OPENAI_PRICES: Readonly<Record<string, OpenRouterModelPricing>> = {
+	'gpt-5': { promptPerMTok: 1.25, completionPerMTok: 10, cacheReadPerMTok: 0.125, requestFee: 0, free: false },
+	'gpt-5-codex': { promptPerMTok: 1.25, completionPerMTok: 10, cacheReadPerMTok: 0.125, requestFee: 0, free: false },
+	'gpt-5-mini': { promptPerMTok: 0.25, completionPerMTok: 2, cacheReadPerMTok: 0.025, requestFee: 0, free: false },
+	'gpt-5-nano': { promptPerMTok: 0.05, completionPerMTok: 0.4, cacheReadPerMTok: 0.005, requestFee: 0, free: false },
+	'o3': { promptPerMTok: 2, completionPerMTok: 8, cacheReadPerMTok: 0.5, requestFee: 0, free: false },
+	'o4-mini': { promptPerMTok: 1.1, completionPerMTok: 4.4, cacheReadPerMTok: 0.275, requestFee: 0, free: false },
+	'gpt-4.1': { promptPerMTok: 2, completionPerMTok: 8, cacheReadPerMTok: 0.5, requestFee: 0, free: false },
+	'gpt-4.1-mini': { promptPerMTok: 0.4, completionPerMTok: 1.6, cacheReadPerMTok: 0.1, requestFee: 0, free: false },
+	'gpt-4o': { promptPerMTok: 2.5, completionPerMTok: 10, cacheReadPerMTok: 1.25, requestFee: 0, free: false },
+	'gpt-4o-mini': { promptPerMTok: 0.15, completionPerMTok: 0.6, cacheReadPerMTok: 0.075, requestFee: 0, free: false },
+};
+
+/**
+ * Static Anthropic per-1M-token USD prices, keyed by the raw catalog id
+ * (`claude-sonnet-4`, ...). Snapshot of api.anthropic.com pricing; unknown ids
+ * cost $0 until added here. Cache reads are 10% of the prompt price.
+ */
+export const NIKA_ANTHROPIC_PRICES: Readonly<Record<string, OpenRouterModelPricing>> = {
+	'claude-sonnet-4': { promptPerMTok: 3, completionPerMTok: 15, cacheReadPerMTok: 0.3, requestFee: 0, free: false },
+	'claude-sonnet-4-5': { promptPerMTok: 3, completionPerMTok: 15, cacheReadPerMTok: 0.3, requestFee: 0, free: false },
+	'claude-opus-4': { promptPerMTok: 15, completionPerMTok: 75, cacheReadPerMTok: 1.5, requestFee: 0, free: false },
+	'claude-opus-4-5': { promptPerMTok: 5, completionPerMTok: 25, cacheReadPerMTok: 0.5, requestFee: 0, free: false },
+	'claude-haiku-4-5': { promptPerMTok: 1, completionPerMTok: 5, cacheReadPerMTok: 0.1, requestFee: 0, free: false },
+};
+
+/** USD cost of an OpenAI request from the static price table ($0 when unknown). */
+export function getOpenAITokenCost(
+	modelId: string,
+	options: { cachedTokens: number; cacheMissTokens: number; outputTokens: number },
+): number {
+	const pricing = NIKA_OPENAI_PRICES[modelId];
+	return pricing ? getOpenRouterTokenCost(pricing, options) : 0;
+}
+
+/** USD cost of an Anthropic request from the static price table ($0 when unknown). */
+export function getAnthropicTokenCost(
+	modelId: string,
+	options: { cachedTokens: number; cacheMissTokens: number; outputTokens: number },
+): number {
+	const pricing = NIKA_ANTHROPIC_PRICES[modelId];
+	return pricing ? getOpenRouterTokenCost(pricing, options) : 0;
+}

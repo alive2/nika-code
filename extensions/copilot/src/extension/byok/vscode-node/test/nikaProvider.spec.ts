@@ -19,7 +19,11 @@ import { GeminiNativeBYOKLMProvider } from '../geminiNativeProvider';
 import { NikaLMProvider, type NikaLanguageModelChatInformation } from '../nikaProvider';
 import { NikaCursorProvider } from '../nikaCursorProvider';
 import { NikaGeminiProvider } from '../nikaGeminiProvider';
+import { NikaOpenAIProvider } from '../nikaOpenAIProvider';
+import { NikaAnthropicProvider } from '../nikaAnthropicProvider';
 import { NikaDeepSeekWebProvider } from '../nikaDeepSeekWebProvider';
+import { NikaChatGptSubProvider } from '../nikaChatGptSubProvider';
+import { NikaClaudeSubProvider } from '../nikaClaudeSubProvider';
 import { OllamaLMProvider } from '../ollamaProvider';
 
 vi.mock('vscode', async (importOriginal) => {
@@ -54,6 +58,7 @@ vi.mock('vscode', async (importOriginal) => {
 		},
 		window: {
 			showErrorMessage: vi.fn(),
+			showWarningMessage: vi.fn().mockResolvedValue(undefined),
 			activeTextEditor: undefined,
 		},
 	};
@@ -94,6 +99,8 @@ function createInstantiationService(overrides: {
 	llamaCppProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	geminiCatalogProvider: { getCatalog: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	cursorProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
+	openAIProvider: { getCatalog: ReturnType<typeof vi.fn>; getKnownModels: ReturnType<typeof vi.fn>; getCachedCapabilities: ReturnType<typeof vi.fn>; provideLanguageModelChatResponse: ReturnType<typeof vi.fn>; provideTokenCount: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
+	anthropicProvider: { getCatalog: ReturnType<typeof vi.fn>; getKnownModels: ReturnType<typeof vi.fn>; getCachedCapabilities: ReturnType<typeof vi.fn>; provideLanguageModelChatResponse: ReturnType<typeof vi.fn>; provideTokenCount: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 }) {
 	const deepSeekEndpointUrls: string[] = [];
 	const createInstance = vi.fn((Ctor: unknown, ...args: unknown[]) => {
@@ -124,6 +131,12 @@ function createInstantiationService(overrides: {
 		if (Ctor === NikaCursorProvider) {
 			return overrides.cursorProvider;
 		}
+		if (Ctor === NikaOpenAIProvider) {
+			return overrides.openAIProvider;
+		}
+		if (Ctor === NikaAnthropicProvider) {
+			return overrides.anthropicProvider;
+		}
 		if (Ctor === NikaDeepSeekWebProvider) {
 			return {
 				dispose: () => { },
@@ -132,6 +145,29 @@ function createInstantiationService(overrides: {
 				getKnownModels: () => ({}),
 				createEndpoint: vi.fn(),
 				invalidateCache: vi.fn(),
+			};
+		}
+		if (Ctor === NikaChatGptSubProvider) {
+			return {
+				dispose: () => { },
+				// No subscription models by default: the chatgpt/claude
+				// families stay invisible unless a dedicated test opts in.
+				getKnownModels: () => ({}),
+				getLiveKnownModels: vi.fn().mockResolvedValue({}),
+				signIn: vi.fn(),
+				refreshToken: vi.fn(),
+				revoke: vi.fn(),
+				createEndpoint: vi.fn(),
+			};
+		}
+		if (Ctor === NikaClaudeSubProvider) {
+			return {
+				dispose: () => { },
+				getKnownModels: () => ({}),
+				signIn: vi.fn(),
+				refreshToken: vi.fn(),
+				fetchAccountStatus: vi.fn(),
+				createEndpoint: vi.fn(),
 			};
 		}
 		if (Ctor === NikaAttachmentProcessor) {
@@ -176,6 +212,7 @@ function createFakes() {
 	};
 	const openRouterProvider = {
 		getCatalog: vi.fn().mockResolvedValue(new Map()),
+		getCachedCapabilities: vi.fn(),
 		createEndpoint: vi.fn(() => ({ dispose: () => { } })),
 		invalidateCache: vi.fn(),
 	};
@@ -193,7 +230,23 @@ function createFakes() {
 		createEndpoint: vi.fn(() => ({ dispose: () => { } })),
 		invalidateCache: vi.fn(),
 	};
-	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, attachmentProcessor, openRouterProvider, llamaCppProvider, geminiCatalogProvider, cursorProvider };
+	const openAIProvider = {
+		getCatalog: vi.fn().mockResolvedValue(new Map()),
+		getKnownModels: vi.fn().mockResolvedValue({}),
+		getCachedCapabilities: vi.fn(),
+		provideLanguageModelChatResponse: vi.fn().mockResolvedValue(undefined),
+		provideTokenCount: vi.fn().mockResolvedValue(0),
+		invalidateCache: vi.fn(),
+	};
+	const anthropicProvider = {
+		getCatalog: vi.fn().mockResolvedValue(new Map()),
+		getKnownModels: vi.fn().mockResolvedValue({}),
+		getCachedCapabilities: vi.fn(),
+		provideLanguageModelChatResponse: vi.fn().mockResolvedValue(undefined),
+		provideTokenCount: vi.fn().mockResolvedValue(0),
+		invalidateCache: vi.fn(),
+	};
+	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, attachmentProcessor, openRouterProvider, llamaCppProvider, geminiCatalogProvider, cursorProvider, openAIProvider, anthropicProvider };
 }
 
 function createProvider(overrides?: {
@@ -202,6 +255,8 @@ function createProvider(overrides?: {
 	catalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[]; pricing?: { label: string; inputCost: number; outputCost: number; cacheCost: number } }; pricing?: { promptPerMTok: number; completionPerMTok: number; cacheReadPerMTok: number; requestFee: number; free: boolean } }>;
 	geminiCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 	cursorCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
+	openAICatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
+	anthropicCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 }) {
 	const fakes = createFakes();
 	const instantiation = createInstantiationService(fakes);
@@ -213,6 +268,12 @@ function createProvider(overrides?: {
 	}
 	if (overrides?.cursorCatalog) {
 		vi.mocked(fakes.cursorProvider.getCatalog).mockResolvedValue(overrides.cursorCatalog as never);
+	}
+	if (overrides?.openAICatalog) {
+		vi.mocked(fakes.openAIProvider.getCatalog).mockResolvedValue(overrides.openAICatalog as never);
+	}
+	if (overrides?.anthropicCatalog) {
+		vi.mocked(fakes.anthropicProvider.getCatalog).mockResolvedValue(overrides.anthropicCatalog as never);
 	}
 	const provider = new NikaLMProvider(
 		createByokStorage() as never,
@@ -815,6 +876,184 @@ describe('Nika Cursor support', () => {
 		try {
 			const { provider } = createProvider({ keys: { 'nika.cursor.apiKey': 'cur-1' } });
 			const model = { id: 'cursor/cursor-turbo' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
+				.rejects.toThrow('is not enabled');
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+});
+
+describe('Nika OpenAI support', () => {
+	const openAICatalog = (): Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }> => new Map([
+		['gpt-5', { id: 'gpt-5', name: 'GPT-5', capabilities: { name: 'GPT-5', toolCalling: true, vision: true, maxInputTokens: 120_000, maxOutputTokens: 8_000, supportsReasoningEffort: ['low', 'medium', 'high'] } }],
+		['gpt-4o-mini', { id: 'gpt-4o-mini', name: 'GPT-4o Mini', capabilities: { name: 'GPT-4o Mini', toolCalling: true, vision: true, maxInputTokens: 120_000, maxOutputTokens: 8_000 } }],
+	]);
+
+	it('routes openai models through the delegate with the raw wire id and Nika key', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.openai.apiKey': 'sk-nika-1' } });
+		const model = { id: 'openai/gpt-5' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+		// The delegate receives the raw id and the Nika key. Image handling is
+		// governed by the master vision-preprocessing toggle (no per-provider
+		// override), so `process` runs with its default options.
+		expect(fakes.openAIProvider.provideLanguageModelChatResponse).toHaveBeenCalledTimes(1);
+		const [delegateModel, key, , , ,] = fakes.openAIProvider.provideLanguageModelChatResponse.mock.calls[0];
+		expect(delegateModel.id).toBe('openai/gpt-5');
+		expect(key).toBe('sk-nika-1');
+		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token);
+		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
+	});
+
+	it('rejects openai models when the API key is missing', async () => {
+		const { provider } = createProvider({ keys: { 'nika.openai.apiKey': undefined } });
+		const model = { id: 'openai/gpt-5' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
+			.rejects.toThrow('Configure an OpenAI API key in Nika Settings');
+	});
+
+	it('appends the OpenAI catalog in legacy mode whenever a key exists', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.openai.apiKey': 'sk-nika-1' }, openAICatalog: openAICatalog() });
+
+		const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+		expect(fakes.openAIProvider.getCatalog).toHaveBeenCalledWith('sk-nika-1', expect.anything());
+		const openAIIds = models.filter(m => m.id.startsWith('openai/'));
+		expect(openAIIds.map(m => m.id).sort()).toEqual(['openai/gpt-4o-mini', 'openai/gpt-5']);
+		expect(openAIIds[0].detail).toBe('Nika');
+		expect(openAIIds[0].isBYOK).toBe(true);
+		expect(openAIIds[0].capabilities.imageInput).toBe(true);
+		// Unlike server-hosted families there is no status icon for OpenAI.
+		expect(openAIIds[0].statusIcon).toBeUndefined();
+	});
+
+	it('filters the OpenAI catalog to the wizard selection in managed mode', async () => {
+		providersConfig = { openai: { models: ['openai/gpt-5'] } };
+		try {
+			const { provider } = createProvider({ keys: { 'nika.openai.apiKey': 'sk-nika-1' }, openAICatalog: openAICatalog() });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(models.filter(m => m.id.startsWith('openai/')).map(m => m.id)).toEqual(['openai/gpt-5']);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
+	it('skips the whole OpenAI catalog when nothing is selected in managed mode', async () => {
+		providersConfig = { openai: { models: [] } };
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.openai.apiKey': 'sk-nika-1' }, openAICatalog: openAICatalog() });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.openAIProvider.getCatalog).not.toHaveBeenCalled();
+			expect(models.filter(m => m.id.startsWith('openai/'))).toHaveLength(0);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
+	it('rejects openai requests for unselected models in managed mode', async () => {
+		providersConfig = { openai: { models: ['openai/gpt-5'] } };
+		try {
+			const { provider } = createProvider({ keys: { 'nika.openai.apiKey': 'sk-nika-1' } });
+			const model = { id: 'openai/gpt-4o-mini' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
+				.rejects.toThrow('is not enabled');
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+});
+
+describe('Nika Anthropic support', () => {
+	const anthropicCatalog = (): Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }> => new Map([
+		['claude-sonnet-4-5', { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', capabilities: { name: 'Claude Sonnet 4.5', toolCalling: true, vision: true, maxInputTokens: 120_000, maxOutputTokens: 8_000 } }],
+		['claude-haiku-4-5', { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', capabilities: { name: 'Claude Haiku 4.5', toolCalling: true, vision: true, maxInputTokens: 120_000, maxOutputTokens: 8_000 } }],
+	]);
+
+	it('routes anthropic models through the delegate with the raw wire id and Nika key', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.anthropic.apiKey': 'sk-ant-nika-1' } });
+		const model = { id: 'anthropic/claude-sonnet-4-5' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+		expect(fakes.anthropicProvider.provideLanguageModelChatResponse).toHaveBeenCalledTimes(1);
+		const [delegateModel, key, , , ,] = fakes.anthropicProvider.provideLanguageModelChatResponse.mock.calls[0];
+		expect(delegateModel.id).toBe('anthropic/claude-sonnet-4-5');
+		expect(key).toBe('sk-ant-nika-1');
+		// Image handling is governed by the master vision-preprocessing toggle
+		// (no per-provider override).
+		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token);
+		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
+	});
+
+	it('rejects anthropic models when the API key is missing', async () => {
+		const { provider } = createProvider({ keys: { 'nika.anthropic.apiKey': undefined } });
+		const model = { id: 'anthropic/claude-sonnet-4-5' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
+			.rejects.toThrow('Configure an Anthropic API key in Nika Settings');
+	});
+
+	it('appends the Anthropic catalog in legacy mode whenever a key exists', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.anthropic.apiKey': 'sk-ant-nika-1' }, anthropicCatalog: anthropicCatalog() });
+
+		const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+		expect(fakes.anthropicProvider.getCatalog).toHaveBeenCalledWith('sk-ant-nika-1', expect.anything());
+		const anthropicIds = models.filter(m => m.id.startsWith('anthropic/'));
+		expect(anthropicIds.map(m => m.id).sort()).toEqual(['anthropic/claude-haiku-4-5', 'anthropic/claude-sonnet-4-5']);
+		expect(anthropicIds[0].detail).toBe('Nika');
+		expect(anthropicIds[0].isBYOK).toBe(true);
+		expect(anthropicIds[0].capabilities.imageInput).toBe(true);
+		expect(anthropicIds[0].statusIcon).toBeUndefined();
+	});
+
+	it('filters the Anthropic catalog to the wizard selection in managed mode', async () => {
+		providersConfig = { anthropic: { models: ['anthropic/claude-sonnet-4-5'] } };
+		try {
+			const { provider } = createProvider({ keys: { 'nika.anthropic.apiKey': 'sk-ant-nika-1' }, anthropicCatalog: anthropicCatalog() });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(models.filter(m => m.id.startsWith('anthropic/')).map(m => m.id)).toEqual(['anthropic/claude-sonnet-4-5']);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
+	it('skips the whole Anthropic catalog when nothing is selected in managed mode', async () => {
+		providersConfig = { anthropic: { models: [] } };
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.anthropic.apiKey': 'sk-ant-nika-1' }, anthropicCatalog: anthropicCatalog() });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.anthropicProvider.getCatalog).not.toHaveBeenCalled();
+			expect(models.filter(m => m.id.startsWith('anthropic/'))).toHaveLength(0);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
+	it('rejects anthropic requests for unselected models in managed mode', async () => {
+		providersConfig = { anthropic: { models: ['anthropic/claude-sonnet-4-5'] } };
+		try {
+			const { provider } = createProvider({ keys: { 'nika.anthropic.apiKey': 'sk-ant-nika-1' } });
+			const model = { id: 'anthropic/claude-haiku-4-5' } as NikaLanguageModelChatInformation;
 			const { messages, options, progress, token } = deepSeekRequestArgs();
 
 			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))

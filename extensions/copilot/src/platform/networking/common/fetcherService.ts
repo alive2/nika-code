@@ -179,6 +179,12 @@ export interface FetchOptions {
 	useFetcher?: FetcherId;
 	suppressIntegrationId?: boolean;
 	/**
+	 * When set, the `X-VSCode-User-Agent-Library-Version` header is not stamped
+	 * on the request (used by endpoints that present as a third-party client,
+	 * e.g. the codex-mirroring subscription endpoints).
+	 */
+	suppressUserAgentLibrary?: boolean;
+	/**
 	 * Opportunistic cache hint. When set to `true`, fetchers that implement
 	 * caching (today only the Node fetch fetcher) will route the request
 	 * through an RFC 9111 cache. Fetchers without cache support ignore this

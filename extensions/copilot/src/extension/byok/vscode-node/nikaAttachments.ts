@@ -47,9 +47,14 @@ export class NikaAttachmentProcessor {
 	) { }
 
 	async process(messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, token: vscode.CancellationToken, options: NikaAttachmentProcessOptions = {}): Promise<NikaAttachmentResult> {
-		// `None (native vision)` passes images through untouched; otherwise the
-		// caller decides (llama.cpp/Cursor preserve, the rest describe).
-		const preserveImages = options.preserveImages ?? (vscode.workspace.getConfiguration('nika').get<string>('visionModel', 'gemini-2.5-flash') === 'none');
+		// The master `nika.visionPreprocessingEnabled` toggle flips the default:
+		// off means raw images everywhere (`preserveImages`), on means the
+		// caller decides. `None (native vision)` always passes images through
+		// untouched; otherwise the caller decides (llama.cpp/Cursor preserve,
+		// the rest describe).
+		const config = vscode.workspace.getConfiguration('nika');
+		const preprocessingEnabled = config.get<boolean>('visionPreprocessingEnabled', true);
+		const preserveImages = options.preserveImages ?? (!preprocessingEnabled || config.get<string>('visionModel', 'gemini-2.5-flash') === 'none');
 		const pdfCount = messages.reduce((count, message) => count + message.content.filter(part => part instanceof vscode.LanguageModelDataPart && isPdfMime(part.mimeType)).length, 0);
 		if (pdfCount > 0) {
 			this._settingsEditor.log('INFO', vscode.l10n.t('Received {0} PDF attachment(s) for Nika preprocessing.', pdfCount));

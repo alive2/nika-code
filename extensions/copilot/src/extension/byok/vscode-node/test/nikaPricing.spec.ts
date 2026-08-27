@@ -14,6 +14,8 @@ import {
 	getDeepSeekRateCountdowns,
 	getDeepSeekRatePeriod,
 	getDeepSeekTokenCost,
+	getAnthropicTokenCost,
+	getOpenAITokenCost,
 	getOpenRouterTokenCost,
 	isDeepSeekPeakHour,
 	NIKA_DEEPSEEK_PEAK_PRICES,
@@ -258,6 +260,40 @@ describe('Nika DeepSeek pricing', () => {
 			const free = parseOpenRouterPricing({ prompt: '0', completion: '0' })!;
 			expect(free.free).toBe(true);
 			expect(formatOpenRouterPriceLabel(free)).toBe('Free');
+		});
+	});
+
+	describe('Nika OpenAI pricing', () => {
+		it('computes cost from the static table with a 10% cache-read rate', () => {
+			// 0.4M miss * 1.25 + 0.1M cache * 0.125 + 0.2M out * 10 = 0.5 + 0.0125 + 2
+			const cost = getOpenAITokenCost('gpt-5', { cachedTokens: 100_000, cacheMissTokens: 400_000, outputTokens: 200_000 });
+			expect(cost).toBeCloseTo(2.5125, 6);
+		});
+
+		it('charges zero for models outside the table', () => {
+			expect(getOpenAITokenCost('gpt-6', { cachedTokens: 0, cacheMissTokens: 100_000, outputTokens: 100_000 })).toBe(0);
+		});
+
+		it('publishes the GPT-5 family and o-series rates', () => {
+			expect(getOpenAITokenCost('gpt-5-mini', { cachedTokens: 0, cacheMissTokens: 1_000_000, outputTokens: 1_000_000 })).toBeCloseTo(2.25, 6);
+			expect(getOpenAITokenCost('o3', { cachedTokens: 0, cacheMissTokens: 1_000_000, outputTokens: 1_000_000 })).toBeCloseTo(10, 6);
+		});
+	});
+
+	describe('Nika Anthropic pricing', () => {
+		it('computes cost from the static table with a 10% cache-read rate', () => {
+			// 0.4M miss * 3 + 0.1M cache * 0.3 + 0.2M out * 15 = 1.2 + 0.03 + 3
+			const cost = getAnthropicTokenCost('claude-sonnet-4', { cachedTokens: 100_000, cacheMissTokens: 400_000, outputTokens: 200_000 });
+			expect(cost).toBeCloseTo(4.23, 6);
+		});
+
+		it('charges zero for models outside the table', () => {
+			expect(getAnthropicTokenCost('claude-sonnet-5', { cachedTokens: 0, cacheMissTokens: 100_000, outputTokens: 100_000 })).toBe(0);
+		});
+
+		it('publishes the Opus/Haiku family rates', () => {
+			expect(getAnthropicTokenCost('claude-opus-4', { cachedTokens: 0, cacheMissTokens: 1_000_000, outputTokens: 1_000_000 })).toBeCloseTo(90, 6);
+			expect(getAnthropicTokenCost('claude-haiku-4-5', { cachedTokens: 0, cacheMissTokens: 1_000_000, outputTokens: 1_000_000 })).toBeCloseTo(6, 6);
 		});
 	});
 });

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it } from 'vitest';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, parseNikaProviderConfig, resolveNikaTokenLimits } from '../nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaChatGptSubModel, isNikaClaudeSubModel, isNikaDeepSeekModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, parseNikaProviderConfig, resolveNikaTokenLimits } from '../nikaModels';
 
 describe('Nika model metadata', () => {
 	it('uses the documented default budgets', () => {
@@ -32,7 +32,19 @@ describe('Nika model metadata', () => {
 		expect(isNikaModelId('gemini-2.5-flash')).toBe(true);
 		expect(isNikaModelId('gemini-2.5-flash-lite')).toBe(true);
 		expect(isNikaModelId('gemma4:31b')).toBe(true);
+		expect(isNikaModelId('openai/gpt-5')).toBe(true);
+		expect(isNikaModelId('openai/gpt-4o-mini')).toBe(true);
+		expect(isNikaModelId('anthropic/claude-sonnet-4')).toBe(true);
+		expect(isNikaModelId('anthropic/claude-opus-4-5')).toBe(true);
+		expect(isNikaModelId('chatgpt/gpt-5-codex')).toBe(true);
+		expect(isNikaModelId('claude/claude-sonnet-4-5')).toBe(true);
 		expect(isNikaModelId('unknown')).toBe(false);
+		expect(isNikaChatGptSubModel('chatgpt/gpt-5-codex')).toBe(true);
+		expect(isNikaChatGptSubModel('chatgpt/gpt-5.1-codex-mini')).toBe(true);
+		expect(isNikaChatGptSubModel('openai/gpt-5')).toBe(false);
+		expect(isNikaClaudeSubModel('claude/claude-opus-4-5')).toBe(true);
+		expect(isNikaClaudeSubModel('claude/claude-haiku-4-5')).toBe(true);
+		expect(isNikaClaudeSubModel('anthropic/claude-sonnet-4')).toBe(false);
 		expect(isNikaDeepSeekModel('deepseek-v4-flash')).toBe(true);
 		expect(isNikaGeminiModel('gemini-2.5-flash')).toBe(true);
 		expect(getNikaModelCapabilities('deepseek-v4-flash-responses', limits).supportedEndpoints).toHaveLength(1);
@@ -71,6 +83,14 @@ describe('Nika model metadata', () => {
 		expect(getNikaModelProvider('nika/openrouter/anthropic/claude-sonnet-4')).toBe('openrouter');
 		expect(getNikaModelProvider('llamacpp/qwen2.5vl-7b')).toBe('llamacpp');
 		expect(getNikaModelProvider('nika/llamacpp/qwen2.5vl-7b')).toBe('llamacpp');
+		expect(getNikaModelProvider('openai/gpt-5')).toBe('openai');
+		expect(getNikaModelProvider('nika/openai/gpt-5')).toBe('openai');
+		expect(getNikaModelProvider('anthropic/claude-sonnet-4')).toBe('anthropic');
+		expect(getNikaModelProvider('nika/anthropic/claude-sonnet-4')).toBe('anthropic');
+		expect(getNikaModelProvider('chatgpt/gpt-5-codex')).toBe('chatgpt');
+		expect(getNikaModelProvider('nika/chatgpt/gpt-5-codex')).toBe('chatgpt');
+		expect(getNikaModelProvider('claude/claude-opus-4-5')).toBe('claude');
+		expect(getNikaModelProvider('nika/claude/claude-opus-4-5')).toBe('claude');
 		expect(getNikaModelProvider('unknown-model')).toBeUndefined();
 	});
 
@@ -91,6 +111,11 @@ describe('Nika model metadata', () => {
 		expect(getNikaEffortOptionsForModel('nika/deepseek-v4-pro-responses')).toEqual(['none', 'low', 'high', 'max']);
 		expect(getNikaEffortOptionsForModel('gemini-2.5-flash')).toEqual(['none', 'low', 'high']);
 		expect(getNikaEffortOptionsForModel('openrouter/anthropic/claude-sonnet-4')).toEqual(['low', 'medium', 'high']);
+		expect(getNikaEffortOptionsForModel('openai/gpt-5')).toEqual(['low', 'medium', 'high']);
+		expect(getNikaEffortOptionsForModel('openai/gpt-4o')).toEqual(['low', 'medium', 'high']); // provider-level fallback; the catalog narrows per model
+		expect(getNikaEffortOptionsForModel('anthropic/claude-sonnet-4')).toEqual([]);
+		expect(getNikaEffortOptionsForModel('chatgpt/gpt-5.6-sol')).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']); // codex range
+		expect(getNikaEffortOptionsForModel('claude/claude-opus-4-5')).toEqual([]);
 		expect(getNikaEffortOptionsForModel('llamacpp/qwen2.5vl-7b')).toEqual([]);
 		expect(getNikaEffortOptionsForModel('gemma4:31b')).toEqual([]);
 		expect(getNikaEffortOptionsForModel('unknown-model')).toEqual([]);
@@ -100,7 +125,9 @@ describe('Nika model metadata', () => {
 		expect(isNikaThinkingEffort('medium')).toBe(true);
 		expect(isNikaThinkingEffort('none')).toBe(true);
 		expect(isNikaThinkingEffort('max')).toBe(true);
-		expect(isNikaThinkingEffort('ultra')).toBe(false);
+		expect(isNikaThinkingEffort('xhigh')).toBe(true);
+		expect(isNikaThinkingEffort('ultra')).toBe(true);
+		expect(isNikaThinkingEffort('turbo')).toBe(false);
 	});
 
 	it('recognizes ollama catalog models as Nika models', () => {
@@ -130,6 +157,14 @@ describe('Nika model metadata', () => {
 		})).toEqual({
 			deepseek: { models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
 		});
+		// Subscription providers are accepted like any other.
+		expect(parseNikaProviderConfig({
+			chatgpt: { models: ['chatgpt/gpt-5-codex', 42] },
+			claude: { models: ['claude/claude-opus-4-5'] },
+		})).toEqual({
+			chatgpt: { models: ['chatgpt/gpt-5-codex'] },
+			claude: { models: ['claude/claude-opus-4-5'] },
+		});
 	});
 
 	it('reads the selected models for a provider', () => {
@@ -141,6 +176,7 @@ describe('Nika model metadata', () => {
 		expect(getNikaSelectedModels(config, 'openrouter')).toEqual(['openrouter/anthropic/claude-sonnet-4']);
 		expect(getNikaSelectedModels(config, 'ollama')).toBeUndefined();
 		expect(getNikaSelectedModels(undefined, 'deepseek')).toBeUndefined();
+		expect(getNikaSelectedModels(parseNikaProviderConfig({ chatgpt: { models: ['chatgpt/gpt-5-codex'] } }), 'chatgpt')).toEqual(['chatgpt/gpt-5-codex']);
 	});
 
 	it('filters native models to the wizard selection in managed mode', () => {

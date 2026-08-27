@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { type LanguageModelChatInformation } from 'vscode';
 import { BYOKKnownModels, BYOKModelCapabilities, byokKnownModelToAPIInfo } from '../common/byokProvider';
-import { buildReasoningEffortSchemaProperty } from '../../conversation/common/languageModelAccess';
+import { buildReasoningEffortSchemaProperty, buildSpeedSchemaProperty } from '../../conversation/common/languageModelAccess';
 
 /**
  * Wraps {@link byokKnownModelToAPIInfo} and enriches the model entry with
@@ -39,4 +39,24 @@ export function byokKnownModelsToAPIInfoWithEffort(providerName: string, knownMo
 		return [];
 	}
 	return Object.entries(knownModels).map(([id, capabilities]) => byokKnownModelToAPIInfoWithEffort(providerName, id, capabilities));
+}
+
+/** The speed tiers the codex backend accepts (Standard / Fast). */
+export const CODEX_SPEED_TIERS: readonly string[] = ['standard', 'fast'];
+
+/**
+ * Like {@link byokKnownModelToAPIInfoWithEffort} but also enriches the entry
+ * with the codex-style Speed control (Standard / Fast → `service_tier`).
+ */
+export function byokKnownModelToAPIInfoWithEffortAndSpeed(providerName: string, id: string, capabilities: BYOKModelCapabilities): LanguageModelChatInformation {
+	const model = byokKnownModelToAPIInfoWithEffort(providerName, id, capabilities);
+	return {
+		...model,
+		configurationSchema: {
+			properties: {
+				...model.configurationSchema?.properties,
+				speed: buildSpeedSchemaProperty(CODEX_SPEED_TIERS),
+			},
+		},
+	};
 }

@@ -16,6 +16,7 @@ import { IEndpoint, isCAPIEndpoint, isCAPIRequestMetadata, postRequest } from '.
 suite('Networking test Suite', function () {
 
 	let headerBuffer: { [name: string]: string } | undefined;
+	let fetchOptionsBuffer: FetchOptions | undefined;
 
 	class StaticFetcherService implements IFetcherService {
 		declare readonly _serviceBrand: undefined;
@@ -27,6 +28,7 @@ suite('Networking test Suite', function () {
 		}
 		fetch(url: string, options: FetchOptions): Promise<Response> {
 			headerBuffer = options.headers;
+			fetchOptionsBuffer = options;
 			return Promise.resolve(createFakeResponse(200));
 		}
 		createWebSocket(_url: string): WebSocketConnection {
@@ -100,6 +102,60 @@ suite('Networking test Suite', function () {
 		});
 
 		assert.strictEqual('Authorization' in headerBuffer!, false);
+	});
+
+	test('sends Copilot platform headers by default for plain URL endpoints', async function () {
+		const testingServiceCollection = createPlatformServices();
+		testingServiceCollection.define(IFetcherService, new StaticFetcherService());
+		const accessor = testingServiceCollection.createTestingAccessor();
+		const endpoint = { urlOrRequestMetadata: 'https://api.example.com/v1/responses' } as unknown as IEndpoint;
+		await accessor.get(IInstantiationService).invokeFunction(postRequest, {
+			endpointOrUrl: endpoint,
+			secretKey: 'abc',
+			intent: 'test',
+			requestId: 'id',
+			additionalHeaders: { 'X-Interaction-Id': 'interaction', 'X-Initiator': 'user' },
+		});
+
+		assert.strictEqual(headerBuffer!['Authorization'], 'Bearer abc');
+		assert.strictEqual(headerBuffer!['X-Request-Id'], 'id');
+		assert.strictEqual(headerBuffer!['OpenAI-Intent'], 'test');
+		assert.strictEqual(headerBuffer!['X-GitHub-Api-Version'], '2026-01-09');
+		assert.strictEqual(headerBuffer!['X-Interaction-Type'], 'test');
+		assert.strictEqual(headerBuffer!['X-Agent-Task-Id'], 'id');
+		assert.strictEqual(headerBuffer!['X-Interaction-Id'], 'interaction');
+		assert.strictEqual(headerBuffer!['X-Initiator'], 'user');
+		assert.strictEqual(fetchOptionsBuffer!.suppressUserAgentLibrary, false);
+	});
+
+	test('suppresses Copilot platform headers when the endpoint opts in', async function () {
+		const testingServiceCollection = createPlatformServices();
+		testingServiceCollection.define(IFetcherService, new StaticFetcherService());
+		const accessor = testingServiceCollection.createTestingAccessor();
+		const endpoint = {
+			urlOrRequestMetadata: 'https://api.example.com/v1/responses',
+			getEndpointFetchOptions: () => ({ suppressCopilotHeaders: true }),
+		} as unknown as IEndpoint;
+		await accessor.get(IInstantiationService).invokeFunction(postRequest, {
+			endpointOrUrl: endpoint,
+			secretKey: 'abc',
+			intent: 'test',
+			requestId: 'id',
+			additionalHeaders: { 'X-Interaction-Id': 'interaction', 'X-Initiator': 'user' },
+		});
+
+		// Auth and the endpoint's own headers still flow
+		assert.strictEqual(headerBuffer!['Authorization'], 'Bearer abc');
+		// None of the Copilot platform headers may reach the wire
+		assert.strictEqual('X-Request-Id' in headerBuffer!, false);
+		assert.strictEqual('OpenAI-Intent' in headerBuffer!, false);
+		assert.strictEqual('X-GitHub-Api-Version' in headerBuffer!, false);
+		assert.strictEqual('X-Interaction-Type' in headerBuffer!, false);
+		assert.strictEqual('X-Agent-Task-Id' in headerBuffer!, false);
+		assert.strictEqual('X-Interaction-Id' in headerBuffer!, false);
+		assert.strictEqual('X-Initiator' in headerBuffer!, false);
+		// The fetcher must also skip the user-agent-library stamp
+		assert.strictEqual(fetchOptionsBuffer!.suppressUserAgentLibrary, true);
 	});
 });
 

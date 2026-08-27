@@ -35,7 +35,9 @@ export abstract class BaseFetchFetcher implements IFetcher {
 		if (!headers['User-Agent']) {
 			headers['User-Agent'] = `GitHubCopilotChat/${this._envService.getVersion()}`;
 		}
-		headers[userAgentLibraryHeader] = this.userAgentLibraryUpdate ? this.userAgentLibraryUpdate(this.getUserAgentLibrary()) : this.getUserAgentLibrary();
+		if (!options.suppressUserAgentLibrary) {
+			headers[userAgentLibraryHeader] = this.userAgentLibraryUpdate ? this.userAgentLibraryUpdate(this.getUserAgentLibrary()) : this.getUserAgentLibrary();
+		}
 
 		let body = options.body;
 		if (options.json) {

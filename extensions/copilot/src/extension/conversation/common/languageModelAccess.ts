@@ -130,6 +130,48 @@ export function buildAutoModeTierSchemaProperty(tiers: readonly string[], defaul
 }
 
 /**
+ * Returns the localized, title-cased picker label for a request speed tier.
+ * Falls back to capitalizing an unknown value.
+ */
+export function getSpeedLabel(speed: string): string {
+	switch (speed) {
+		case 'standard': return l10n.t('Standard');
+		case 'fast': return l10n.t('Fast');
+		default: return speed.charAt(0).toUpperCase() + speed.slice(1);
+	}
+}
+
+/**
+ * Returns the localized description shown in the picker hover for a request
+ * speed tier. Falls back to the raw tier for unknown values.
+ */
+export function getSpeedDescription(speed: string): string {
+	switch (speed) {
+		case 'standard': return l10n.t('Default speed');
+		case 'fast': return l10n.t('1.5x speed, more usage');
+		default: return speed;
+	}
+}
+
+/**
+ * Builds the `speed` property descriptor for a model's
+ * {@link LanguageModelConfigurationSchema} — the codex-style Speed
+ * (Standard / Fast) control. Fast maps to the backend's priority service
+ * tier (`service_tier: "priority"`, 1.5x speed, increased usage).
+ */
+export function buildSpeedSchemaProperty(speeds: readonly string[], defaultSpeed = 'standard'): NonNullable<LanguageModelConfigurationSchema['properties']>[string] {
+	return {
+		type: 'string',
+		title: l10n.t('Speed'),
+		enum: [...speeds],
+		enumItemLabels: speeds.map(getSpeedLabel),
+		enumDescriptions: speeds.map(getSpeedDescription),
+		default: defaultSpeed,
+		group: 'navigation',
+	};
+}
+
+/**
  * Resolves the model picker's warning presentation. All warnings show as hover banners,
  * but only a degradation or a pending deprecation flags the row, and `rowWarning` is the
  * message explaining it. Callers must skip the synthetic Auto model, which wraps another
