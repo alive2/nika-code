@@ -17,6 +17,7 @@ import { ITelemetryService } from '../../../platform/telemetry/common/telemetry'
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { findNotebook, isJupyterNotebookUri } from '../../../util/common/notebooks';
+import { safeSlice } from '../../../util/common/stringUtils';
 import { raceCancellationError, raceTimeout } from '../../../util/vs/base/common/async';
 import { dispose } from '../../../util/vs/base/common/lifecycle';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
@@ -416,7 +417,7 @@ export class RunNotebookCellOutput extends PromptElement<IRunNotebookCellOutputP
 		});
 		const itemsText = items.join('\n');
 
-		const textChunk = itemsText.length > limit ? itemsText.substring(0, limit) : itemsText;
+		const textChunk = itemsText.length > limit ? safeSlice(itemsText, 0, limit) : itemsText;
 		return textChunk;
 	}
 }

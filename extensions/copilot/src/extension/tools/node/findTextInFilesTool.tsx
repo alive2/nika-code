@@ -16,6 +16,7 @@ import { ITelemetryService } from '../../../platform/telemetry/common/telemetry'
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
 import { WorkingDirectory } from '../../../platform/workspace/common/workingDirectory';
 import { raceTimeoutAndCancellationError } from '../../../util/common/racePromise';
+import { safeSlice } from '../../../util/common/stringUtils';
 import { asArray } from '../../../util/vs/base/common/arrays';
 import { CancellationToken } from '../../../util/vs/base/common/cancellation';
 import { isAbsolute } from '../../../util/vs/base/common/path';
@@ -550,12 +551,12 @@ export class FindMatch extends PromptElement<IFindMatchProps> {
 		let toPreview = preview;
 		let lineStartsAt = (rangeInDocument.start.line + 1) - count(preview.slice(0, start), '\n');
 		if (preview.length - end > MAX_CHARS_BETWEEN_MATCHES) {
-			toPreview = preview.slice(0, end + MAX_CHARS_BETWEEN_MATCHES) + '...';
+			toPreview = safeSlice(preview, 0, end + MAX_CHARS_BETWEEN_MATCHES) + '...';
 		}
 
 		if (start > MAX_CHARS_BETWEEN_MATCHES) {
 			lineStartsAt += count(preview.slice(0, start - MAX_CHARS_BETWEEN_MATCHES), '\n');
-			toPreview = '...' + toPreview.slice(start - MAX_CHARS_BETWEEN_MATCHES);
+			toPreview = '...' + safeSlice(toPreview, start - MAX_CHARS_BETWEEN_MATCHES, toPreview.length);
 		}
 
 		const toPreviewLines = toPreview.split('\n');
@@ -663,16 +664,20 @@ export class FindTextInFilesGrepResult extends PromptElement<FindTextInFilesGrep
 		const start = Math.max(0, Math.min(convert.positionToOffset(new EditorPosition(previewRange.start.line + 1, previewRange.start.character + 1)), preview.length));
 		const end = Math.max(start, Math.min(convert.positionToOffset(new EditorPosition(previewRange.end.line + 1, previewRange.end.character + 1)), preview.length));
 
-		let matchText = preview.slice(start, end);
+		// Use surrogate-safe slicing throughout: cutting between the two code units
+		// of an astral character (e.g. an emoji) leaves a lone surrogate, which
+		// serializes as a \uDXXX escape that strict JSON parsers reject
+		// ("unexpected end of hex escape").
+		let matchText = safeSlice(preview, start, end);
 		if (matchText.length > this.MAX_MATCH_CHARS) {
 			const head = Math.ceil(this.MAX_MATCH_CHARS / 2);
 			const tail = this.MAX_MATCH_CHARS - head;
 			const elided = matchText.length - head - tail;
-			matchText = `${matchText.slice(0, head)}[... ${elided} characters elided ...]${matchText.slice(matchText.length - tail)}`;
+			matchText = `${safeSlice(matchText, 0, head)}[... ${elided} characters elided ...]${safeSlice(matchText, matchText.length - tail, matchText.length)}`;
 		}
 
-		const before = preview.slice(Math.max(0, start - this.CONTEXT_BEFORE_CHARS), start);
-		const after = preview.slice(end, end + this.CONTEXT_AFTER_CHARS);
+		const before = safeSlice(preview, Math.max(0, start - this.CONTEXT_BEFORE_CHARS), start);
+		const after = safeSlice(preview, end, end + this.CONTEXT_AFTER_CHARS);
 		const column = textMatch.ranges[0].sourceRange.start.character + 1;
 		const annotation = ` [match at col ${column} \u00B7 line truncated, ${this.formatCharCount(preview.length)} chars]`;
 

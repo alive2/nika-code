@@ -10,6 +10,7 @@ import { ICopilotTokenManager } from '../../../platform/authentication/common/co
 import { IChatDebugFileLoggerService } from '../../../platform/chat/common/chatDebugFileLoggerService';
 import { ISessionStore } from '../../../platform/chronicle/common/sessionStore';
 import { CancellationToken } from '../../../util/vs/base/common/cancellation';
+import { safeSlice } from '../../../util/common/stringUtils';
 import { LanguageModelTextPart, LanguageModelToolResult } from '../../../vscodeTypes';
 import { SessionIndexingPreference } from '../../chronicle/common/sessionIndexingPreference';
 import { CloudSessionStoreClient } from '../../chronicle/node/cloudSessionStoreClient';
@@ -389,7 +390,7 @@ function formatSqlResult(rows: Record<string, unknown>[], truncated: boolean, so
 				return '';
 			}
 			const s = String(v);
-			return s.length > perCellLimit ? s.slice(0, perCellLimit) + '...' : s;
+			return s.length > perCellLimit ? safeSlice(s, 0, perCellLimit) + '...' : s;
 		});
 		lines.push(`| ${values.join(' | ')} |`);
 	}

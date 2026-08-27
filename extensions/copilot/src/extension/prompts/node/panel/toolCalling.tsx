@@ -26,6 +26,7 @@ import { IOTelService } from '../../../../platform/otel/common/otelService';
 import { IExperimentationService } from '../../../../platform/telemetry/common/nullExperimentationService';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry';
 import { toErrorMessage } from '../../../../util/common/errorMessage';
+import { safeSlice } from '../../../../util/common/stringUtils';
 import { CancellationToken } from '../../../../util/vs/base/common/cancellation';
 import { isCancellationError } from '../../../../util/vs/base/common/errors';
 import { getExtensionForMimeType } from '../../../../util/vs/base/common/mime';
@@ -996,7 +997,10 @@ export class ToolResult extends PrimitiveToolResult<IToolResultProps> {
 		const keepInFirstHalf = Math.round(targetChars * 0.4);
 		const keepInSecondHalf = targetChars - keepInFirstHalf;
 
-		return content.slice(0, keepInFirstHalf) + removedMessage + content.slice(-keepInSecondHalf);
+		// Use surrogate-safe slicing so truncation never splits an emoji (or other
+		// astral character) in half: a lone surrogate would serialize as a \uDXXX
+		// escape, which strict JSON parsers reject ("unexpected end of hex escape").
+		return safeSlice(content, 0, keepInFirstHalf) + removedMessage + safeSlice(content, content.length - keepInSecondHalf, content.length);
 	}
 
 	protected override onResourceLink(data: string) {

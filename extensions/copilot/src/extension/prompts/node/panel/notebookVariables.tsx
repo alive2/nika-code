@@ -11,6 +11,7 @@ import { INotebookService, VariablesResult } from '../../../../platform/notebook
 import { IPromptPathRepresentationService } from '../../../../platform/prompts/common/promptPathRepresentationService';
 import { IWorkspaceService } from '../../../../platform/workspace/common/workspaceService';
 import { getNotebookCellOutput, isJupyterNotebookUri } from '../../../../util/common/notebooks';
+import { safeSlice } from '../../../../util/common/stringUtils';
 import { URI } from '../../../../util/vs/base/common/uri';
 import { IPromptEndpoint } from '../base/promptRenderer';
 import { Tag } from '../base/tag';
@@ -138,7 +139,7 @@ export class NotebookCellOutputVariable extends PromptElement<INotebookCellOutpu
 				textChunk = parseAndCleanStack(textChunk);
 			}
 			if (textChunk.length > textSize) {
-				textChunk = textChunk.substring(0, textSize);
+				textChunk = safeSlice(textChunk, 0, textSize);
 			}
 			text = (
 				<>

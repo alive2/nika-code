@@ -9,6 +9,7 @@ import { ILogService } from '../../../../platform/log/common/logService';
 import { IParserService, treeSitterOffsetRangeToVSCodeRange, treeSitterToVSCodeRange, vscodeToTreeSitterOffsetRange, vscodeToTreeSitterRange } from '../../../../platform/parser/node/parserService';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry';
 import { IWorkspaceService } from '../../../../platform/workspace/common/workspaceService';
+import { safeSlice } from '../../../../util/common/stringUtils';
 import { Diagnostic, Location, Range, Uri } from '../../../../vscodeTypes';
 import { asyncComputeWithTimeBudget } from '../../../context/node/resolvers/selectionContextHelpers';
 import { IDocumentContext } from '../../../prompt/node/documentContext';
@@ -83,7 +84,7 @@ class DiagnosticDescription extends PromptElement<DiagnosticDescriptionProps> {
 		const range = d.range;
 		const content = document.getText(new Range(range.start.line, 0, range.end.line + 1, 0)).trimEnd();
 		const code = (content.length > this.props.maxLength) ?
-			content.slice(0, this.props.maxLength) + ' (truncated…)' :
+			safeSlice(content, 0, this.props.maxLength) + ' (truncated…)' :
 			content;
 		return <>
 			{code

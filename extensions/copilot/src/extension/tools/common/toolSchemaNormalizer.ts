@@ -12,6 +12,7 @@ import { isGeminiFamily } from '../../../platform/endpoint/common/chatModelCapab
 import { Iterable } from '../../../util/vs/base/common/iterator';
 import { Lazy } from '../../../util/vs/base/common/lazy';
 import { deepClone } from '../../../util/vs/base/common/objects';
+import { safeSlice } from '../../../util/common/stringUtils';
 
 /**
  * Normalizes tool schema for various model restrictions. This is a hack
@@ -110,7 +111,7 @@ const jsonSchemaRules: ((family: string, node: JsonSchema, didFix: (message: str
 
 		forEachSchemaNode(schema, n => {
 			if (n && 'description' in n && n.description && n.description.length > gpt4oMaxStringLength) {
-				n.description = n.description.substring(0, gpt4oMaxStringLength);
+				n.description = safeSlice(n.description, 0, gpt4oMaxStringLength);
 				onFix(`object description is too long (truncated to ${gpt4oMaxStringLength} chars)`);
 			}
 		});

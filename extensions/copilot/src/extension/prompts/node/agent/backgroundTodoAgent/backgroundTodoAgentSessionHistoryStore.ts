@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable, toDisposable } from '../../../../../util/vs/base/common/lifecycle';
+import { safeSlice } from '../../../../../util/common/stringUtils';
 import { ThinkingData } from '../../../../../platform/thinking/common/thinking';
 import { IBuildPromptContext, IToolCall, IToolCallRound } from '../../../../prompt/common/intents';
 import { ToolName } from '../../../../tools/common/toolNames';
@@ -124,7 +125,7 @@ function processToolCallRound(index: number, toolCall: IToolCallRound): {
 		thinking: processThinkingData(toolCall.thinking),
 		toolCalls: substantiveToolCalls.map(t => ({
 			name: t.name,
-			arguments: t.arguments.trim().slice(0, 200),
+			arguments: safeSlice(t.arguments.trim(), 0, 200),
 		}))
 	};
 
@@ -136,7 +137,7 @@ function processThinkingData(thinkingData: ThinkingData | undefined) {
 	if (thinkingText === undefined || typeof thinkingText === 'string') {
 		return thinkingText?.trim();
 	}
-	return thinkingText.join('\n').trim().slice(0, 400);
+	return safeSlice(thinkingText.join('\n').trim(), 0, 400);
 }
 
 /**
