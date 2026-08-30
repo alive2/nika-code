@@ -59,9 +59,7 @@ param(
 	# Patterns of files to sign inside the app directory.
 	[string[]]$AppPatterns = @('*.exe', '*.dll', '*.node'),
 	# Skip signing the app binaries (sign only the installer).
-	[switch]$SkipAppBinaries,
-	# Continue past individual file failures and report at the end.
-	[switch]$ContinueOnError
+	[switch]$SkipAppBinaries
 )
 
 $ErrorActionPreference = 'Stop'
@@ -172,12 +170,15 @@ if ($files.Count -eq 0) {
 # 3. Sign
 # ---------------------------------------------------------------------------
 $failed = [System.Collections.Generic.List[string]]::new()
+$skipped = [System.Collections.Generic.List[string]]::new()
 $signed = 0
 $total = $files.Count
 
 foreach ($file in $files) {
 	$signed++
 	Write-Host "[$signed/$total] Signing $file" -ForegroundColor DarkGray
+	$exitCode = 0
+	$outputLines = @()
 	try {
 		if ($usePfX) {
 			$args = @('sign', '/fd', 'SHA256', '/tr', $timestampUrl, '/td', 'SHA256')
@@ -187,8 +188,8 @@ foreach ($file in $files) {
 				$args += @('/f', $env:NIKA_SIGN_PFX_PATH, '/p', $env:NIKA_SIGN_PFX_PASSWORD)
 			}
 			$args += $file
-			& $signtool @args
-			if ($LASTEXITCODE -ne 0) { throw "signtool exited with code $LASTEXITCODE" }
+			$outputLines = @(& $signtool @args 2>&1 | ForEach-Object { "$_" })
+			$exitCode = $LASTEXITCODE
 		} else {
 			$args = @(
 				'sign',
@@ -202,13 +203,25 @@ foreach ($file in $files) {
 			)
 			if ($env:NIKA_ATS_EXTRA_ARGS) { $args += ($env:NIKA_ATS_EXTRA_ARGS -split ' ') }
 			$args += $file
-			& $azuresigntool.Source @args
-			if ($LASTEXITCODE -ne 0) { throw "azuresigntool exited with code $LASTEXITCODE" }
+			$outputLines = @(& $azuresigntool.Source @args 2>&1 | ForEach-Object { "$_" })
+			$exitCode = $LASTEXITCODE
 		}
 	} catch {
-		Write-Warning "Failed to sign $file : $($_.Exception.Message)"
-		$failed.Add($file)
-		if (-not $ContinueOnError) { break }
+		$exitCode = 1
+		$outputLines = @($_.Exception.Message)
+	}
+
+	if ($exitCode -ne 0) {
+		$output = ($outputLines -join "`n")
+		if ($output -match '0x800700C1|badexeformat|Bad EXE format') {
+			# Not a signable PE (e.g. some Rust prebuilt .node shims) — nothing we can do.
+			Write-Warning "Skipped (not a signable PE): $file"
+			$skipped.Add($file)
+		} else {
+			Write-Warning "Failed to sign $file (exit $exitCode)"
+			foreach ($line in $outputLines | Select-Object -First 4) { Write-Host "  $line" -ForegroundColor DarkGray }
+			$failed.Add($file)
+		}
 	}
 }
 
@@ -232,12 +245,14 @@ if ($setupExe -and (Test-Path $setupExe.FullName)) {
 # ---------------------------------------------------------------------------
 # 5. Summary
 # ---------------------------------------------------------------------------
+Write-Host ''
+Write-Host "Signed $signed file(s): $($signed - $failed.Count - $skipped.Count) OK, $($skipped.Count) skipped (not signable PE), $($failed.Count) failed" -ForegroundColor $(if ($failed.Count -gt 0) { 'Red' } else { 'Green' })
+if ($skipped.Count -gt 0) {
+	Write-Host 'Skipped files:' -ForegroundColor Yellow
+	$skipped | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+}
 if ($failed.Count -gt 0) {
-	Write-Host ''
 	Write-Host "FAILED: $($failed.Count) of $total files could not be signed:" -ForegroundColor Red
 	$failed | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
 	exit 1
-} else {
-	Write-Host ''
-	Write-Host "Done. Signed $total file(s) with timestamp server $timestampUrl" -ForegroundColor Green
 }

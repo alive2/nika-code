@@ -67,8 +67,10 @@ npm run sign-release
 
 The script reads the backend and credentials from environment variables, signs
 every `.exe`/`.dll`/`.node` in the built app plus the setup exe, and verifies
-the installer signature. If no backend is configured it prints a notice and
-exits 0, so the pipeline also works unsigned.
+the installer signature. Binaries that are not signable PEs (e.g. some Rust
+prebuilds shipped by third-party extensions) are skipped automatically. If no
+backend is configured it prints a notice and exits 0, so the pipeline also
+works unsigned.
 
 ---
 
