@@ -54,6 +54,22 @@ Compute the SHA-256 (needed for release notes):
 Get-FileHash .build\win32-x64\user-setup\NikaCodeSetup-1.0.2.exe -Algorithm SHA256
 ```
 
+### 2.5 Sign the build (optional but strongly recommended)
+
+Unsigned installers are blocked by Windows **Smart App Control** / SmartScreen
+("We blocked ... because we could not verify its publisher"). If you have a
+signing certificate configured (see [Code signing](#code-signing)), sign the
+app binaries and the installer before publishing:
+
+```powershell
+npm run sign-release
+```
+
+The script reads the backend and credentials from environment variables, signs
+every `.exe`/`.dll`/`.node` in the built app plus the setup exe, and verifies
+the installer signature. If no backend is configured it prints a notice and
+exits 0, so the pipeline also works unsigned.
+
 ---
 
 ## 3. Commit & push
@@ -140,6 +156,59 @@ will pick up the update within the hour, or immediately via
 > **Older installs (v1.0.0 and earlier)** have no `updateUrl` and will **not**
 > auto-update. They must install the new release manually. See
 > [AUTO-UPDATE.md](./AUTO-UPDATE.md#upgrade-path-for-pre-update-builds).
+
+## Code signing
+
+Signing gives Windows a publisher to verify, which stops Smart App Control and
+SmartScreen from blocking `NikaCode.exe` and the installer on fresh installs.
+
+### Option A — Traditional certificate (PFX) with signtool
+
+1. Buy an **OV** or **EV** code-signing certificate (EV builds reputation
+   faster). Export it as a `.pfx` file.
+2. Install the Windows SDK (provides `signtool.exe`).
+3. Set the environment variables and run the signing script:
+
+```powershell
+$env:NIKA_SIGN_PFX_PATH = 'C:\certs\nika-code.pfx'
+$env:NIKA_SIGN_PFX_PASSWORD = '...'
+# optional: sign with a cert already in the store instead of a PFX
+# $env:NIKA_SIGN_PFX_THUMBPRINT = '<sha1>'
+npm run sign-release
+```
+
+### Option B — Azure Trusted Signing
+
+1. Create a **Trusted Signing** resource in the Azure portal, add a
+   certificate profile, and complete identity validation.
+2. Install the signing tool:
+
+```powershell
+dotnet tool install --global Microsoft.TrustedSigning.Client
+```
+
+3. Authenticate (`az login`, or set `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` /
+   `AZURE_TENANT_ID` for a service principal) and set the resource details:
+
+```powershell
+$env:NIKA_ATS_ENDPOINT = 'https://<account>.codesigning.azure.net'
+$env:NIKA_ATS_ACCOUNT = '<account>'
+$env:NIKA_ATS_CERT = '<certificate-name>'
+$env:NIKA_ATS_PROFILE = '<profile>'
+npm run sign-release
+```
+
+### Notes
+
+- Both backends use RFC 3161 timestamping (default server
+  `http://timestamp.digicert.com`, override with `NIKA_SIGN_TIMESTAMP_URL`), so
+  signatures stay valid after the certificate expires.
+- Timestamps are embedded by the signing tool; the script also runs
+  `signtool verify /pa` on the installer when signtool is available.
+- Even with a valid signature, a brand-new certificate can still be blocked
+  briefly by Smart App Control while it builds cloud reputation.
+- The Inno `SignTool=esrp` definition in `build/win32/code.iss` is only used by
+  Microsoft's CI (ESRP); this script signs locally after the build instead.
 
 ---
 
