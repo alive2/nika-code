@@ -164,6 +164,57 @@ describe('Nika OpenRouter vision', () => {
 	});
 });
 
+describe('Nika DeepSeek vision backend', () => {
+	it('describes an image through the DeepSeek vision model endpoint', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ choices: [{ message: { content: 'A schematic of a resistor circuit.' } }] }) });
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => key === 'visionModel' ? 'nika/deepseek-v4-flash-vision-exp-responses' : fallback,
+		} as never);
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn().mockResolvedValue('sk-ds-1') } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: fetchMock, makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
+		);
+		const result = await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(new Uint8Array([4, 5, 6]), 'image/png')]),
+		], new vscode.CancellationTokenSource().token);
+
+		const text = result.messages[0].content.find(part => part instanceof vscode.LanguageModelTextPart) as vscode.LanguageModelTextPart;
+		expect(text.value).toContain('A schematic of a resistor circuit.');
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe('https://api.deepseek.com/chat/completions');
+		const body = JSON.parse(init.body);
+		// The Responses variant routes to Chat Completions with the base id.
+		expect(body.model).toBe('deepseek-v4-flash-vision-exp');
+		expect(body.messages[0].content[1].type).toBe('image_url');
+		expect(init.headers.Authorization).toBe('Bearer sk-ds-1');
+		expect(init.callSite).toBe('nika-deepseek-vision');
+	});
+
+	it('falls back to a placeholder when no DeepSeek key is stored', async () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => key === 'visionModel' ? 'nika/deepseek-v4-flash-vision-exp' : fallback,
+		} as never);
+		const showWarningMessage = vi.fn();
+		vi.mocked(vscode.window.showWarningMessage).mockImplementation(showWarningMessage);
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn().mockResolvedValue(undefined) } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: vi.fn(), makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
+		);
+
+		const result = await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(new Uint8Array([2]), 'image/png')]),
+		], new vscode.CancellationTokenSource().token);
+
+		const text = result.messages[0].content[0] as vscode.LanguageModelTextPart;
+		expect(text.value).toContain('Image processing failed');
+		expect(showWarningMessage).toHaveBeenCalled();
+	});
+});
+
 describe('Nika DeepSeek Web vision', () => {
 	it('describes an image through the DeepSeek Web provider using the stored token', async () => {
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({

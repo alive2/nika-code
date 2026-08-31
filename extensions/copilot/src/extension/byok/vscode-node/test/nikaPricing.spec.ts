@@ -43,14 +43,17 @@ describe('Nika DeepSeek pricing', () => {
 		expect(isDeepSeekPeakHour(utcHour(23))).toBe(false);
 	});
 
-	it('publishes both DeepSeek models with peak rates', () => {
+	it('publishes the DeepSeek models with peak rates', () => {
 		expect(NIKA_DEEPSEEK_PEAK_PRICES['deepseek-v4-flash']).toEqual({ cacheHitPerMTok: 0.014, cacheMissPerMTok: 0.44, outputPerMTok: 1.32 });
 		expect(NIKA_DEEPSEEK_PEAK_PRICES['deepseek-v4-pro']).toEqual({ cacheHitPerMTok: 0.044, cacheMissPerMTok: 1.32, outputPerMTok: 3.96 });
+		// The vision model bills at the Flash rate.
+		expect(NIKA_DEEPSEEK_PEAK_PRICES['deepseek-v4-flash-vision-exp']).toEqual({ cacheHitPerMTok: 0.014, cacheMissPerMTok: 0.44, outputPerMTok: 1.32 });
 	});
 
 	it('maps responses models to their base pricing key', () => {
 		expect(deepSeekPricingKey('deepseek-v4-flash')).toBe('deepseek-v4-flash');
 		expect(deepSeekPricingKey('deepseek-v4-pro-responses')).toBe('deepseek-v4-pro');
+		expect(deepSeekPricingKey('deepseek-v4-flash-vision-exp-responses')).toBe('deepseek-v4-flash-vision-exp');
 		expect(deepSeekPricingKey('gemini-2.5-flash')).toBeUndefined();
 		expect(deepSeekPricingKey('gemma4:31b')).toBeUndefined();
 	});

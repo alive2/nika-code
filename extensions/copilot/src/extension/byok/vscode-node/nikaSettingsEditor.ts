@@ -9,7 +9,7 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaTokenLimits, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekVisionModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaTokenLimits, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
 import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour, NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { NikaOpenAIProvider } from './nikaOpenAIProvider';
@@ -1661,8 +1661,10 @@ export class NikaSettingsEditor extends Disposable {
 		const names: Record<string, string> = {
 			'deepseek-v4-flash': 'DeepSeek V4 Flash',
 			'deepseek-v4-pro': 'DeepSeek V4 Pro',
-			'deepseek-v4-flash-responses': 'DeepSeek V4 Flash (Responses, Experimental)',
-			'deepseek-v4-pro-responses': 'DeepSeek V4 Pro (Responses, Experimental)',
+			'deepseek-v4-flash-responses': 'DeepSeek V4 Flash (Responses)',
+			'deepseek-v4-pro-responses': 'DeepSeek V4 Pro (Responses)',
+			'deepseek-v4-flash-vision-exp': 'DeepSeek V4 Flash Vision (Exp)',
+			'deepseek-v4-flash-vision-exp-responses': 'DeepSeek V4 Flash Vision (Exp) (Responses)',
 			'gemini-2.5-flash': 'Gemini 2.5 Flash',
 			'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
 			'gemma4:31b': 'Gemma 4 31B (Ollama)',
@@ -1813,7 +1815,7 @@ function status(id,configured){const result=state.connections[id];const text=res
 // --- Provider wizard (Add Provider flow + provider cards) ---
 const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor',deepseekweb:'DeepSeek Web',openai:'OpenAI',anthropic:'Anthropic',chatgpt:'ChatGPT',claude:'Claude'};
 const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor','deepseekweb','openai','anthropic','chatgpt','claude'];
-const providerHints={deepseek:'Flash, Pro, and experimental Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota'};
+const providerHints={deepseek:'Flash, Pro, Flash Vision, and Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota'};
 const providerModels=state.providerModels||{};
 const providerConfig=state.providers||{};
 const providersManaged=!!state.providersManaged;
@@ -2119,7 +2121,7 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 	 */
 	private _overviewProviderRows(state: Record<string, unknown>): string {
 		const labels: Record<string, [string, string]> = {
-			deepseek: [vscode.l10n.t('DeepSeek'), vscode.l10n.t('Flash, Pro, and experimental Responses')],
+			deepseek: [vscode.l10n.t('DeepSeek'), vscode.l10n.t('Flash, Pro, Flash Vision, and Responses')],
 			gemini: [vscode.l10n.t('Gemini'), vscode.l10n.t('Every Gemini model on the Google catalog')],
 			openrouter: [vscode.l10n.t('OpenRouter'), vscode.l10n.t('The full model catalog at OpenRouter prices')],
 			ollama: [vscode.l10n.t('Ollama'), vscode.l10n.t('Models pulled on the configured host')],
@@ -2250,18 +2252,21 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 	private _visionBackendRow(state: Record<string, unknown>, currentValue: string): string {
 		const defaultModel = String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL);
 		const choices = this._modelChoices(state);
-		// DeepSeek advertises media input only so Copilot preserves attachments
-		// for Nika's text conversion — it cannot describe images itself, so it
-		// never counts as a vision backend or as natively vision-capable.
+		// The text-only DeepSeek models advertise media input only so Copilot
+		// preserves attachments for Nika's text conversion — they cannot
+		// describe images themselves, so they never count as a vision backend
+		// or as natively vision-capable. The DeepSeek vision model, however,
+		// sees images natively and can serve as the description backend too.
 		const defaultModelEntry = choices.find(m => m.id === defaultModel);
-		const defaultModelVision = (defaultModelEntry?.vision ?? false) && defaultModelEntry?.provider !== 'deepseek';
+		const defaultModelVision = (defaultModelEntry?.vision ?? false)
+			&& (defaultModelEntry?.provider !== 'deepseek' || isNikaDeepSeekVisionModel(defaultModel));
 		const options: string[][] = [];
 		if (defaultModelVision) {
 			options.push(['none', vscode.l10n.t('None (native vision)')]);
 		}
 		const seen = new Set<string>();
 		for (const model of choices) {
-			if (!model.vision || model.provider === 'deepseek' || seen.has(model.id)) {
+			if (!model.vision || seen.has(model.id) || (model.provider === 'deepseek' && !isNikaDeepSeekVisionModel(model.id))) {
 				continue;
 			}
 			seen.add(model.id);

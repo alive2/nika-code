@@ -212,6 +212,8 @@ export type NikaModelId =
 	| 'deepseek-v4-pro'
 	| 'deepseek-v4-flash-responses'
 	| 'deepseek-v4-pro-responses'
+	| 'deepseek-v4-flash-vision-exp'
+	| 'deepseek-v4-flash-vision-exp-responses'
 	| 'gemini-2.5-flash'
 	| 'gemini-2.5-flash-lite'
 	| 'gemma4:31b';
@@ -241,6 +243,8 @@ export const NIKA_DEEPSEEK_MODEL_IDS: readonly NikaModelId[] = [
 	'deepseek-v4-pro',
 	'deepseek-v4-flash-responses',
 	'deepseek-v4-pro-responses',
+	'deepseek-v4-flash-vision-exp',
+	'deepseek-v4-flash-vision-exp-responses',
 ];
 
 export const NIKA_GEMINI_MODEL_IDS: readonly NikaModelId[] = [
@@ -408,6 +412,19 @@ export function isNikaLlamaCppModel(value: string): boolean {
 
 export function isNikaDeepSeekModel(value: string): value is NikaModelId {
 	return NIKA_DEEPSEEK_MODEL_IDS.includes(value as NikaModelId);
+}
+
+/**
+ * True for the natively vision-capable DeepSeek model ids (the
+ * `deepseek-v4-flash-vision-exp` Chat Completions and Responses variants).
+ * Unlike the text-only DeepSeek models — which advertise media input only so
+ * Nika can preprocess attachments into text — this model accepts image parts
+ * directly on the wire, so the vision-preprocessing toggle should be the only
+ * thing deciding whether images are described first or sent natively.
+ */
+export function isNikaDeepSeekVisionModel(value: string): boolean {
+	const id = unprefixNikaModelId(value);
+	return id === 'deepseek-v4-flash-vision-exp' || id === 'deepseek-v4-flash-vision-exp-responses';
 }
 
 export function isNikaGeminiModel(value: string): value is NikaModelId {
@@ -580,19 +597,26 @@ export function getNikaModelCapabilities(id: NikaModelId, limits: NikaTokenLimit
 		const name = id === 'deepseek-v4-pro'
 			? 'DeepSeek V4 Pro'
 			: id === 'deepseek-v4-pro-responses'
-				? 'DeepSeek V4 Pro (Responses, Experimental)'
+				? 'DeepSeek V4 Pro (Responses)'
 				: id === 'deepseek-v4-flash-responses'
-					? 'DeepSeek V4 Flash (Responses, Experimental)'
-					: 'DeepSeek V4 Flash';
+					? 'DeepSeek V4 Flash (Responses)'
+					: id === 'deepseek-v4-flash-vision-exp'
+						? 'DeepSeek V4 Flash Vision (Exp)'
+						: id === 'deepseek-v4-flash-vision-exp-responses'
+							? 'DeepSeek V4 Flash Vision (Exp) (Responses)'
+							: 'DeepSeek V4 Flash';
 		return {
 			name,
 			contextWindow: limits.contextWindow,
 			maxInputTokens: limits.maxInputTokens,
 			maxOutputTokens: limits.maxOutputTokens,
 			toolCalling: true,
-			// Nika preprocesses images and PDFs before forwarding DeepSeek's
-			// text-only request. Advertise media input here so Copilot preserves
-			// those attachments long enough for Nika to perform that conversion.
+			// The text-only DeepSeek models advertise media input here so
+			// Copilot preserves attachments long enough for Nika to convert
+			// them to text (images via the vision backend, PDFs always).
+			// The vision model accepts image parts natively: with vision
+			// preprocessing off (or `None (native vision)` selected), images
+			// ride through untouched instead of being described first.
 			vision: true,
 			thinking: true,
 			supportsReasoningEffort: ['none', 'low', 'high', 'max'],

@@ -26,6 +26,7 @@ import {
 	isNikaClaudeSubModel,
 	isNikaCursorModel,
 	isNikaDeepSeekModel,
+	isNikaDeepSeekVisionModel,
 	isNikaDeepSeekWebModel,
 	isNikaGeminiCatalogModel,
 	isNikaGeminiModel,
@@ -860,10 +861,14 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				});
 				if (model.id.endsWith('-responses') && !token.isCancellationRequested) {
 					const chatModel = model.id.slice(0, -'-responses'.length);
-					const chatModelLabel = chatModel === 'deepseek-v4-pro' ? 'DeepSeek V4 Pro' : 'DeepSeek V4 Flash';
+					const chatModelLabel = chatModel === 'deepseek-v4-pro'
+						? 'DeepSeek V4 Pro'
+						: chatModel === 'deepseek-v4-flash-vision-exp'
+							? 'DeepSeek V4 Flash Vision (Exp)'
+							: 'DeepSeek V4 Flash';
 					const switchAction = vscode.l10n.t('Use {0} Chat Completions', chatModelLabel);
 					const selected = await vscode.window.showErrorMessage(
-						vscode.l10n.t('The experimental DeepSeek Responses request failed. Nika did not fall back automatically.'),
+						vscode.l10n.t('The DeepSeek Responses request failed. Nika did not fall back automatically.'),
 						switchAction,
 					);
 					if (selected === switchAction) {
@@ -1502,13 +1507,15 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	 * `nika.visionPreprocessingEnabled` toggle conflicts with the model's
 	 * image handling:
 	 * - Toggle ON + a natively vision-capable model routed through the
-	 *   describe path (vision-capable OpenRouter models): images will be
-	 *   described by the vision backend instead of sent natively.
-	 * - Toggle OFF + a text-only model (DeepSeek, text-only OpenRouter
-	 *   models): the model may reject raw image parts.
-	 * The warning offers an action that opens Nika Settings on the Vision
-	 * page. Only the models affected by the toggle are considered (models
-	 * that always pass images through natively are skipped entirely).
+	 *   describe path (the DeepSeek vision model, vision-capable OpenRouter /
+	 *   OpenAI / Anthropic models): images will be described by the vision
+	 *   backend instead of sent natively.
+	 * - Toggle OFF + a text-only model (text-only DeepSeek, OpenRouter,
+	 *   OpenAI, Anthropic models): the model may reject raw image parts.
+	 * The warning offers an action that flips the toggle directly, plus one
+	 * that opens Nika Settings on the Vision page. Only the models affected
+	 * by the toggle are considered (models that always pass images through
+	 * natively are skipped entirely).
 	 */
 	private _warnVisionConflict(modelId: string): void {
 		const config = vscode.workspace.getConfiguration('nika');
@@ -1521,9 +1528,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 
 		let nativeVision: boolean | undefined;
 		if (isNikaDeepSeekModel(modelId)) {
-			// DeepSeek advertises media input only so Copilot preserves
-			// attachments for Nika's text conversion — it cannot see images.
-			nativeVision = false;
+			// Only the vision model sees images natively; the text-only
+			// DeepSeek models advertise media input only so Copilot preserves
+			// attachments for Nika's text conversion.
+			nativeVision = isNikaDeepSeekVisionModel(modelId);
 		} else if (isNikaOpenRouterModel(modelId)) {
 			// Consult the cached catalog only: fetching here would add latency
 			// to the request path, and the request branch fetches it anyway.
@@ -1546,21 +1554,32 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		}
 
 		const openVisionAction = vscode.l10n.t('Open Vision Settings');
+		const flipToggle = async (value: boolean): Promise<void> => {
+			await vscode.workspace.getConfiguration('nika').update('visionPreprocessingEnabled', value, vscode.ConfigurationTarget.Global);
+		};
 		if (enabled && nativeVision) {
+			const turnOffAction = vscode.l10n.t('Turn preprocessing off');
 			void vscode.window.showWarningMessage(
-				vscode.l10n.t('Vision preprocessing is on, so images sent to {0} are described by the vision backend first — even though this model supports them natively. Turn preprocessing off in Nika Settings → Vision to send images directly.', modelId),
+				vscode.l10n.t('Vision preprocessing is on, so images sent to {0} are described by the vision backend first — even though this model supports them natively.', modelId),
+				turnOffAction,
 				openVisionAction,
-			).then(action => {
-				if (action === openVisionAction) {
+			).then(async action => {
+				if (action === turnOffAction) {
+					await flipToggle(false);
+				} else if (action === openVisionAction) {
 					this.settingsEditor.open('vision');
 				}
 			});
 		} else if (!enabled && !nativeVision) {
+			const turnOnAction = vscode.l10n.t('Turn preprocessing on');
 			void vscode.window.showWarningMessage(
-				vscode.l10n.t('Vision preprocessing is off, and {0} is a text-only model — it may not support image attachments. Turn preprocessing on in Nika Settings → Vision to have images described first.', modelId),
+				vscode.l10n.t('Vision preprocessing is off, and {0} is a text-only model — it may not support image attachments.', modelId),
+				turnOnAction,
 				openVisionAction,
-			).then(action => {
-				if (action === openVisionAction) {
+			).then(async action => {
+				if (action === turnOnAction) {
+					await flipToggle(true);
+				} else if (action === openVisionAction) {
 					this.settingsEditor.open('vision');
 				}
 			});
@@ -1578,7 +1597,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 
 	private _tooltipFor(id: string): string {
 		if (id.endsWith('-responses')) {
-			return vscode.l10n.t('Experimental DeepSeek Responses API model. It never falls back silently to Chat Completions.');
+			return vscode.l10n.t('DeepSeek Responses API model. It never falls back silently to Chat Completions.');
+		}
+		if (isNikaDeepSeekVisionModel(id)) {
+			return vscode.l10n.t('DeepSeek V4 Flash Vision (Exp) with native image input through the Nika provider. Images are sent directly when vision preprocessing is off; PDFs are always converted to text.');
 		}
 		if (isNikaDeepSeekModel(id)) {
 			return vscode.l10n.t('DeepSeek V4 through the native Nika provider. Images and PDFs are converted to text first.');

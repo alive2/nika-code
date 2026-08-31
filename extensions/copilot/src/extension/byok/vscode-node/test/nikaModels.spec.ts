@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it } from 'vitest';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaChatGptSubModel, isNikaClaudeSubModel, isNikaDeepSeekModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, parseNikaProviderConfig, resolveNikaTokenLimits } from '../nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaChatGptSubModel, isNikaClaudeSubModel, isNikaDeepSeekModel, isNikaDeepSeekVisionModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, parseNikaProviderConfig, resolveNikaTokenLimits } from '../nikaModels';
 
 describe('Nika model metadata', () => {
 	it('uses the documented default budgets', () => {
@@ -29,6 +29,8 @@ describe('Nika model metadata', () => {
 		expect(isNikaModelId('deepseek-v4-pro')).toBe(true);
 		expect(isNikaModelId('deepseek-v4-flash-responses')).toBe(true);
 		expect(isNikaModelId('deepseek-v4-pro-responses')).toBe(true);
+		expect(isNikaModelId('deepseek-v4-flash-vision-exp')).toBe(true);
+		expect(isNikaModelId('deepseek-v4-flash-vision-exp-responses')).toBe(true);
 		expect(isNikaModelId('gemini-2.5-flash')).toBe(true);
 		expect(isNikaModelId('gemini-2.5-flash-lite')).toBe(true);
 		expect(isNikaModelId('gemma4:31b')).toBe(true);
@@ -46,18 +48,32 @@ describe('Nika model metadata', () => {
 		expect(isNikaClaudeSubModel('claude/claude-haiku-4-5')).toBe(true);
 		expect(isNikaClaudeSubModel('anthropic/claude-sonnet-4')).toBe(false);
 		expect(isNikaDeepSeekModel('deepseek-v4-flash')).toBe(true);
+		expect(isNikaDeepSeekModel('deepseek-v4-flash-vision-exp')).toBe(true);
 		expect(isNikaGeminiModel('gemini-2.5-flash')).toBe(true);
 		expect(getNikaModelCapabilities('deepseek-v4-flash-responses', limits).supportedEndpoints).toHaveLength(1);
-		expect(getNikaModelCapabilities('deepseek-v4-pro-responses', limits).name).toBe('DeepSeek V4 Pro (Responses, Experimental)');
+		expect(getNikaModelCapabilities('deepseek-v4-pro-responses', limits).name).toBe('DeepSeek V4 Pro (Responses)');
 		expect(getNikaModelCapabilities('deepseek-v4-pro-responses', limits).supportedEndpoints).toHaveLength(1);
+		expect(getNikaModelCapabilities('deepseek-v4-flash-vision-exp', limits).name).toBe('DeepSeek V4 Flash Vision (Exp)');
+		expect(getNikaModelCapabilities('deepseek-v4-flash-vision-exp', limits).vision).toBe(true);
+		expect(getNikaModelCapabilities('deepseek-v4-flash-vision-exp-responses', limits).name).toBe('DeepSeek V4 Flash Vision (Exp) (Responses)');
 		expect(getNikaModelCapabilities('gemini-2.5-flash', limits).vision).toBe(true);
 		expect(getNikaModelCapabilities('gemma4:31b', limits).vision).toBe(true);
+	});
+
+	it('recognizes the DeepSeek vision model ids with or without the nika/ prefix', () => {
+		expect(isNikaDeepSeekVisionModel('deepseek-v4-flash-vision-exp')).toBe(true);
+		expect(isNikaDeepSeekVisionModel('deepseek-v4-flash-vision-exp-responses')).toBe(true);
+		expect(isNikaDeepSeekVisionModel('nika/deepseek-v4-flash-vision-exp')).toBe(true);
+		expect(isNikaDeepSeekVisionModel('nika/deepseek-v4-flash-vision-exp-responses')).toBe(true);
+		expect(isNikaDeepSeekVisionModel('deepseek-v4-flash')).toBe(false);
+		expect(isNikaDeepSeekVisionModel('deepseek-v4-flash-responses')).toBe(false);
+		expect(isNikaDeepSeekVisionModel('deepseek-v4-pro')).toBe(false);
 	});
 
 	it('hides cloud models until their corresponding key exists', () => {
 		expect(getVisibleNikaModelIds(false, false)).toEqual(['gemma4:31b']);
 		expect(getVisibleNikaModelIds(true, false)).toEqual([
-			'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-responses', 'deepseek-v4-pro-responses', 'gemma4:31b',
+			'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-responses', 'deepseek-v4-pro-responses', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-flash-vision-exp-responses', 'gemma4:31b',
 		]);
 		expect(getVisibleNikaModelIds(false, true)).toEqual([
 			'gemma4:31b', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
@@ -191,7 +207,7 @@ describe('Nika model metadata', () => {
 		expect(getVisibleNikaModelIds(true, true, config)).not.toContain('gemma4:31b');
 		// Legacy mode (no config) keeps the classic key-driven rules.
 		expect(getVisibleNikaModelIds(true, false)).toEqual([
-			'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-responses', 'deepseek-v4-pro-responses', 'gemma4:31b',
+			'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-responses', 'deepseek-v4-pro-responses', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-flash-vision-exp-responses', 'gemma4:31b',
 		]);
 	});
 });

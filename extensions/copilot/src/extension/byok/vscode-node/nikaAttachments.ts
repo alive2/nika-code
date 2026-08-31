@@ -8,7 +8,7 @@ import { IVSCodeExtensionContext } from '../../../platform/extContext/common/ext
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
-import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, getNikaModelProvider } from './nikaModels';
+import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, getNikaModelProvider, isNikaDeepSeekVisionModel } from './nikaModels';
 import { CURSOR_BASE_URL } from './nikaCursorProvider';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
@@ -260,8 +260,18 @@ export class NikaAttachmentProcessor {
 					if (!key) { throw new Error(vscode.l10n.t('Configure a DeepSeek web token for the selected vision backend.')); }
 					return this._deepSeekWebProvider.describeImage(data, mimeType, prompt, key);
 				}
-				case 'deepseek':
-					break; // text-only models cannot describe images
+				case 'deepseek': {
+					// Only the vision model can describe images; the text-only
+					// DeepSeek models cannot. The Responses variant routes to the
+					// Chat Completions endpoint with the base vision id.
+					if (!isNikaDeepSeekVisionModel(raw)) {
+						break;
+					}
+					const key = await this._context.secrets.get(NIKA_DEEPSEEK_SECRET);
+					if (!key) { throw new Error(vscode.l10n.t('Configure a DeepSeek key for the selected vision backend.')); }
+					const model = raw.endsWith('-responses') ? raw.slice(0, -'-responses'.length) : raw;
+					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, 'https://api.deepseek.com/chat/completions', 'nika-deepseek-vision', 'DeepSeek', token);
+				}
 			}
 		}
 		return this._describeWithVSCodeModel(data, mimeType, prompt, token);

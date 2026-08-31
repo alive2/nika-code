@@ -25,6 +25,10 @@ export interface DeepSeekModelPricing {
 export const NIKA_DEEPSEEK_PEAK_PRICES: Readonly<Record<string, DeepSeekModelPricing>> = {
 	'deepseek-v4-flash': { cacheHitPerMTok: 0.014, cacheMissPerMTok: 0.44, outputPerMTok: 1.32 },
 	'deepseek-v4-pro': { cacheHitPerMTok: 0.044, cacheMissPerMTok: 1.32, outputPerMTok: 3.96 },
+	// The vision model bills at the Flash rate; image tokens are converted
+	// from image dimensions and billed as input tokens (see
+	// https://api-docs.deepseek.com/quick_start/pricing).
+	'deepseek-v4-flash-vision-exp': { cacheHitPerMTok: 0.014, cacheMissPerMTok: 0.44, outputPerMTok: 1.32 },
 };
 
 /**
