@@ -276,6 +276,18 @@ export class NikaSettingsEditor extends Disposable {
 		void this._render(this._activeSection);
 	}
 
+	/**
+	 * Re-renders the panel with fresh state when it is open. Used after
+	 * programmatic setting changes made outside the webview (e.g. the
+	 * vision-conflict warning's one-click toggle actions) so the UI reflects
+	 * the new values immediately.
+	 */
+	refresh(): void {
+		if (this._panel) {
+			void this._render(this._activeSection);
+		}
+	}
+
 	private async _render(initialSection: NikaSettingsSection = this._activeSection): Promise<void> {
 		if (!this._panel) {
 			return;

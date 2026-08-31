@@ -23,6 +23,7 @@ export import ExtensionMode = vscode.ExtensionMode;
 export import Location = vscode.Location;
 export import DiagnosticRelatedInformation = vscode.DiagnosticRelatedInformation;
 export import ChatVariableLevel = vscode.ChatVariableLevel;
+export import ConfigurationTarget = vscode.ConfigurationTarget;
 export import ChatResponseClearToPreviousToolInvocationReason = vscode.ChatResponseClearToPreviousToolInvocationReason;
 export import ChatResponseMarkdownPart = vscode.ChatResponseMarkdownPart;
 export import ChatResponseThinkingProgressPart = vscode.ChatResponseThinkingProgressPart;

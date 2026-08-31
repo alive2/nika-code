@@ -3298,6 +3298,11 @@
             "default": "",
             "markdownDescription": "%nika.config.visionOpenRouterModel%"
           },
+          "nika.visionPreprocessingEnabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%nika.config.visionPreprocessingEnabled%"
+          },
           "nika.ollamaBaseUrl": {
             "type": "string",
             "default": "http://localhost:11434",

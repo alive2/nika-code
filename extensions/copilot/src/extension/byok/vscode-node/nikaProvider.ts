@@ -1555,7 +1555,15 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 
 		const openVisionAction = vscode.l10n.t('Open Vision Settings');
 		const flipToggle = async (value: boolean): Promise<void> => {
-			await vscode.workspace.getConfiguration('nika').update('visionPreprocessingEnabled', value, vscode.ConfigurationTarget.Global);
+			try {
+				await vscode.workspace.getConfiguration('nika').update('visionPreprocessingEnabled', value, vscode.ConfigurationTarget.Global);
+				// Reflect the new toggle state in the settings page if it is open.
+				this.settingsEditor.refresh();
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				this.settingsEditor.log('ERROR', detail);
+				void vscode.window.showErrorMessage(vscode.l10n.t('Nika could not change vision preprocessing: {0}', detail));
+			}
 		};
 		if (enabled && nativeVision) {
 			const turnOffAction = vscode.l10n.t('Turn preprocessing off');

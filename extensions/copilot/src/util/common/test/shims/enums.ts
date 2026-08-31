@@ -72,3 +72,9 @@ export enum FileType {
 	Directory = 2,
 	SymbolicLink = 64
 }
+
+export enum ConfigurationTarget {
+	Global = 1,
+	Workspace = 2,
+	WorkspaceFolder = 3
+}

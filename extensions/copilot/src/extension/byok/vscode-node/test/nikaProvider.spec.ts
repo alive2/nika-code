@@ -94,6 +94,7 @@ function createInstantiationService(overrides: {
 	geminiProvider: { provideLanguageModelChatResponse: ReturnType<typeof vi.fn>; provideTokenCount: ReturnType<typeof vi.fn> };
 	ollamaProvider: { provideLanguageModelChatResponse: ReturnType<typeof vi.fn>; provideTokenCount: ReturnType<typeof vi.fn>; updateKnownModels: ReturnType<typeof vi.fn> };
 	usageTracker: { notifyLiveChange: ReturnType<typeof vi.fn>; trackStream: ReturnType<typeof vi.fn>; record: ReturnType<typeof vi.fn> };
+	settingsEditor: { dispose: () => void; refresh: ReturnType<typeof vi.fn>; open: ReturnType<typeof vi.fn>; log: ReturnType<typeof vi.fn> };
 	attachmentProcessor: { process: ReturnType<typeof vi.fn> };
 	openRouterProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	llamaCppProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
@@ -117,7 +118,7 @@ function createInstantiationService(overrides: {
 			return overrides.usageTracker;
 		}
 		if (Ctor === NikaSettingsEditor) {
-			return { dispose: () => { } };
+			return overrides.settingsEditor;
 		}
 		if (Ctor === NikaOpenRouterProvider) {
 			return overrides.openRouterProvider;
@@ -207,6 +208,12 @@ function createFakes() {
 		trackStream: vi.fn(() => () => { }),
 		record: vi.fn(),
 	};
+	const settingsEditor = {
+		dispose: () => { },
+		refresh: vi.fn(),
+		open: vi.fn(),
+		log: vi.fn(),
+	};
 	const attachmentProcessor = {
 		process: vi.fn().mockResolvedValue({ replayMarkers: [], messages: [] }),
 	};
@@ -246,7 +253,7 @@ function createFakes() {
 		provideTokenCount: vi.fn().mockResolvedValue(0),
 		invalidateCache: vi.fn(),
 	};
-	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, attachmentProcessor, openRouterProvider, llamaCppProvider, geminiCatalogProvider, cursorProvider, openAIProvider, anthropicProvider };
+	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, settingsEditor, attachmentProcessor, openRouterProvider, llamaCppProvider, geminiCatalogProvider, cursorProvider, openAIProvider, anthropicProvider };
 }
 
 function createProvider(overrides?: {
@@ -308,6 +315,36 @@ describe('NikaLMProvider', () => {
 		// Ollama fallback branch, which surfaced Ollama's "model not found" 404
 		// for the `-responses` id and masked the successful DeepSeek response).
 		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
+	});
+
+	it('turns vision preprocessing off from the warning for the DeepSeek vision model and refreshes the settings page', async () => {
+		const { provider, fakes } = createProvider();
+		const model = { id: 'deepseek-v4-flash-vision-exp' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		const update = vi.fn().mockResolvedValue(undefined);
+		const configMock = vi.mocked(vscode.workspace.getConfiguration);
+		const originalConfig = configMock.getMockImplementation();
+		try {
+			configMock.mockImplementation(() => ({
+				get: (_key: string, fallback: unknown) => fallback,
+				update,
+			} as never));
+			vi.mocked(vscode.window.showWarningMessage).mockResolvedValue('Turn preprocessing off' as never);
+
+			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+			// The vision model is natively vision-capable and preprocessing is on,
+			// so the warning's one-click action flips the toggle off...
+			await vi.waitFor(() => {
+				expect(update).toHaveBeenCalledWith('visionPreprocessingEnabled', false, vscode.ConfigurationTarget.Global);
+			});
+			// ...and the open settings page re-renders with the new state.
+			expect(fakes.settingsEditor.refresh).toHaveBeenCalled();
+		} finally {
+			configMock.mockImplementation(originalConfig!);
+			vi.mocked(vscode.window.showWarningMessage).mockResolvedValue(undefined);
+		}
 	});
 
 	it('still routes non-DeepSeek models to the Ollama fallback', async () => {
