@@ -427,6 +427,7 @@ export class NikaSettingsEditor extends Disposable {
 				visionVSCodeModel: value('visionVSCodeModel', ''),
 				visionOpenRouterModel: value('visionOpenRouterModel', ''),
 				visionPreprocessingEnabled: value('visionPreprocessingEnabled', true),
+				'deepseekWeb.deleteSessionsAfterVision': value('deepseekWeb.deleteSessionsAfterVision', false),
 				ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 				pdfMaxFileSizeMB: value('pdfMaxFileSizeMB', 100),
 				pdfMaxPages: value('pdfMaxPages', 60),
