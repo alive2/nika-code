@@ -500,6 +500,7 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 	private resolveSubagentModel(subagent: ICustomAgent | undefined, mainModelId: string | undefined, explicitModelQualifiedName?: string): { modeModelId: string | undefined; resolvedModelName: string | undefined } {
 		let modeModelId = mainModelId;
 		let explicitModelResolved = false;
+		let subagentModelResolved = false;
 
 		// Explicit model parameter takes highest priority
 		if (explicitModelQualifiedName) {
@@ -530,8 +531,25 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 							continue;
 						}
 						modeModelId = lmByQualifiedName.identifier;
+						subagentModelResolved = true;
 						break;
 					}
+				}
+			}
+		}
+
+		// When nothing resolved the subagent model (no explicit parameter, and the agent has no
+		// usable model list) and the main model is BYOK, fall back to the model assigned to the
+		// "Utility" role in Nika Settings -> Agents before inheriting the main model. The role is
+		// stored in the native, dynamic `chat.utilityModel` setting, so reading it here keeps the
+		// behavior model-agnostic: any newly added Nika model becomes selectable without code
+		// changes, and for non-BYOK (Copilot) main models the behavior is unchanged.
+		if (!explicitModelResolved && !subagentModelResolved && modeModelId === mainModelId && mainModelId) {
+			const mainModelMetadata = this.languageModelsService.lookupLanguageModel(mainModelId);
+			if (mainModelMetadata && isByokModel(mainModelMetadata)) {
+				const configuredUtilityModelId = this.configurationService.getValue<string>(ChatConfiguration.UtilityModel);
+				if (configuredUtilityModelId && this.languageModelsService.lookupLanguageModel(configuredUtilityModelId)) {
+					modeModelId = configuredUtilityModelId;
 				}
 			}
 		}

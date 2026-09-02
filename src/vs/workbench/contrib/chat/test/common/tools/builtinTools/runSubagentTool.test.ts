@@ -263,6 +263,7 @@ suite('RunSubagentTool', () => {
 			models: Map<string, ILanguageModelChatMetadata>;
 			qualifiedNameMap?: Map<string, ILanguageModelChatMetadataAndIdentifier>;
 			customAgents?: ICustomAgent[];
+			config?: Record<string, unknown>;
 		}) {
 			const mockToolsService = testDisposables.add(new MockLanguageModelToolsService());
 			const promptsService = new MockPromptsService();
@@ -288,7 +289,7 @@ suite('RunSubagentTool', () => {
 				mockToolsService,
 				mockLanguageModelsService as ILanguageModelsService,
 				new NullLogService(),
-				new TestConfigurationService(),
+				new TestConfigurationService(opts.config),
 				promptsService,
 				{} as IInstantiationService,
 				builtinProductService,
@@ -682,6 +683,208 @@ suite('RunSubagentTool', () => {
 				agentName: 'MyAgent',
 				prompt: 'test',
 				modelName: 'Copilot Sonnet',
+			});
+		});
+
+		test('uses the configured utility model when a BYOK main spawns an agent with no model list', async () => {
+			const mainMeta = createMetadata('GPT-Sol BYOK', 1, 'nika');
+			const utilityMeta = createMetadata('Nika Utility', 1, 'nika');
+			const models = new Map([
+				['main-byok-id', mainMeta],
+				['utility-model-id', utilityMeta],
+			]);
+
+			const agent = createAgent('NoModelAgent');
+			const tool = createTool({
+				models,
+				customAgents: [agent],
+				config: { [ChatConfiguration.UtilityModel]: 'utility-model-id' },
+			});
+
+			const result = await tool.prepareToolInvocation({
+				parameters: { prompt: 'test', description: 'test task', agentName: 'NoModelAgent' },
+				toolCallId: 'utility-call-1',
+				modelId: 'main-byok-id',
+				chatSessionResource: URI.parse('test://session'),
+			}, CancellationToken.None);
+
+			assert.ok(result);
+			// The agent has no model list, so the subagent uses the configured utility model instead of the main BYOK model.
+			assert.deepStrictEqual(result.toolSpecificData, {
+				kind: 'subagent',
+				description: 'test task',
+				agentName: 'NoModelAgent',
+				prompt: 'test',
+				modelName: 'Nika Utility',
+			});
+		});
+
+		test('uses the configured utility model when a BYOK main spawns a subagent without an agentName', async () => {
+			const mainMeta = createMetadata('GPT-Sol BYOK', 1, 'nika');
+			const utilityMeta = createMetadata('Nika Utility', 1, 'nika');
+			const models = new Map([
+				['main-byok-id', mainMeta],
+				['utility-model-id', utilityMeta],
+			]);
+
+			const tool = createTool({
+				models,
+				config: { [ChatConfiguration.UtilityModel]: 'utility-model-id' },
+			});
+
+			const result = await tool.prepareToolInvocation({
+				parameters: { prompt: 'test', description: 'test task' },
+				toolCallId: 'utility-call-2',
+				modelId: 'main-byok-id',
+				chatSessionResource: URI.parse('test://session'),
+			}, CancellationToken.None);
+
+			assert.ok(result);
+			// Anonymous subagents (reading/trivial delegations) run on the configured utility model, not the main BYOK model.
+			assert.deepStrictEqual(result.toolSpecificData, {
+				kind: 'subagent',
+				description: 'test task',
+				agentName: undefined,
+				prompt: 'test',
+				modelName: 'Nika Utility',
+			});
+		});
+
+		test('uses the configured utility model when a built-in agent only lists Copilot fallbacks and the main model is BYOK', async () => {
+			const mainMeta = createMetadata('GPT-Sol BYOK', 1, 'nika');
+			const copilotFallback = createMetadata('Copilot Haiku', undefined, COPILOT_VENDOR_ID);
+			const utilityMeta = createMetadata('Nika Utility', 1, 'nika');
+			const models = new Map([
+				['main-byok-id', mainMeta],
+				['copilot-fallback-id', copilotFallback],
+				['utility-model-id', utilityMeta],
+			]);
+			const qualifiedNameMap = new Map([
+				['Copilot Haiku (copilot)', { metadata: copilotFallback, identifier: 'copilot-fallback-id' }],
+			]);
+
+			const agent = createBuiltinAgent('ExploreAgent', ['Copilot Haiku (copilot)']);
+			const tool = createTool({
+				models,
+				qualifiedNameMap,
+				customAgents: [agent],
+				config: { [ChatConfiguration.UtilityModel]: 'utility-model-id' },
+			});
+
+			const result = await tool.prepareToolInvocation({
+				parameters: { prompt: 'test', description: 'test task', agentName: 'ExploreAgent' },
+				toolCallId: 'utility-call-3',
+				modelId: 'main-byok-id',
+				chatSessionResource: URI.parse('test://session'),
+			}, CancellationToken.None);
+
+			assert.ok(result);
+			// The Copilot fallback is skipped for a BYOK main, and the configured utility model takes over.
+			assert.deepStrictEqual(result.toolSpecificData, {
+				kind: 'subagent',
+				description: 'test task',
+				agentName: 'ExploreAgent',
+				prompt: 'test',
+				modelName: 'Nika Utility',
+			});
+		});
+
+		test('does not use the configured utility model when the main model is Copilot', async () => {
+			const mainMeta = createMetadata('Copilot GPT-4o', 1, COPILOT_VENDOR_ID);
+			const utilityMeta = createMetadata('Nika Utility', 1, 'nika');
+			const models = new Map([
+				['main-copilot-id', mainMeta],
+				['utility-model-id', utilityMeta],
+			]);
+
+			const agent = createAgent('NoModelAgent');
+			const tool = createTool({
+				models,
+				customAgents: [agent],
+				config: { [ChatConfiguration.UtilityModel]: 'utility-model-id' },
+			});
+
+			const result = await tool.prepareToolInvocation({
+				parameters: { prompt: 'test', description: 'test task', agentName: 'NoModelAgent' },
+				toolCallId: 'utility-call-4',
+				modelId: 'main-copilot-id',
+				chatSessionResource: URI.parse('test://session'),
+			}, CancellationToken.None);
+
+			assert.ok(result);
+			// The utility fallback only applies to BYOK main models; Copilot mains keep inheriting the main model.
+			assert.deepStrictEqual(result.toolSpecificData, {
+				kind: 'subagent',
+				description: 'test task',
+				agentName: 'NoModelAgent',
+				prompt: 'test',
+				modelName: 'Copilot GPT-4o',
+			});
+		});
+
+		test('honors the agent\'s own model over the configured utility model', async () => {
+			const mainMeta = createMetadata('GPT-Sol BYOK', 1, 'nika');
+			const utilityMeta = createMetadata('Nika Utility', 1, 'nika');
+			const byokFallback = createMetadata('Ollama Llama', 1, 'ollama');
+			const models = new Map([
+				['main-byok-id', mainMeta],
+				['utility-model-id', utilityMeta],
+				['byok-fallback-id', byokFallback],
+			]);
+			const qualifiedNameMap = new Map([
+				['Ollama Llama (ollama)', { metadata: byokFallback, identifier: 'byok-fallback-id' }],
+			]);
+
+			const agent = createAgent('PinnedAgent', ['Ollama Llama (ollama)']);
+			const tool = createTool({
+				models,
+				qualifiedNameMap,
+				customAgents: [agent],
+				config: { [ChatConfiguration.UtilityModel]: 'utility-model-id' },
+			});
+
+			const result = await tool.prepareToolInvocation({
+				parameters: { prompt: 'test', description: 'test task', agentName: 'PinnedAgent' },
+				toolCallId: 'utility-call-5',
+				modelId: 'main-byok-id',
+				chatSessionResource: URI.parse('test://session'),
+			}, CancellationToken.None);
+
+			assert.ok(result);
+			// A resolved agent model always wins over the utility fallback.
+			assert.deepStrictEqual(result.toolSpecificData, {
+				kind: 'subagent',
+				description: 'test task',
+				agentName: 'PinnedAgent',
+				prompt: 'test',
+				modelName: 'Ollama Llama',
+			});
+		});
+
+		test('inherits the main model when the configured utility model cannot be resolved', async () => {
+			const mainMeta = createMetadata('GPT-Sol BYOK', 1, 'nika');
+			const models = new Map([['main-byok-id', mainMeta]]);
+
+			const tool = createTool({
+				models,
+				config: { [ChatConfiguration.UtilityModel]: 'missing-model-id' },
+			});
+
+			const result = await tool.prepareToolInvocation({
+				parameters: { prompt: 'test', description: 'test task' },
+				toolCallId: 'utility-call-6',
+				modelId: 'main-byok-id',
+				chatSessionResource: URI.parse('test://session'),
+			}, CancellationToken.None);
+
+			assert.ok(result);
+			// An unresolvable utility model falls back to the main BYOK model, same as before.
+			assert.deepStrictEqual(result.toolSpecificData, {
+				kind: 'subagent',
+				description: 'test task',
+				agentName: undefined,
+				prompt: 'test',
+				modelName: 'GPT-Sol BYOK',
 			});
 		});
 	});
