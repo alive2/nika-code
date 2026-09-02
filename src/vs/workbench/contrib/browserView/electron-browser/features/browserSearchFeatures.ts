@@ -16,7 +16,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			type: 'string',
 			enum: [BROWSER_SEARCH_NONE, ...BROWSER_SEARCH_ENGINES.map(e => e.id)],
 			enumItemLabels: [localize('browser.search.engine.none', "None"), ...BROWSER_SEARCH_ENGINES.map(e => e.label)],
-			default: BrowserSearchEngineId.Bing,
+			default: BrowserSearchEngineId.Google,
 			markdownDescription: localize(
 				'browser.searchEngine',
 				"Controls the search engine used to search the web from the address bar of the integrated browser. Select 'None' to disable search."

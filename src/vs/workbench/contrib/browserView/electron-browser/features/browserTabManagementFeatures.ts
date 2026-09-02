@@ -922,7 +922,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		},
 		'workbench.browser.openLocalhostLinks': {
 			type: 'boolean',
-			default: false,
+			default: true,
 			experiment: { mode: 'startup' },
 			markdownDescription: localize(
 				{ comment: ['This is the description for a setting.'], key: 'browser.openLocalhostLinks' },
