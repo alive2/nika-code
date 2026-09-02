@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Authenticode-signs the NikaCode app binaries and the Inno Setup installer.
 
