@@ -103,6 +103,8 @@ describe('Nika model metadata', () => {
 		expect(getNikaModelProvider('nika/openai/gpt-5')).toBe('openai');
 		expect(getNikaModelProvider('anthropic/claude-sonnet-4')).toBe('anthropic');
 		expect(getNikaModelProvider('nika/anthropic/claude-sonnet-4')).toBe('anthropic');
+		expect(getNikaModelProvider('zai/glm-4.5')).toBe('zai');
+		expect(getNikaModelProvider('nika/zai/glm-4.5')).toBe('zai');
 		expect(getNikaModelProvider('chatgpt/gpt-5-codex')).toBe('chatgpt');
 		expect(getNikaModelProvider('nika/chatgpt/gpt-5-codex')).toBe('chatgpt');
 		expect(getNikaModelProvider('claude/claude-opus-4-5')).toBe('claude');
@@ -132,6 +134,7 @@ describe('Nika model metadata', () => {
 		expect(getNikaEffortOptionsForModel('anthropic/claude-sonnet-4')).toEqual([]);
 		expect(getNikaEffortOptionsForModel('chatgpt/gpt-5.6-sol')).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']); // codex range
 		expect(getNikaEffortOptionsForModel('claude/claude-opus-4-5')).toEqual([]);
+		expect(getNikaEffortOptionsForModel('zai/glm-4.5')).toEqual([]); // Z.ai GLM models have no effort control
 		expect(getNikaEffortOptionsForModel('llamacpp/qwen2.5vl-7b')).toEqual([]);
 		expect(getNikaEffortOptionsForModel('gemma4:31b')).toEqual([]);
 		expect(getNikaEffortOptionsForModel('unknown-model')).toEqual([]);

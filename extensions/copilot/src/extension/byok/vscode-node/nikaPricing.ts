@@ -441,3 +441,38 @@ export function getAnthropicTokenCost(
 	const pricing = NIKA_ANTHROPIC_PRICES[modelId];
 	return pricing ? getOpenRouterTokenCost(pricing, options) : 0;
 }
+
+/**
+ * Static Z.ai (Zhipu GLM) per-1M-token USD prices, keyed by the raw catalog
+ * id as served by `api.z.ai/api/paas/v4/models`. Best-effort snapshot of
+ * platform.z.ai pricing (2026-09-02); unknown ids cost $0 until added here.
+ * The `-flash` entry mirrors the platform's published $0 flash tier. Cache
+ * reads are 10% of the prompt price, matching the other static tables.
+ */
+export const NIKA_ZAI_PRICES: Readonly<Record<string, OpenRouterModelPricing>> = {
+	'glm-5.3': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.14, requestFee: 0, free: false },
+	'glm-5.3-flash': { promptPerMTok: 0.15, completionPerMTok: 0.5, cacheReadPerMTok: 0.015, requestFee: 0, free: false },
+	'glm-5.2': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.14, requestFee: 0, free: false },
+	'glm-5.1': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.14, requestFee: 0, free: false },
+	'glm-5': { promptPerMTok: 1, completionPerMTok: 3.2, cacheReadPerMTok: 0.1, requestFee: 0, free: false },
+	'glm-5-turbo': { promptPerMTok: 1.2, completionPerMTok: 4, cacheReadPerMTok: 0.12, requestFee: 0, free: false },
+	'glm-5-code': { promptPerMTok: 1.2, completionPerMTok: 5, cacheReadPerMTok: 0.12, requestFee: 0, free: false },
+	'glm-4.7': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
+	'glm-4.7-flash': { promptPerMTok: 0.07, completionPerMTok: 0.4, cacheReadPerMTok: 0.007, requestFee: 0, free: false },
+	'glm-4.6': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
+	'glm-4.5': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
+	'glm-4.5-x': { promptPerMTok: 2.2, completionPerMTok: 8.9, cacheReadPerMTok: 0.22, requestFee: 0, free: false },
+	'glm-4.5-air': { promptPerMTok: 0.2, completionPerMTok: 1.1, cacheReadPerMTok: 0.02, requestFee: 0, free: false },
+	'glm-4.5-airx': { promptPerMTok: 1.1, completionPerMTok: 4.5, cacheReadPerMTok: 0.11, requestFee: 0, free: false },
+	'glm-4.5-flash': { promptPerMTok: 0, completionPerMTok: 0, cacheReadPerMTok: 0, requestFee: 0, free: true },
+	'glm-4.5v': { promptPerMTok: 0.6, completionPerMTok: 1.8, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
+};
+
+/** USD cost of a Z.ai request from the static price table ($0 when unknown). */
+export function getZaiTokenCost(
+	modelId: string,
+	options: { cachedTokens: number; cacheMissTokens: number; outputTokens: number },
+): number {
+	const pricing = NIKA_ZAI_PRICES[modelId];
+	return pricing ? getOpenRouterTokenCost(pricing, options) : 0;
+}

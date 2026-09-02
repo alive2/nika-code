@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
-import { NikaAttachmentProcessor } from '../nikaAttachments';
+import { getNikaPreserveImagesForModel, NikaAttachmentProcessor } from '../nikaAttachments';
 
 vi.mock('vscode', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('vscode')>();
@@ -260,5 +260,42 @@ describe('Nika DeepSeek Web vision', () => {
 		const text = result.messages[0].content[0] as vscode.LanguageModelTextPart;
 		expect(text.value).toContain('Image processing failed');
 		expect(showWarningMessage).toHaveBeenCalled();
+	});
+});
+
+describe('Nika per-model vision preprocessing resolution', () => {
+	it('prefers a per-model map entry when set (true = preprocess, false = native)', () => {
+		// Preprocess override on a natively-vision model → preserve = false.
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => key === 'visionPreprocessingMap' ? { 'deepseek-v4-flash-vision-exp': true } : fallback,
+			inspect: () => undefined,
+		} as never);
+		expect(getNikaPreserveImagesForModel('deepseek-v4-flash-vision-exp', true)).toBe(false);
+
+		// Native override on a text-only model → preserve = true.
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => key === 'visionPreprocessingMap' ? { 'deepseek-v4-flash-responses': false } : fallback,
+			inspect: () => undefined,
+		} as never);
+		expect(getNikaPreserveImagesForModel('deepseek-v4-flash-responses', false)).toBe(true);
+	});
+
+	it('falls back to the legacy global toggle when no per-model entry exists', () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (_key: string, fallback: unknown) => fallback,
+			inspect: (key: string) => key === 'visionPreprocessingEnabled' ? { globalValue: false } : undefined,
+		} as never);
+		// Legacy global off → preserve = true even though the model has no
+		// per-model entry (and is natively vision-capable).
+		expect(getNikaPreserveImagesForModel('deepseek-v4-flash-vision-exp', true)).toBe(true);
+	});
+
+	it('uses the model capability when no override or legacy value is set', () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (_key: string, fallback: unknown) => fallback,
+			inspect: () => undefined,
+		} as never);
+		expect(getNikaPreserveImagesForModel('deepseek-v4-flash-vision-exp', true)).toBe(true);
+		expect(getNikaPreserveImagesForModel('deepseek-v4-flash-responses', false)).toBe(false);
 	});
 });

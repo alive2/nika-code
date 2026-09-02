@@ -8,7 +8,7 @@ import { IVSCodeExtensionContext } from '../../../platform/extContext/common/ext
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
-import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, getNikaModelProvider, isNikaDeepSeekVisionModel } from './nikaModels';
+import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, getNikaModelProvider, isNikaDeepSeekVisionModel } from './nikaModels';
 import { CURSOR_BASE_URL } from './nikaCursorProvider';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
@@ -28,11 +28,33 @@ export interface NikaAttachmentResult {
 export interface NikaAttachmentProcessOptions {
 	/**
 	 * When true, image parts pass through untouched as native data parts
-	 * (used for multimodal llama.cpp models). Only PDFs are converted to
+	 * (used for models with native vision). Only PDFs are converted to
 	 * text. Default: false (all media converted to text for text-only
 	 * models).
 	 */
 	readonly preserveImages?: boolean;
+}
+
+/**
+ * Resolves whether image parts should pass through untouched for the given
+ * model id, honoring the per-model `nika.visionPreprocessingMap` override
+ * first and falling back to the model's native-vision capability.
+ */
+export function getNikaPreserveImagesForModel(modelId: string, nativeVision: boolean): boolean {
+	const config = vscode.workspace.getConfiguration('nika');
+	const map = config.get<Record<string, boolean>>(NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, {}) ?? {};
+	const override = map[modelId];
+	if (typeof override === 'boolean') {
+		// Stored value: true = preprocess, false = preserve (native).
+		return !override;
+	}
+	// Legacy global toggle: a user-set value keeps working as the default for
+	// models without a per-model entry until they migrate (or clear it).
+	const legacy = config.inspect<boolean>('visionPreprocessingEnabled')?.globalValue;
+	if (legacy !== undefined) {
+		return !legacy;
+	}
+	return nativeVision;
 }
 
 /** Converts media attachments into deterministic text for DeepSeek. */
@@ -47,14 +69,13 @@ export class NikaAttachmentProcessor {
 	) { }
 
 	async process(messages: Array<vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2>, token: vscode.CancellationToken, options: NikaAttachmentProcessOptions = {}): Promise<NikaAttachmentResult> {
-		// The master `nika.visionPreprocessingEnabled` toggle flips the default:
-		// off means raw images everywhere (`preserveImages`), on means the
-		// caller decides. `None (native vision)` always passes images through
-		// untouched; otherwise the caller decides (llama.cpp/Cursor preserve,
-		// the rest describe).
+		// `preserveImages` is explicit (the caller decides via the per-model
+		// map), otherwise the description backend decides: `None (native
+		// vision)` always passes images through untouched because there is no
+		// backend to describe with.
 		const config = vscode.workspace.getConfiguration('nika');
-		const preprocessingEnabled = config.get<boolean>('visionPreprocessingEnabled', true);
-		const preserveImages = options.preserveImages ?? (!preprocessingEnabled || config.get<string>('visionModel', 'gemini-2.5-flash') === 'none');
+		const preserveImages = options.preserveImages
+			?? config.get<string>('visionModel', 'gemini-2.5-flash') === 'none';
 		const pdfCount = messages.reduce((count, message) => count + message.content.filter(part => part instanceof vscode.LanguageModelDataPart && isPdfMime(part.mimeType)).length, 0);
 		if (pdfCount > 0) {
 			this._settingsEditor.log('INFO', vscode.l10n.t('Received {0} PDF attachment(s) for Nika preprocessing.', pdfCount));

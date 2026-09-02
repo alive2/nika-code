@@ -36,6 +36,7 @@ import {
 	isNikaOpenAIModel,
 	isNikaOpenRouterModel,
 	isNikaThinkingEffort,
+	isNikaZaiModel,
 	NIKA_CURSOR_MODEL_PREFIX,
 	NIKA_CURSOR_SECRET,
 	NIKA_ANTHROPIC_MODEL_PREFIX,
@@ -57,6 +58,8 @@ import {
 	NIKA_OPENAI_SECRET,
 	NIKA_OPENROUTER_MODEL_PREFIX,
 	NIKA_OPENROUTER_SECRET,
+	NIKA_ZAI_MODEL_PREFIX,
+	NIKA_ZAI_SECRET,
 	NIKA_PROVIDER_ID,
 	NIKA_PROVIDER_NAME,
 	NIKA_RESPONSES_MODEL,
@@ -76,11 +79,12 @@ import { NikaChatGptSubProvider, nikaChatGptModelId, resolveChatGptSubModelCapab
 import { NikaClaudeSubProvider, nikaClaudeModelId } from './nikaClaudeSubProvider';
 import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, NikaLlamaCppProvider, nikaLlamaCppModelId } from './nikaLlamaCppProvider';
 import { NikaCursorProvider, nikaCursorModelId } from './nikaCursorProvider';
+import { NikaZaiProvider, nikaZaiModelId } from './nikaZaiProvider';
 import { NikaGeminiProvider, nikaGeminiModelId } from './nikaGeminiProvider';
 import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
-import { NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES, OpenRouterModelPricing } from './nikaPricing';
+import { NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES, NIKA_ZAI_PRICES, OpenRouterModelPricing } from './nikaPricing';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
-import { NikaAttachmentProcessor } from './nikaAttachments';
+import { getNikaPreserveImagesForModel, NikaAttachmentProcessor } from './nikaAttachments';
 import { NikaUsageTracker, TokenTrackingProgress } from './nikaUsageTracker';
 import { OllamaConfig, OllamaLMProvider } from './ollamaProvider';
 
@@ -122,6 +126,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private readonly _llamaCppProvider: NikaLlamaCppProvider;
 	private readonly _geminiCatalogProvider: NikaGeminiProvider;
 	private readonly _cursorProvider: NikaCursorProvider;
+	private readonly _zaiProvider: NikaZaiProvider;
 	private readonly _deepSeekWebProvider: NikaDeepSeekWebProvider;
 	private readonly _openAIProvider: NikaOpenAIProvider;
 	private readonly _anthropicProvider: NikaAnthropicProvider;
@@ -148,19 +153,20 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._llamaCppProvider = this._register(this._instantiationService.createInstance(NikaLlamaCppProvider));
 		this._geminiCatalogProvider = this._register(this._instantiationService.createInstance(NikaGeminiProvider));
 		this._cursorProvider = this._register(this._instantiationService.createInstance(NikaCursorProvider));
+		this._zaiProvider = this._register(this._instantiationService.createInstance(NikaZaiProvider));
 		this._deepSeekWebProvider = this._register(this._instantiationService.createInstance(NikaDeepSeekWebProvider));
 		this._openAIProvider = this._register(this._instantiationService.createInstance(NikaOpenAIProvider, byokStorageService));
 		this._anthropicProvider = this._register(this._instantiationService.createInstance(NikaAnthropicProvider, byokStorageService));
 		this._chatGptSubProvider = this._register(this._instantiationService.createInstance(NikaChatGptSubProvider));
 		this._claudeSubProvider = this._register(this._instantiationService.createInstance(NikaClaudeSubProvider));
 		this.usageTracker = this._register(this._instantiationService.createInstance(NikaUsageTracker));
-		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider, this._llamaCppProvider, this._geminiCatalogProvider, this._cursorProvider, this._deepSeekWebProvider, this._openAIProvider, this._anthropicProvider, this._chatGptSubProvider, this._claudeSubProvider));
+		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider, this._llamaCppProvider, this._geminiCatalogProvider, this._cursorProvider, this._deepSeekWebProvider, this._openAIProvider, this._anthropicProvider, this._chatGptSubProvider, this._claudeSubProvider, this._zaiProvider));
 		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor, this._deepSeekWebProvider);
 		this._register(this._instantiationService.createInstance(NikaIndexingStatus, this.settingsEditor));
 		this._register(this._instantiationService.createInstance(NikaUsageStatus, this.settingsEditor, this.usageTracker));
 
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET) {
 				if (event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET) {
 					// A changed key must never reuse a stale catalog fetch.
 					this._openRouterProvider.invalidateCache();
@@ -182,6 +188,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 					// A changed key must never reuse a stale catalog fetch.
 					this._anthropicProvider.invalidateCache();
 				}
+				if (event.key === NIKA_ZAI_SECRET) {
+					// A changed key must never reuse a stale catalog fetch.
+					this._zaiProvider.invalidateCache();
+				}
 				this._onDidChange.fire();
 			}
 		}));
@@ -202,7 +212,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	async provideLanguageModelChatInformation(_options: vscode.PrepareLanguageModelChatModelOptions, _token: vscode.CancellationToken): Promise<NikaLanguageModelChatInformation[]> {
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, chatGptSubToken, claudeSubToken] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, chatGptSubToken, claudeSubToken, zaiKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
@@ -213,6 +223,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			this._context.secrets.get(NIKA_ANTHROPIC_SECRET),
 			this._context.secrets.get(NIKA_CHATGPT_SUB_SECRET),
 			this._context.secrets.get(NIKA_CLAUDE_SUB_SECRET),
+			this._context.secrets.get(NIKA_ZAI_SECRET),
 		]);
 		const limits = this._limits();
 		const providerConfig = parseNikaProviderConfig(vscode.workspace.getConfiguration('nika').get('providers'));
@@ -567,6 +578,45 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			}
 		}
 
+		// Z.ai (GLM) catalog: managed mode exposes exactly the wizard-selected
+		// models; legacy mode exposes the full catalog whenever a key exists.
+		if (zaiKey) {
+			const selected = getNikaSelectedModels(providerConfig, 'zai');
+			if (selected === undefined ? providerConfig === undefined : selected.length > 0) {
+				try {
+					const catalog = await this._zaiProvider.getCatalog(zaiKey);
+					for (const [rawId, model] of catalog) {
+						const id = nikaZaiModelId(rawId);
+						if (selected && !selected.includes(id)) {
+							continue;
+						}
+						const base = byokKnownModelToAPIInfo(NIKA_PROVIDER_NAME, id, model.capabilities);
+						entries.push({
+							...base,
+							name: model.name,
+							detail: vscode.l10n.t('Nika'),
+							tooltip: this._zaiTooltip(rawId),
+							// GLM models advertise image input so the workbench lets
+							// users attach images: the vision line (glm-4.5v/4.6v,
+							// GLM-4.7+) accepts them natively, and text-only models
+							// are served via the Nika vision-backend preprocessing.
+							capabilities: {
+								...base.capabilities,
+								imageInput: true,
+							},
+							isBYOK: true,
+							isDefault: id === defaultModel,
+							statusIcon: undefined,
+						});
+					}
+				} catch (error) {
+					// A key that is invalid (or an API outage) must not hide the
+					// other Nika models: log and continue.
+					this.logZaiError(error);
+				}
+			}
+		}
+
 		// Dynamic Ollama catalog: managed mode exposes exactly the wizard-
 		// selected models pulled on the configured host. Legacy mode needs no
 		// catalog here — the classic Gemma id is already part of the native
@@ -668,6 +718,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return vscode.l10n.t('{0} served by the Cursor API. Images pass through natively (no vision backend).', rawId);
 	}
 
+	private _zaiTooltip(rawId: string): string {
+		return vscode.l10n.t('{0} served by the Z.ai (GLM) API with catalog pricing.', rawId);
+	}
+
 	private _ollamaTooltip(name: string, baseUrl: string): string {
 		return vscode.l10n.t('{0} served by Ollama at {1}. Images pass through natively (no vision backend).', name, baseUrl);
 	}
@@ -751,6 +805,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		console.warn(`[Nika] Cursor catalog failed: ${detail}`);
 	}
 
+	private logZaiError(error: unknown): void {
+		const detail = error instanceof Error ? error.message : String(error);
+		console.warn(`[Nika] Z.ai catalog failed: ${detail}`);
+	}
+
 	private logOpenAIError(error: unknown): void {
 		const detail = error instanceof Error ? error.message : String(error);
 		console.warn(`[Nika] OpenAI catalog failed: ${detail}`);
@@ -806,6 +865,9 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		if (isNikaClaudeSubModel(id)) {
 			return getNikaSelectedModels(providerConfig, 'claude')?.includes(id) ?? false;
 		}
+		if (isNikaZaiModel(id)) {
+			return getNikaSelectedModels(providerConfig, 'zai')?.includes(id) ?? false;
+		}
 		// The legacy bare Gemma id is not part of managed mode (Ollama models
 		// are exposed as `ollama/<name>` there), so it is rejected.
 		return false;
@@ -822,7 +884,6 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		if (!this._isNikaModelEnabledForRequest(model.id, this._providerConfig())) {
 			throw new Error(vscode.l10n.t('The Nika model {0} is not enabled. Select it in the Providers page of Nika Settings first.', model.id));
 		}
-		this._warnVisionConflict(model.id);
 		if (isNikaDeepSeekModel(model.id)) {
 			const key = await this._context.secrets.get(NIKA_DEEPSEEK_SECRET);
 			if (!key) {
@@ -837,7 +898,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const workspace = currentWorkspaceName();
 			try {
 				const endpoint = this._createDeepSeekEndpoint(model.id, key);
-				const processed = await this._attachmentProcessor.process(messages, token);
+				// Per-model vision preprocessing: text-only DeepSeek models are
+				// described by the vision backend (default), while the V4 Flash
+				// Vision model sends images natively unless the user overrides
+				// it in Settings.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, isNikaDeepSeekVisionModel(model.id)));
 				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
 				const effectiveOptions = isNikaThinkingEffort(requestedEffort)
 					? { ...options, modelConfiguration: { ...options.modelConfiguration, reasoningEffort: requestedEffort } }
@@ -867,14 +932,48 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 							? 'DeepSeek V4 Flash Vision (Exp)'
 							: 'DeepSeek V4 Flash';
 					const switchAction = vscode.l10n.t('Use {0} Chat Completions', chatModelLabel);
+					const retryAction = vscode.l10n.t('Retry');
+					const compactAction = vscode.l10n.t('Compact Conversation');
+					const messageActions: string[] = [switchAction];
+					// The foreground chat panel threads the conversation id through
+					// modelOptions (extChatEndpoint.ts) so we can reconstruct the
+					// local chat session URI and let the core Retry action resend
+					// this exact request. Agent-host/CLI session ids are URIs (or
+					// opaque ids without a matching local session), so the Retry
+					// button is only offered for plain local conversation ids.
+					const conversationId = typeof options.modelOptions?._conversationId === 'string' ? options.modelOptions._conversationId : undefined;
+					if (conversationId !== undefined && !conversationId.includes('://')) {
+						messageActions.push(retryAction);
+					}
+					messageActions.push(compactAction);
 					const selected = await vscode.window.showErrorMessage(
 						vscode.l10n.t('The DeepSeek Responses request failed. Nika did not fall back automatically.'),
-						switchAction,
+						...messageActions,
 					);
 					if (selected === switchAction) {
 						const qualified = `nika/${chatModel}`;
 						await vscode.workspace.getConfiguration('chat').update('defaultModel', qualified, vscode.ConfigurationTarget.Global);
 						await vscode.workspace.getConfiguration('nika').update('defaultModel', qualified, vscode.ConfigurationTarget.Global);
+					} else if (selected === retryAction && conversationId !== undefined) {
+						// Same encoding as core's LocalChatSessionUri.forSession:
+						// vscode-chat-session://local/<base64url(sessionId)>.
+						const sessionUri = vscode.Uri.from({
+							scheme: 'vscode-chat-session',
+							authority: 'local',
+							path: '/' + Buffer.from(conversationId).toString('base64url'),
+						});
+						try {
+							await vscode.commands.executeCommand('workbench.action.chat.retry', { sessionResource: sessionUri });
+						} catch {
+							// The session may have been closed since the failure; the
+							// original error above is what the user already saw.
+						}
+					} else if (selected === compactAction) {
+						try {
+							await vscode.commands.executeCommand('github.copilot.chat.compact');
+						} catch {
+							// Best-effort: compact is a no-op if no chat is focused.
+						}
 					}
 				}
 				throw error;
@@ -926,7 +1025,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const workspace = currentWorkspaceName();
 			try {
 				const endpoint = this._openRouterProvider.createEndpoint(this._openRouterWireModelId(rawId), key);
-				const processed = await this._attachmentProcessor.process(messages, token);
+				// Per-model vision preprocessing: vision-capable OpenRouter
+				// catalog models pass images through natively (default), while
+				// text-only ones are described by the vision backend first.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, entry?.capabilities?.vision ?? false));
 				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
 				// OpenRouter models accept `low`/`medium`/`high` effort only; drop
 				// agent-requested efforts the model does not support instead of
@@ -977,10 +1079,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const title = extractPromptTitle(messages);
 			const workspace = currentWorkspaceName();
 			try {
-				// The vision preprocessing toggle decides whether images are
-				// described by the vision backend (default) or passed through
+				// The per-model vision-preprocessing setting decides whether
+				// images are described by the vision backend or passed through
 				// natively; PDFs are always converted to text.
-				const processed = await this._attachmentProcessor.process(messages, token);
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, capabilities.vision ?? false));
 				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
 				// OpenAI models accept `low`/`medium`/`high` effort only; drop
 				// agent-requested efforts the model does not support instead of
@@ -1028,10 +1130,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const title = extractPromptTitle(messages);
 			const workspace = currentWorkspaceName();
 			try {
-				// The vision preprocessing toggle decides whether images
-				// are described by the vision backend (default) or passed
-				// through natively; PDFs are always converted to text.
-				const processed = await this._attachmentProcessor.process(messages, token);
+				const capabilities = resolveAnthropicModelCapabilities(rawId, this._limits());
+				// Per-model vision preprocessing: Claude models accept images
+				// natively by default; PDFs are always converted to text.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, capabilities.vision ?? false));
 				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
 				// Claude has no reasoning-effort control (extended thinking
 				// is a budget handled by the delegate), so `options` pass
@@ -1077,8 +1179,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const title = extractPromptTitle(messages);
 			const workspace = currentWorkspaceName();
 			try {
-				// GPT-5 Codex accepts images natively; only PDFs are converted.
-				const processed = await this._attachmentProcessor.process(messages, token, { preserveImages: true });
+				// GPT-5/Codex models accept images natively by default; the
+				// user can still opt into vision-backend preprocessing per
+				// model. Only PDFs are always converted.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, capabilities.vision ?? false));
 				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
 				// Codex models accept `low`..`ultra` effort; drop agent-requested
 				// efforts the model does not support instead of letting the
@@ -1125,8 +1229,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const title = extractPromptTitle(messages);
 			const workspace = currentWorkspaceName();
 			try {
-				// Claude models accept images natively; only PDFs are converted.
-				const processed = await this._attachmentProcessor.process(messages, token, { preserveImages: true });
+				// Claude models accept images natively by default; the user can
+				// still opt into vision-backend preprocessing per model. Only
+				// PDFs are always converted.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, true));
 				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
 				// Claude has no reasoning-effort control (extended thinking is a
 				// budget the agent host manages), so `options` pass through
@@ -1168,10 +1274,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const workspace = currentWorkspaceName();
 			try {
 				const endpoint = this._llamaCppProvider.createEndpoint(rawId, baseUrl, key);
-				// Native multimodal pass-through: llama.cpp models accept image
-				// parts directly (as image_url data URIs), so only PDFs are
-				// converted to text.
-				const processed = await this._attachmentProcessor.process(messages, token, { preserveImages: true });
+				// Per-model vision preprocessing: llama.cpp models are
+				// multimodal (image_url data URIs pass through), so images are
+				// preserved by default; the user can still opt into
+				// vision-backend descriptions. Only PDFs are converted.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, true));
 				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
 				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
 				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator });
@@ -1211,9 +1318,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const workspace = currentWorkspaceName();
 			try {
 				const endpoint = this._cursorProvider.createEndpoint(rawId, key);
-				// Native multimodal pass-through: Cursor serves frontier
-				// Claude/GPT/Gemini models that accept image parts directly.
-				const processed = await this._attachmentProcessor.process(messages, token, { preserveImages: true });
+				// Per-model vision preprocessing: Cursor serves frontier
+				// multimodal models that accept image parts directly, so
+				// images are preserved by default; the user can still opt into
+				// vision-backend descriptions. Only PDFs are converted.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, true));
 				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
 				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
 				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator });
@@ -1239,6 +1348,59 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return;
 		}
 
+		if (isNikaZaiModel(model.id)) {
+			const key = await this._context.secrets.get(NIKA_ZAI_SECRET);
+			if (!key) {
+				throw new Error(vscode.l10n.t('Configure a Z.ai API key in Nika Settings before using this model.'));
+			}
+			const rawId = model.id.slice(NIKA_ZAI_MODEL_PREFIX.length);
+			// Refresh the catalog first so endpoint capabilities and the pricing
+			// snapshot (used for cost accounting) are warm.
+			const catalog = await this._zaiProvider.getCatalog(key);
+			const entry = catalog.get(rawId);
+			const pricing = entry?.pricing;
+			const nativeVision = entry?.capabilities.vision ?? false;
+
+			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
+			const disposeStream = this.usageTracker.trackStream(trackedProgress);
+			const sessionId = typeof options.modelOptions?._nikaSessionId === 'string' ? options.modelOptions._nikaSessionId : undefined;
+			const title = extractPromptTitle(messages);
+			const workspace = currentWorkspaceName();
+			try {
+				const endpoint = this._zaiProvider.createEndpoint(rawId, key);
+				// Per-model vision preprocessing: the Z.ai vision line (glm-4.5v,
+				// glm-4.6v, GLM-4.7+) accepts image parts directly, so images are
+				// preserved by default there; text-only GLM models are described
+				// by the vision backend first. Only PDFs are always converted.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, nativeVision));
+				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
+				// GLM models have no reasoning-effort control exposed through the
+				// Nika harness, so `options` pass through unchanged.
+				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
+				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator }, pricing);
+			} catch (error) {
+				this.usageTracker.record({
+					model: model.id,
+					sessionId,
+					initiator: options.requestInitiator,
+					title,
+					workspace,
+					promptTokens: 0,
+					completionTokens: 0,
+					totalTokens: 0,
+					cachedTokens: 0,
+					reasoningTokens: 0,
+					provider: 'zai',
+					pricing,
+					error: true,
+				});
+				throw error;
+			} finally {
+				disposeStream();
+			}
+			return;
+		}
+
 		if (isNikaDeepSeekWebModel(model.id)) {
 			const webToken = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
 			if (!webToken) {
@@ -1252,10 +1414,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const workspace = currentWorkspaceName();
 			try {
 				const endpoint = this._deepSeekWebProvider.createEndpoint(model.id, webToken, sessionId);
-				// Images ride through natively: they are uploaded to DeepSeek's
-				// servers and analyzed there, so the vision backend must not
-				// preprocess them into text.
-				const processed = await this._attachmentProcessor.process(messages, token, { preserveImages: true });
+				// Images ride through natively by default: they are uploaded to
+				// DeepSeek's servers and analyzed there, so the vision backend
+				// must not preprocess them into text — unless the user opts
+				// into preprocessing for this model in Settings.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, true));
 				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
 				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
 				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator });
@@ -1346,6 +1509,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const endpoint = this._cursorProvider.createEndpoint(model.id.slice(NIKA_CURSOR_MODEL_PREFIX.length), await this._context.secrets.get(NIKA_CURSOR_SECRET) ?? '');
 			return this._lmWrapper.provideTokenCount(endpoint, text);
 		}
+		if (isNikaZaiModel(model.id)) {
+			const endpoint = this._zaiProvider.createEndpoint(model.id.slice(NIKA_ZAI_MODEL_PREFIX.length), await this._context.secrets.get(NIKA_ZAI_SECRET) ?? '');
+			return this._lmWrapper.provideTokenCount(endpoint, text);
+		}
 		if (isNikaDeepSeekWebModel(model.id)) {
 			const token = await this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET);
 			if (!token) {
@@ -1382,7 +1549,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 								: isNikaAnthropicModel(modelId) ? 'anthropic' as const
 									: isNikaChatGptSubModel(modelId) ? 'chatgpt' as const
 										: isNikaClaudeSubModel(modelId) ? 'claude' as const
-											: 'deepseek' as const;
+											: isNikaZaiModel(modelId) ? 'zai' as const
+												: 'deepseek' as const;
 		const usage = tracked.exactUsage;
 		if (usage) {
 			this.usageTracker.record({
@@ -1497,101 +1665,14 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	/**
-	 * Set of `modelId:on|off` keys for which the vision-conflict warning has
-	 * already been shown, so a user is not nagged on every request.
+	 * The attachment-processing options for a model. `preserveImages` is set
+	 * from the per-model `nika.visionPreprocessingMap` entry when present,
+	 * falling back to the model's native-vision capability (native models
+	 * pass images through, text-only models describe them first). PDFs are
+	 * always converted to text by the processor regardless.
 	 */
-	private readonly _visionWarningsShown = new Set<string>();
-
-	/**
-	 * Warn once per (model, toggle-state) when the master
-	 * `nika.visionPreprocessingEnabled` toggle conflicts with the model's
-	 * image handling:
-	 * - Toggle ON + a natively vision-capable model routed through the
-	 *   describe path (the DeepSeek vision model, vision-capable OpenRouter /
-	 *   OpenAI / Anthropic models): images will be described by the vision
-	 *   backend instead of sent natively.
-	 * - Toggle OFF + a text-only model (text-only DeepSeek, OpenRouter,
-	 *   OpenAI, Anthropic models): the model may reject raw image parts.
-	 * The warning offers an action that flips the toggle directly, plus one
-	 * that opens Nika Settings on the Vision page. Only the models affected
-	 * by the toggle are considered (models that always pass images through
-	 * natively are skipped entirely).
-	 */
-	private _warnVisionConflict(modelId: string): void {
-		const config = vscode.workspace.getConfiguration('nika');
-		const enabled = config.get<boolean>('visionPreprocessingEnabled', true);
-		const key = `${modelId}:${enabled ? 'on' : 'off'}`;
-		if (this._visionWarningsShown.has(key)) {
-			return;
-		}
-		this._visionWarningsShown.add(key);
-
-		let nativeVision: boolean | undefined;
-		if (isNikaDeepSeekModel(modelId)) {
-			// Only the vision model sees images natively; the text-only
-			// DeepSeek models advertise media input only so Copilot preserves
-			// attachments for Nika's text conversion.
-			nativeVision = isNikaDeepSeekVisionModel(modelId);
-		} else if (isNikaOpenRouterModel(modelId)) {
-			// Consult the cached catalog only: fetching here would add latency
-			// to the request path, and the request branch fetches it anyway.
-			nativeVision = this._openRouterProvider.getCachedCapabilities(modelId.slice(NIKA_OPENROUTER_MODEL_PREFIX.length))?.vision ?? undefined;
-		} else if (isNikaOpenAIModel(modelId)) {
-			// OpenAI capabilities are deterministic (family heuristics); the
-			// cached catalog is preferred when warm, the heuristic otherwise.
-			const rawId = modelId.slice(NIKA_OPENAI_MODEL_PREFIX.length);
-			nativeVision = this._openAIProvider.getCachedCapabilities(rawId)?.vision ?? resolveOpenAIModelCapabilities(rawId, this._limits()).vision;
-		} else if (isNikaAnthropicModel(modelId)) {
-			// Anthropic capabilities are deterministic (family heuristics); the
-			// cached catalog is preferred when warm, the heuristic otherwise.
-			const rawId = modelId.slice(NIKA_ANTHROPIC_MODEL_PREFIX.length);
-			nativeVision = this._anthropicProvider.getCachedCapabilities(rawId)?.vision ?? resolveAnthropicModelCapabilities(rawId, this._limits()).vision;
-		}
-		// Unknown capability (catalog not fetched yet) or a model that always
-		// preserves images natively: nothing to warn about.
-		if (nativeVision === undefined) {
-			return;
-		}
-
-		const openVisionAction = vscode.l10n.t('Open Vision Settings');
-		const flipToggle = async (value: boolean): Promise<void> => {
-			try {
-				await vscode.workspace.getConfiguration('nika').update('visionPreprocessingEnabled', value, vscode.ConfigurationTarget.Global);
-				// Reflect the new toggle state in the settings page if it is open.
-				this.settingsEditor.refresh();
-			} catch (error) {
-				const detail = error instanceof Error ? error.message : String(error);
-				this.settingsEditor.log('ERROR', detail);
-				void vscode.window.showErrorMessage(vscode.l10n.t('Nika could not change vision preprocessing: {0}', detail));
-			}
-		};
-		if (enabled && nativeVision) {
-			const turnOffAction = vscode.l10n.t('Turn preprocessing off');
-			void vscode.window.showWarningMessage(
-				vscode.l10n.t('Vision preprocessing is on, so images sent to {0} are described by the vision backend first — even though this model supports them natively.', modelId),
-				turnOffAction,
-				openVisionAction,
-			).then(async action => {
-				if (action === turnOffAction) {
-					await flipToggle(false);
-				} else if (action === openVisionAction) {
-					this.settingsEditor.open('vision');
-				}
-			});
-		} else if (!enabled && !nativeVision) {
-			const turnOnAction = vscode.l10n.t('Turn preprocessing on');
-			void vscode.window.showWarningMessage(
-				vscode.l10n.t('Vision preprocessing is off, and {0} is a text-only model — it may not support image attachments.', modelId),
-				turnOnAction,
-				openVisionAction,
-			).then(async action => {
-				if (action === turnOnAction) {
-					await flipToggle(true);
-				} else if (action === openVisionAction) {
-					this.settingsEditor.open('vision');
-				}
-			});
-		}
+	private _attachmentOptionsFor(modelId: string, nativeVision: boolean): { preserveImages: boolean } {
+		return { preserveImages: getNikaPreserveImagesForModel(modelId, nativeVision) };
 	}
 
 	private _geminiKnownModels(): BYOKKnownModels {
@@ -1608,7 +1689,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return vscode.l10n.t('DeepSeek Responses API model. It never falls back silently to Chat Completions.');
 		}
 		if (isNikaDeepSeekVisionModel(id)) {
-			return vscode.l10n.t('DeepSeek V4 Flash Vision (Exp) with native image input through the Nika provider. Images are sent directly when vision preprocessing is off; PDFs are always converted to text.');
+			return vscode.l10n.t('DeepSeek V4 Flash Vision (Exp) with native image input through the Nika provider. Images are sent directly by default (tunable per model in Nika Settings); PDFs are always converted to text.');
 		}
 		if (isNikaDeepSeekModel(id)) {
 			return vscode.l10n.t('DeepSeek V4 through the native Nika provider. Images and PDFs are converted to text first.');
@@ -1636,6 +1717,9 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		}
 		if (isNikaClaudeSubModel(id)) {
 			return this._claudeSubTooltip(id.slice(NIKA_CLAUDE_SUB_MODEL_PREFIX.length));
+		}
+		if (isNikaZaiModel(id)) {
+			return vscode.l10n.t('Model served by the Z.ai (GLM) API with catalog pricing.');
 		}
 		return vscode.l10n.t('Gemma 4 31B through the configured Ollama host.');
 	}

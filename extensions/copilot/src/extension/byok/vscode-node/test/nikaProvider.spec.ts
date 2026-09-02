@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { CopilotLanguageModelWrapper } from '../../../conversation/vscode-node/languageModelAccess';
 import { DeepSeekEndpoint } from '../../node/deepSeekEndpoint';
@@ -18,6 +18,7 @@ import { CustomDataPartMimeTypes } from '../../../../platform/endpoint/common/en
 import { GeminiNativeBYOKLMProvider } from '../geminiNativeProvider';
 import { NikaLMProvider, type NikaLanguageModelChatInformation } from '../nikaProvider';
 import { NikaCursorProvider } from '../nikaCursorProvider';
+import { NikaZaiProvider } from '../nikaZaiProvider';
 import { NikaGeminiProvider } from '../nikaGeminiProvider';
 import { NikaOpenAIProvider } from '../nikaOpenAIProvider';
 import { NikaAnthropicProvider } from '../nikaAnthropicProvider';
@@ -51,7 +52,10 @@ vi.mock('vscode', async (importOriginal) => {
 		ChatMcpToolInvocationData: class ChatMcpToolInvocationData { },
 		LanguageModelToolInformation: class LanguageModelToolInformation { },
 		workspace: {
-			getConfiguration: vi.fn(() => ({ get: (key: string, fallback: unknown) => key === 'openrouterFloor' ? floorEnabled : key === 'providers' ? providersConfig : fallback })),
+			getConfiguration: vi.fn(() => ({
+				get: (key: string, fallback: unknown) => key === 'openrouterFloor' ? floorEnabled : key === 'providers' ? providersConfig : fallback,
+				inspect: (_key: string) => undefined,
+			})),
 			onDidChangeConfiguration: configurationChange.event,
 			workspaceFolders: [],
 			asRelativePath: (_uri: unknown, _includeWorkspaceFolder: boolean) => '',
@@ -60,6 +64,9 @@ vi.mock('vscode', async (importOriginal) => {
 			showErrorMessage: vi.fn(),
 			showWarningMessage: vi.fn().mockResolvedValue(undefined),
 			activeTextEditor: undefined,
+		},
+		commands: {
+			executeCommand: vi.fn().mockResolvedValue(undefined),
 		},
 	};
 });
@@ -100,6 +107,7 @@ function createInstantiationService(overrides: {
 	llamaCppProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	geminiCatalogProvider: { getCatalog: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	cursorProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
+	zaiProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	openAIProvider: { getCatalog: ReturnType<typeof vi.fn>; getKnownModels: ReturnType<typeof vi.fn>; getCachedCapabilities: ReturnType<typeof vi.fn>; provideLanguageModelChatResponse: ReturnType<typeof vi.fn>; provideTokenCount: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	anthropicProvider: { getCatalog: ReturnType<typeof vi.fn>; getKnownModels: ReturnType<typeof vi.fn>; getCachedCapabilities: ReturnType<typeof vi.fn>; provideLanguageModelChatResponse: ReturnType<typeof vi.fn>; provideTokenCount: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 }) {
@@ -131,6 +139,9 @@ function createInstantiationService(overrides: {
 		}
 		if (Ctor === NikaCursorProvider) {
 			return overrides.cursorProvider;
+		}
+		if (Ctor === NikaZaiProvider) {
+			return overrides.zaiProvider;
 		}
 		if (Ctor === NikaOpenAIProvider) {
 			return overrides.openAIProvider;
@@ -237,6 +248,11 @@ function createFakes() {
 		createEndpoint: vi.fn(() => ({ dispose: () => { } })),
 		invalidateCache: vi.fn(),
 	};
+	const zaiProvider = {
+		getCatalog: vi.fn().mockResolvedValue(new Map()),
+		createEndpoint: vi.fn(() => ({ dispose: () => { } })),
+		invalidateCache: vi.fn(),
+	};
 	const openAIProvider = {
 		getCatalog: vi.fn().mockResolvedValue(new Map()),
 		getKnownModels: vi.fn().mockResolvedValue({}),
@@ -253,7 +269,7 @@ function createFakes() {
 		provideTokenCount: vi.fn().mockResolvedValue(0),
 		invalidateCache: vi.fn(),
 	};
-	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, settingsEditor, attachmentProcessor, openRouterProvider, llamaCppProvider, geminiCatalogProvider, cursorProvider, openAIProvider, anthropicProvider };
+	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, settingsEditor, attachmentProcessor, openRouterProvider, llamaCppProvider, geminiCatalogProvider, cursorProvider, zaiProvider, openAIProvider, anthropicProvider };
 }
 
 function createProvider(overrides?: {
@@ -262,6 +278,7 @@ function createProvider(overrides?: {
 	catalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[]; pricing?: { label: string; inputCost: number; outputCost: number; cacheCost: number } }; pricing?: { promptPerMTok: number; completionPerMTok: number; cacheReadPerMTok: number; requestFee: number; free: boolean } }>;
 	geminiCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 	cursorCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
+	zaiCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 	openAICatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 	anthropicCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 }) {
@@ -275,6 +292,9 @@ function createProvider(overrides?: {
 	}
 	if (overrides?.cursorCatalog) {
 		vi.mocked(fakes.cursorProvider.getCatalog).mockResolvedValue(overrides.cursorCatalog as never);
+	}
+	if (overrides?.zaiCatalog) {
+		vi.mocked(fakes.zaiProvider.getCatalog).mockResolvedValue(overrides.zaiCatalog as never);
 	}
 	if (overrides?.openAICatalog) {
 		vi.mocked(fakes.openAIProvider.getCatalog).mockResolvedValue(overrides.openAICatalog as never);
@@ -300,6 +320,11 @@ function deepSeekRequestArgs() {
 }
 
 describe('NikaLMProvider', () => {
+	beforeEach(() => {
+		vi.mocked(vscode.window.showErrorMessage).mockReset();
+		vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue(undefined);
+	});
+
 	it('returns after a successful DeepSeek request without falling through to the Ollama fallback', async () => {
 		const { provider, fakes, deepSeekEndpointUrls } = createProvider();
 		const model = { id: 'deepseek-v4-flash-responses' } as NikaLanguageModelChatInformation;
@@ -317,34 +342,79 @@ describe('NikaLMProvider', () => {
 		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
 	});
 
-	it('turns vision preprocessing off from the warning for the DeepSeek vision model and refreshes the settings page', async () => {
+	it('offers Retry and Compact Conversation on a DeepSeek Responses failure', async () => {
 		const { provider, fakes } = createProvider();
-		const model = { id: 'deepseek-v4-flash-vision-exp' } as NikaLanguageModelChatInformation;
+		const model = { id: 'deepseek-v4-flash-responses' } as NikaLanguageModelChatInformation;
 		const { messages, options, progress, token } = deepSeekRequestArgs();
+		(options as { modelOptions: Record<string, unknown> }).modelOptions = { _conversationId: 'conv-42' };
+		vi.mocked(fakes.lmWrapper.provideLanguageModelResponse).mockRejectedValueOnce(new Error('HTTP 500'));
 
-		const update = vi.fn().mockResolvedValue(undefined);
-		const configMock = vi.mocked(vscode.workspace.getConfiguration);
-		const originalConfig = configMock.getMockImplementation();
-		try {
-			configMock.mockImplementation(() => ({
-				get: (_key: string, fallback: unknown) => fallback,
-				update,
-			} as never));
-			vi.mocked(vscode.window.showWarningMessage).mockResolvedValue('Turn preprocessing off' as never);
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow('HTTP 500');
 
-			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+		// The notification offers model switch, retry and compact — in that order.
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			'The DeepSeek Responses request failed. Nika did not fall back automatically.',
+			'Use DeepSeek V4 Flash Chat Completions',
+			'Retry',
+			'Compact Conversation',
+		);
+	});
 
-			// The vision model is natively vision-capable and preprocessing is on,
-			// so the warning's one-click action flips the toggle off...
-			await vi.waitFor(() => {
-				expect(update).toHaveBeenCalledWith('visionPreprocessingEnabled', false, vscode.ConfigurationTarget.Global);
-			});
-			// ...and the open settings page re-renders with the new state.
-			expect(fakes.settingsEditor.refresh).toHaveBeenCalled();
-		} finally {
-			configMock.mockImplementation(originalConfig!);
-			vi.mocked(vscode.window.showWarningMessage).mockResolvedValue(undefined);
-		}
+	it('retries the failed request in the originating chat session', async () => {
+		const { provider, fakes } = createProvider();
+		const model = { id: 'deepseek-v4-flash-responses' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+		(options as { modelOptions: Record<string, unknown> }).modelOptions = { _conversationId: 'conv-42' };
+		vi.mocked(fakes.lmWrapper.provideLanguageModelResponse).mockRejectedValueOnce(new Error('HTTP 500'));
+		vi.mocked(vscode.window.showErrorMessage).mockResolvedValue('Retry' as never);
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow('HTTP 500');
+
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith('workbench.action.chat.retry', {
+			sessionResource: vscode.Uri.from({
+				scheme: 'vscode-chat-session',
+				authority: 'local',
+				path: '/Y29udi00Mg', // base64url('conv-42')
+			}),
+		});
+		// The model-switch config update must NOT fire for the retry path.
+		expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith('chat');
+	});
+
+	it('compacts the conversation from the failure notification', async () => {
+		const { provider, fakes } = createProvider();
+		const model = { id: 'deepseek-v4-flash-responses' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+		vi.mocked(fakes.lmWrapper.provideLanguageModelResponse).mockRejectedValueOnce(new Error('HTTP 500'));
+		vi.mocked(vscode.window.showErrorMessage).mockResolvedValue('Compact Conversation' as never);
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow('HTTP 500');
+
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith('github.copilot.chat.compact');
+		// Compact is offered also without a session id, but Retry is not.
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			'The DeepSeek Responses request failed. Nika did not fall back automatically.',
+			'Use DeepSeek V4 Flash Chat Completions',
+			'Compact Conversation',
+		);
+	});
+
+	it('does not offer Retry for agent-host style session ids (no local session to resend)', async () => {
+		const { provider, fakes } = createProvider();
+		const model = { id: 'deepseek-v4-flash-responses' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+		// Agent-host paths thread a session id that is not a plain local
+		// conversation id (it is a URI or opaque remote id).
+		(options as { modelOptions: Record<string, unknown> }).modelOptions = { _conversationId: 'https://host/session/abc' };
+		vi.mocked(fakes.lmWrapper.provideLanguageModelResponse).mockRejectedValueOnce(new Error('HTTP 500'));
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow('HTTP 500');
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			'The DeepSeek Responses request failed. Nika did not fall back automatically.',
+			'Use DeepSeek V4 Flash Chat Completions',
+			'Compact Conversation',
+		);
 	});
 
 	it('still routes non-DeepSeek models to the Ollama fallback', async () => {
@@ -937,13 +1007,13 @@ describe('Nika OpenAI support', () => {
 		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
 
 		// The delegate receives the raw id and the Nika key. Image handling is
-		// governed by the master vision-preprocessing toggle (no per-provider
-		// override), so `process` runs with its default options.
+		// per model: gpt-5 is vision-capable, so images pass through natively
+		// by default (the per-model map can override this).
 		expect(fakes.openAIProvider.provideLanguageModelChatResponse).toHaveBeenCalledTimes(1);
 		const [delegateModel, key, , , ,] = fakes.openAIProvider.provideLanguageModelChatResponse.mock.calls[0];
 		expect(delegateModel.id).toBe('openai/gpt-5');
 		expect(key).toBe('sk-nika-1');
-		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token);
+		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token, { preserveImages: true });
 		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
 	});
 
@@ -1030,9 +1100,9 @@ describe('Nika Anthropic support', () => {
 		const [delegateModel, key, , , ,] = fakes.anthropicProvider.provideLanguageModelChatResponse.mock.calls[0];
 		expect(delegateModel.id).toBe('anthropic/claude-sonnet-4-5');
 		expect(key).toBe('sk-ant-nika-1');
-		// Image handling is governed by the master vision-preprocessing toggle
-		// (no per-provider override).
-		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token);
+		// Image handling is per model: Claude is vision-capable, so images pass
+		// through natively by default (the per-model map can override this).
+		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token, { preserveImages: true });
 		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
 	});
 
@@ -1091,6 +1161,95 @@ describe('Nika Anthropic support', () => {
 		try {
 			const { provider } = createProvider({ keys: { 'nika.anthropic.apiKey': 'sk-ant-nika-1' } });
 			const model = { id: 'anthropic/claude-haiku-4-5' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
+				.rejects.toThrow('is not enabled');
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+});
+
+describe('Nika Z.ai support', () => {
+	const zaiCatalog = (): Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }> => new Map([
+		['glm-4.7', { id: 'glm-4.7', name: 'GLM-4.7', capabilities: { name: 'GLM-4.7', toolCalling: true, vision: true, maxInputTokens: 200_000, maxOutputTokens: 8_192 } }],
+		['glm-4.6', { id: 'glm-4.6', name: 'GLM-4.6', capabilities: { name: 'GLM-4.6', toolCalling: true, vision: false, maxInputTokens: 200_000, maxOutputTokens: 8_192 } }],
+	]);
+
+	it('routes zai models through the endpoint with native images on the vision line', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.zai.apiKey': 'zai-key-1' }, zaiCatalog: zaiCatalog() });
+		const model = { id: 'zai/glm-4.7' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+		// The endpoint receives the raw wire id and the platform key.
+		expect(fakes.zaiProvider.createEndpoint).toHaveBeenCalledWith('glm-4.7', 'zai-key-1');
+		// GLM-4.7 is natively multimodal: images ride through untouched.
+		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token, { preserveImages: true });
+		expect(fakes.lmWrapper.provideLanguageModelResponse).toHaveBeenCalledTimes(1);
+		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
+	});
+
+	it('rejects zai models when the API key is missing', async () => {
+		const { provider } = createProvider({ keys: { 'nika.zai.apiKey': undefined } });
+		const model = { id: 'zai/glm-4.7' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))
+			.rejects.toThrow('Configure a Z.ai API key in Nika Settings');
+	});
+
+	it('appends the Z.ai catalog in legacy mode whenever a key exists', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.zai.apiKey': 'zai-key-1' }, zaiCatalog: zaiCatalog() });
+
+		const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+		expect(fakes.zaiProvider.getCatalog).toHaveBeenCalledWith('zai-key-1');
+		const zaiIds = models.filter(m => m.id.startsWith('zai/'));
+		expect(zaiIds.map(m => m.id).sort()).toEqual(['zai/glm-4.6', 'zai/glm-4.7']);
+		expect(zaiIds[0].detail).toBe('Nika');
+		expect(zaiIds[0].isBYOK).toBe(true);
+		// The catalog advertises image input; the vision line accepts it
+		// natively and text-only models use the vision backend.
+		expect(zaiIds[0].capabilities.imageInput).toBe(true);
+		expect(zaiIds[0].statusIcon).toBeUndefined();
+	});
+
+	it('filters the Z.ai catalog to the wizard selection in managed mode', async () => {
+		providersConfig = { zai: { models: ['zai/glm-4.7'] } };
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.zai.apiKey': 'zai-key-1' }, zaiCatalog: zaiCatalog() });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.zaiProvider.getCatalog).toHaveBeenCalledWith('zai-key-1');
+			expect(models.filter(m => m.id.startsWith('zai/')).map(m => m.id)).toEqual(['zai/glm-4.7']);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
+	it('skips the whole Z.ai catalog when nothing is selected in managed mode', async () => {
+		providersConfig = { zai: { models: [] } };
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.zai.apiKey': 'zai-key-1' }, zaiCatalog: zaiCatalog() });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.zaiProvider.getCatalog).not.toHaveBeenCalled();
+			expect(models.filter(m => m.id.startsWith('zai/'))).toHaveLength(0);
+		} finally {
+			providersConfig = undefined;
+		}
+	});
+
+	it('rejects zai requests for unselected models in managed mode', async () => {
+		providersConfig = { zai: { models: ['zai/glm-4.7'] } };
+		try {
+			const { provider } = createProvider({ keys: { 'nika.zai.apiKey': 'zai-key-1' } });
+			const model = { id: 'zai/glm-4.6' } as NikaLanguageModelChatInformation;
 			const { messages, options, progress, token } = deepSeekRequestArgs();
 
 			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token))

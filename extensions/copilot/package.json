@@ -3298,6 +3298,14 @@
             "default": "",
             "markdownDescription": "%nika.config.visionOpenRouterModel%"
           },
+          "nika.visionPreprocessingMap": {
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "markdownDescription": "%nika.config.visionPreprocessingMap%"
+          },
           "nika.visionPreprocessingEnabled": {
             "type": "boolean",
             "default": true,

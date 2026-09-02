@@ -9,8 +9,8 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekVisionModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_RESPONSES_MODEL, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaTokenLimits, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
-import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour, NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES } from './nikaPricing';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekVisionModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_ZAI_MODEL_PREFIX, NIKA_ZAI_SECRET, NIKA_RESPONSES_MODEL, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaTokenLimits, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
+import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour, NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES, NIKA_ZAI_PRICES } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { NikaOpenAIProvider } from './nikaOpenAIProvider';
 import { NikaAnthropicProvider } from './nikaAnthropicProvider';
@@ -19,6 +19,7 @@ import { NikaChatGptSubProvider } from './nikaChatGptSubProvider';
 import { NikaClaudeSubProvider } from './nikaClaudeSubProvider';
 import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, NikaLlamaCppProvider } from './nikaLlamaCppProvider';
 import { NikaCursorProvider } from './nikaCursorProvider';
+import { NikaZaiProvider, ZAI_BASE_URL } from './nikaZaiProvider';
 import { NikaGeminiProvider } from './nikaGeminiProvider';
 import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
 import { DeepSeekWebClient } from '../node/deepSeekWebClient';
@@ -30,7 +31,7 @@ type ConnectionResult = { readonly ok: boolean; readonly message: string; readon
 
 const SETTINGS = new Set([
 	'defaultModel', 'outputTokens', 'contextWindow', 'temperature', 'thinkingEffort', 'openrouterFloor',
-	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'visionPreprocessingEnabled', 'ollamaBaseUrl', 'llamaCppBaseUrl', 'deepseekWeb.deleteSessionsAfterVision',
+	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'ollamaBaseUrl', 'llamaCppBaseUrl', 'deepseekWeb.deleteSessionsAfterVision',
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
@@ -39,7 +40,7 @@ const SETTINGS = new Set([
 
 const DEEP_SEEK_WEB_URL = 'https://chat.deepseek.com/';
 
-const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude', string> = {
+const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai', string> = {
 	deepseek: NIKA_DEEPSEEK_SECRET,
 	gemini: NIKA_GEMINI_SECRET,
 	openrouter: NIKA_OPENROUTER_SECRET,
@@ -50,6 +51,7 @@ const SECRET_KEYS: Record<'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'c
 	anthropic: NIKA_ANTHROPIC_SECRET,
 	chatgpt: NIKA_CHATGPT_SUB_SECRET,
 	claude: NIKA_CLAUDE_SUB_SECRET,
+	zai: NIKA_ZAI_SECRET,
 };
 
 function providerDisplayName(provider: NikaConnection): string {
@@ -65,6 +67,7 @@ function providerDisplayName(provider: NikaConnection): string {
 		case 'anthropic': return 'Anthropic';
 		case 'chatgpt': return 'ChatGPT';
 		case 'claude': return 'Claude';
+		case 'zai': return 'Z.ai';
 	}
 }
 
@@ -121,6 +124,7 @@ export class NikaSettingsEditor extends Disposable {
 		private readonly _anthropicProvider: NikaAnthropicProvider,
 		private readonly _chatGptSubProvider: NikaChatGptSubProvider,
 		private readonly _claudeSubProvider: NikaClaudeSubProvider,
+		private readonly _zaiProvider: NikaZaiProvider,
 		@IVSCodeExtensionContext private readonly _context: IVSCodeExtensionContext,
 		@IFetcherService private readonly _fetcherService: IFetcherService,
 		@ILogService private readonly _logService: ILogService,
@@ -147,7 +151,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET) {
 				void this._render(this._activeSection);
 			}
 		}));
@@ -299,7 +303,7 @@ export class NikaSettingsEditor extends Disposable {
 
 	private async _state(): Promise<Record<string, unknown>> {
 		const config = vscode.workspace.getConfiguration('nika');
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, chatGptSubSecret, claudeSubSecret] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, chatGptSubSecret, claudeSubSecret, zaiKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
@@ -310,6 +314,7 @@ export class NikaSettingsEditor extends Disposable {
 			this._context.secrets.get(NIKA_ANTHROPIC_SECRET),
 			this._context.secrets.get(NIKA_CHATGPT_SUB_SECRET),
 			this._context.secrets.get(NIKA_CLAUDE_SUB_SECRET),
+			this._context.secrets.get(NIKA_ZAI_SECRET),
 		]);
 		const chatGptSubToken = parseNikaChatGptSubscriptionToken(chatGptSubSecret);
 		const claudeSubToken = parseNikaClaudeSubscriptionToken(claudeSubSecret);
@@ -322,21 +327,31 @@ export class NikaSettingsEditor extends Disposable {
 			config.get<string>('contextWindow', '128K'),
 			config.get<string>('outputTokens', '8K'),
 		);
+		// Wizard-driven provider selection. Absent = legacy mode (classic
+		// key-based visibility); present = managed mode (only the selected
+		// models of added providers are visible anywhere). Parsed up front:
+		// the Ollama probe below depends on it.
+		const providers = parseNikaProviderConfig(config.get('providers'));
+		const providersManaged = providers !== undefined;
 		const openRouterCatalog = openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [];
 		const llamaCppBaseUrl = this._llamaCppBaseUrl();
 		const llamaCppCatalog = llamaCppBaseUrl ? await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined) : [];
-		const ollamaCatalog = await this._ollamaCatalogState(value('ollamaBaseUrl', 'http://localhost:11434'));
+		const ollamaBaseUrl = value('ollamaBaseUrl', 'http://localhost:11434');
+		// Ollama needs no secret, so it cannot be keyed on one. Probe its host
+		// only when it is actually in use: added through the provider wizard
+		// (managed mode) or given an explicit host (legacy mode / wizard in
+		// progress, where the URL is saved before the provider entry). Probing
+		// the default `localhost:11434` on every open would otherwise warn
+		// about a refused connection for setups that never run Ollama.
+		const ollamaInUse = !!providers?.ollama || config.inspect<unknown>('ollamaBaseUrl')?.globalValue !== undefined;
+		const ollamaCatalog = ollamaInUse ? await this._ollamaCatalogState(ollamaBaseUrl) : [];
 		const geminiCatalog = geminiKey ? await this._geminiCatalogState(geminiKey) : [];
 		const cursorCatalog = cursorKey ? await this._cursorCatalogState(cursorKey) : [];
+		const zaiCatalog = zaiKey ? await this._zaiCatalogState(zaiKey) : [];
 		const openAICatalog = openAIKey ? await this._openAICatalogState(openAIKey, limits) : [];
 		const anthropicCatalog = anthropicKey ? await this._anthropicCatalogState(anthropicKey, limits) : [];
 		const chatGptSubModels = this._subModelEntries('chatgpt', chatGptSubToken ? await this._chatGptSubProvider.getLiveKnownModels(chatGptSubToken, limits) : {});
 		const claudeSubModels = this._subModelEntries('claude', claudeSubToken ? this._claudeSubProvider.getKnownModels(limits) : {});
-		// Wizard-driven provider selection. Absent = legacy mode (classic
-		// key-based visibility); present = managed mode (only the selected
-		// models of added providers are visible anywhere).
-		const providers = parseNikaProviderConfig(config.get('providers'));
-		const providersManaged = providers !== undefined;
 		const nativeModelEntry = (id: NikaModelId, provider: NikaProviderId): Record<string, unknown> => {
 			const capabilities = getNikaModelCapabilities(id, limits);
 			return {
@@ -372,6 +387,7 @@ export class NikaSettingsEditor extends Disposable {
 			anthropicModels: anthropicCatalog,
 			chatgptConfigured: !!chatGptSubToken,
 			claudeConfigured: !!claudeSubToken,
+			zaiConfigured: !!zaiKey,
 			// Subscription status rows (plan type / display name) for the
 			// provider cards and the overview page.
 			chatgptStatus: { planType: chatGptSubToken?.planType, displayName: chatGptSubToken?.accountId ? `ChatGPT ${chatGptSubToken.accountId.slice(0, 6)}` : undefined },
@@ -381,8 +397,8 @@ export class NikaSettingsEditor extends Disposable {
 			// Per-provider configured flag for status pills. Legacy mode keeps
 			// the classic rules; managed mode reflects the added providers.
 			providersConfigured: providersManaged
-				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb, openai: !!providers.openai, anthropic: !!providers.anthropic, chatgpt: !!providers.chatgpt, claude: !!providers.claude }
-				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken, openai: !!openAIKey, anthropic: !!anthropicKey, chatgpt: !!chatGptSubToken, claude: !!claudeSubToken },
+				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb, openai: !!providers.openai, anthropic: !!providers.anthropic, chatgpt: !!providers.chatgpt, claude: !!providers.claude, zai: !!providers.zai }
+				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken, openai: !!openAIKey, anthropic: !!anthropicKey, chatgpt: !!chatGptSubToken, claude: !!claudeSubToken, zai: !!zaiKey },
 			// Available models per provider for the wizard's selection step.
 			// Native entries are bare ids; catalog families carry their prefix
 			// so the wizard stores exactly what the picker gates on.
@@ -400,6 +416,7 @@ export class NikaSettingsEditor extends Disposable {
 				cursor: prefixCatalog(cursorCatalog, NIKA_CURSOR_MODEL_PREFIX),
 				openai: prefixCatalog(openAICatalog, NIKA_OPENAI_MODEL_PREFIX),
 				anthropic: prefixCatalog(anthropicCatalog, NIKA_ANTHROPIC_MODEL_PREFIX),
+				zai: prefixCatalog(zaiCatalog, NIKA_ZAI_MODEL_PREFIX),
 				// The web model ids already carry their `deepseekweb/` prefix
 				// (see NikaDeepSeekWebProvider.getKnownModels), so they persist
 				// verbatim — exactly what the picker gates on.
@@ -420,7 +437,7 @@ export class NikaSettingsEditor extends Disposable {
 			// Flattened, selection-gated model list for the Models / Agents /
 			// Vision dropdowns (native + Ollama + OpenRouter + llama.cpp +
 			// Gemini catalog + Cursor + OpenAI + Anthropic).
-			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, openAICatalog, anthropicCatalog, chatGptSubModels, claudeSubModels, providers),
+			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, openAICatalog, anthropicCatalog, zaiCatalog, chatGptSubModels, claudeSubModels, providers),
 			hasOllama: true,
 			ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 			llamaCppBaseUrl,
@@ -438,7 +455,7 @@ export class NikaSettingsEditor extends Disposable {
 				visionModel: value('visionModel', 'gemini-2.5-flash'),
 				visionVSCodeModel: value('visionVSCodeModel', ''),
 				visionOpenRouterModel: value('visionOpenRouterModel', ''),
-				visionPreprocessingEnabled: value('visionPreprocessingEnabled', true),
+				visionPreprocessingMap: value<Record<string, boolean>>(NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, {}),
 				'deepseekWeb.deleteSessionsAfterVision': value('deepseekWeb.deleteSessionsAfterVision', false),
 				ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 				pdfMaxFileSizeMB: value('pdfMaxFileSizeMB', 100),
@@ -659,6 +676,39 @@ export class NikaSettingsEditor extends Disposable {
 	}
 
 	/**
+	 * Serialized Z.ai model list for the wizard and the Models section.
+	 * Mirrors {@link _openAICatalogState}: the list travels through state
+	 * because the webview CSP forbids fetch calls. A key that is invalid (or
+	 * an API outage) degrades to an empty list rather than breaking the whole
+	 * settings page. Price labels come from the static Z.ai price table.
+	 */
+	private async _zaiCatalogState(apiKey: string): Promise<unknown[]> {
+		try {
+			const catalog = await this._zaiProvider.getCatalog(apiKey);
+			return [...catalog.values()].map(model => {
+				const pricing = NIKA_ZAI_PRICES[model.id];
+				return {
+					id: model.id,
+					name: model.name,
+					contextWindow: model.contextWindow,
+					vision: model.capabilities.vision,
+					toolCalling: model.capabilities.toolCalling,
+					reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+					// Z.ai models have no reasoning-effort control.
+					efforts: [],
+					provider: 'zai',
+					priceLabel: pricing ? formatOpenRouterPriceLabel(pricing) : '',
+					free: !!pricing?.free,
+				};
+			});
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			this.log('WARN', vscode.l10n.t('Z.ai catalog unavailable: {0}', detail));
+			return [];
+		}
+	}
+
+	/**
 	 * Serialized OpenAI model list for the wizard and the Models section.
 	 * Mirrors {@link _openRouterCatalogState}: the list travels through state
 	 * because the webview CSP forbids fetch calls. A key that is invalid (or
@@ -735,7 +785,7 @@ export class NikaSettingsEditor extends Disposable {
 	 * family, capabilities (vision, effort levels), and optional
 	 * context/pricing for the catalog rows.
 	 */
-	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[], llamaCppCatalog: unknown[], ollamaCatalog: unknown[], geminiCatalog: unknown[], cursorCatalog: unknown[], openAICatalog: unknown[], anthropicCatalog: unknown[], chatGptSubModels: unknown[], claudeSubModels: unknown[], providerConfig: NikaProviderConfig | undefined): Promise<unknown[]> {
+	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[], llamaCppCatalog: unknown[], ollamaCatalog: unknown[], geminiCatalog: unknown[], cursorCatalog: unknown[], openAICatalog: unknown[], anthropicCatalog: unknown[], zaiCatalog: unknown[], chatGptSubModels: unknown[], claudeSubModels: unknown[], providerConfig: NikaProviderConfig | undefined): Promise<unknown[]> {
 		const limits = resolveNikaTokenLimits(
 			config.get<string>('contextWindow', '128K'),
 			config.get<string>('outputTokens', '8K'),
@@ -888,6 +938,27 @@ export class NikaSettingsEditor extends Disposable {
 					free: entry.free,
 				};
 			});
+		const zaiSelected = getNikaSelectedModels(providerConfig, 'zai');
+		const zaiChoices = (zaiCatalog as unknown[])
+			.filter(model => {
+				if (zaiSelected === undefined) {
+					return providerConfig === undefined;
+				}
+				return zaiSelected.includes(`${NIKA_ZAI_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number; priceLabel: string; free: boolean };
+				return {
+					id: `nika/${NIKA_ZAI_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.name,
+					provider: 'zai',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+					priceLabel: entry.priceLabel,
+					free: entry.free,
+				};
+			});
 		// The web model is static: no catalog fetch needed. Managed mode gates
 		// on the wizard selection; legacy mode shows it whenever a token
 		// exists (mirroring the classic key-based visibility rules).
@@ -931,7 +1002,7 @@ export class NikaSettingsEditor extends Disposable {
 					efforts: entry.efforts,
 				};
 			});
-		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices, ...openAIChoices, ...anthropicChoices, ...chatGptChoices, ...claudeChoices];
+		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices, ...openAIChoices, ...anthropicChoices, ...zaiChoices, ...chatGptChoices, ...claudeChoices];
 	}
 
 	private _llamaCppBaseUrl(): string {
@@ -1022,20 +1093,30 @@ export class NikaSettingsEditor extends Disposable {
 						await this._saveSetting(message.key, message.value);
 					}
 					break;
+				case 'saveVisionMapEntry':
+					if (typeof message.modelId === 'string' && message.modelId && typeof message.value === 'boolean') {
+						await this._saveVisionMapEntry(message.modelId, message.value);
+					}
+					break;
+				case 'clearVisionMapEntry':
+					if (typeof message.modelId === 'string' && message.modelId) {
+						await this._saveVisionMapEntry(message.modelId, undefined);
+					}
+					break;
 				case 'saveSecret':
-					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic') && typeof message.value === 'string') {
+					if ((message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic' || message.provider === 'zai') && typeof message.value === 'string') {
 						await this._saveSecret(message.provider, message.value);
 					}
 					break;
 				case 'removeSecret':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic' || message.provider === 'zai') {
 						await this._context.secrets.delete(SECRET_KEYS[message.provider]);
 						this._connections.delete(message.provider);
 						void vscode.window.showInformationMessage(vscode.l10n.t('{0} key removed.', providerDisplayName(message.provider)));
 					}
 					break;
 				case 'testConnection':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic' || message.provider === 'zai') {
 						await this.testConnection(message.provider);
 					}
 					break;
@@ -1175,6 +1256,24 @@ export class NikaSettingsEditor extends Disposable {
 		this.log('INFO', vscode.l10n.t('Updated {0}.', `nika.${key}`));
 	}
 
+	/**
+	 * Writes one entry of the per-model vision-preprocessing map
+	 * (`nika.visionPreprocessingMap`). A `undefined` value removes the entry
+	 * so the model falls back to its capability-based default.
+	 */
+	private async _saveVisionMapEntry(modelId: string, value: boolean | undefined): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const current = config.get<Record<string, boolean>>(NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, {}) ?? {};
+		const next: Record<string, boolean> = { ...current };
+		if (value === undefined) {
+			delete next[modelId];
+		} else {
+			next[modelId] = value;
+		}
+		await config.update(NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, next, vscode.ConfigurationTarget.Global);
+		this.log('INFO', vscode.l10n.t('Updated vision preprocessing for {0}.', modelId));
+	}
+
 	private async _setIndexingWorkspace(useWorkspace: boolean): Promise<void> {
 		const config = vscode.workspace.getConfiguration('nika');
 		const scheme = config.get<string>('indexing.scheme', 'off');
@@ -1197,7 +1296,7 @@ export class NikaSettingsEditor extends Disposable {
 		await this._indexingSchemeManager.clear();
 	}
 
-	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic', value: string): Promise<void> {
+	private async _saveSecret(provider: 'deepseek' | 'gemini' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'zai', value: string): Promise<void> {
 		const trimmed = value.trim();
 		// Local llama.cpp servers often use short tokens; any non-empty value
 		// is accepted there. Cloud providers need a real key.
@@ -1236,7 +1335,7 @@ export class NikaSettingsEditor extends Disposable {
 	 */
 	private async _legacyProviderSeed(): Promise<NikaProviderConfig> {
 		const seed: NikaProviderConfig = {};
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, zaiKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
@@ -1245,6 +1344,7 @@ export class NikaSettingsEditor extends Disposable {
 			this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET),
 			this._context.secrets.get(NIKA_OPENAI_SECRET),
 			this._context.secrets.get(NIKA_ANTHROPIC_SECRET),
+			this._context.secrets.get(NIKA_ZAI_SECRET),
 		]);
 		if (deepseekKey) {
 			seed.deepseek = { models: [...NIKA_DEEPSEEK_MODEL_IDS] };
@@ -1261,8 +1361,15 @@ export class NikaSettingsEditor extends Disposable {
 			const catalog = await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined);
 			seed.llamacpp = { models: (catalog as { id: string }[]).map(model => `${NIKA_LLAMACPP_MODEL_PREFIX}${model.id}`) };
 		}
-		const ollamaBaseUrl = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
-		const ollamaCatalog = await this._ollamaCatalogState(ollamaBaseUrl);
+		const ollamaConfig = vscode.workspace.getConfiguration('nika');
+		const ollamaBaseUrl = ollamaConfig.get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
+		// Probe only when a host is explicitly configured; otherwise seed the
+		// classic always-visible Gemma model without touching the network (a
+		// refused default-`localhost` probe would otherwise warn while saving
+		// an unrelated provider for the first time).
+		const ollamaCatalog = ollamaConfig.inspect<string>('ollamaBaseUrl')?.globalValue !== undefined
+			? await this._ollamaCatalogState(ollamaBaseUrl)
+			: [];
 		// The classic setup always exposed Gemma; seed at least that, and all
 		// pulled models when the host is reachable.
 		const ollamaModels = (ollamaCatalog as { id: string }[]).length > 0
@@ -1289,6 +1396,10 @@ export class NikaSettingsEditor extends Disposable {
 				vscode.workspace.getConfiguration('nika').get<string>('outputTokens', '8K'),
 			));
 			seed.anthropic = { models: (catalog as { id: string }[]).map(model => `${NIKA_ANTHROPIC_MODEL_PREFIX}${model.id}`) };
+		}
+		if (zaiKey) {
+			const catalog = await this._zaiCatalogState(zaiKey);
+			seed.zai = { models: (catalog as { id: string }[]).map(model => `${NIKA_ZAI_MODEL_PREFIX}${model.id}`) };
 		}
 		// Legacy mode surfaces the full static subscription catalogs whenever
 		// a sign-in is present, mirroring the classic key-based visibility.
@@ -1410,6 +1521,11 @@ export class NikaSettingsEditor extends Disposable {
 		this._connections.delete(provider);
 		if (provider === 'chatgpt' || provider === 'claude') {
 			await this._subSignOut(provider);
+		}
+		if (provider === 'ollama') {
+			// Ollama's only configuration is its host; drop it with the
+			// provider so the settings page stops probing the server.
+			await config.update('ollamaBaseUrl', undefined, vscode.ConfigurationTarget.Global);
 		}
 		void vscode.window.showInformationMessage(vscode.l10n.t('{0} removed. Its models no longer appear in chat or agents.', providerDisplayName(provider)));
 	}
@@ -1595,6 +1711,10 @@ export class NikaSettingsEditor extends Disposable {
 				const key = await this._context.secrets.get(NIKA_ANTHROPIC_SECRET);
 				if (!key) { throw new Error(vscode.l10n.t('No Anthropic key is configured.')); }
 				response = await this._fetcherService.fetch('https://api.anthropic.com/v1/models', { method: 'GET', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, callSite: 'nika-anthropic-test' });
+			} else if (provider === 'zai') {
+				const key = await this._context.secrets.get(NIKA_ZAI_SECRET);
+				if (!key) { throw new Error(vscode.l10n.t('No Z.ai key is configured.')); }
+				response = await this._fetcherService.fetch(`${ZAI_BASE_URL}/models`, { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-zai-test' });
 			} else if (provider === 'chatgpt') {
 				// A refresh round trip proves the stored token works and rotates
 				// the access token in the same pass (codex does the same).
@@ -1800,11 +1920,12 @@ ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Provide
 ${this._modelSelectRow('defaultModel', vscode.l10n.t('Default model for new chats'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL))}
 ${this._selectRow('outputTokens', vscode.l10n.t('Maximum output'), ['4K', '8K', '16K', '32K', '64K', '128K', '384K'].map(v => [v, v]))}${this._selectRow('contextWindow', vscode.l10n.t('Input context preset'), ['32K', '64K', '128K', '256K', '512K', '1M'].map(v => [v, v]))}${this._numberRow('temperature', vscode.l10n.t('Temperature'), '0', '2', '0.1')}${this._effortSelectRow('thinkingEffort', vscode.l10n.t('Default thinking effort'), state, String((state.settings as Record<string, unknown>).defaultModel ?? NIKA_RESPONSES_MODEL), String((state.settings as Record<string, unknown>).thinkingEffort ?? 'high'))}${this._selectRow('codexSpeed', vscode.l10n.t('ChatGPT request speed'), [['standard', vscode.l10n.t('Standard')], ['fast', vscode.l10n.t('Fast')]])}${this._checkboxRow('openrouterFloor', vscode.l10n.t('Use floor pricing for OpenRouter models'))}</div>
 ${(state.openrouterModels as unknown[]).length > 0 ? `<div class="card" style="min-width:0"><h2>${vscode.l10n.t('OpenRouter catalog')}</h2><p class="hint">${vscode.l10n.t('Search the full catalog and pick a default. The chat model picker always shows the complete list with live prices.')}</p><div class="controls"><input type="text" data-openrouter-filter placeholder="${vscode.l10n.t('Filter by model id or name…')}"></div><div data-openrouter-catalog style="min-width:0"></div></div>` : ''}</section>
-<section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only models. Provider credentials are managed on the Providers page.')}</p><div class="card">
-${this._checkboxRow('visionPreprocessingEnabled', vscode.l10n.t('Describe images before sending them to the model'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When on, images attached to text-only models are described by the backend below first. When off, images are sent to the model as-is: models with native vision receive them directly, while text-only models may reject them.')}</span></label></div>
+<section id="vision"><h1>${vscode.l10n.t('Vision')}</h1><p class="lead">${vscode.l10n.t('Choose the image-description backend used for text-only models, and decide per model whether the harness preprocesses images before sending them. Provider credentials are managed on the Providers page.')}</p><div class="card">
 ${this._visionBackendRow(state, String((state.settings as Record<string, unknown>).visionModel ?? 'gemini-2.5-flash'))}<div class="row"><label for="deepseekWeb.deleteSessionsAfterVision"><strong>${vscode.l10n.t('Delete DeepSeek Web sessions after each description')}</strong><span class="hint">${vscode.l10n.t('Removes the chat session from chat.deepseek.com after a successful image description, so image conversations do not linger in your DeepSeek history.')}</span></label><input id="deepseekWeb.deleteSessionsAfterVision" data-setting="deepseekWeb.deleteSessionsAfterVision" type="checkbox"></div>${this._textRow('visionVSCodeModel', vscode.l10n.t('VS Code vision model identifier'))}
 <div class="row"><label for="visionOpenRouterModel"><strong>${vscode.l10n.t('OpenRouter vision model')}</strong><span class="hint">${vscode.l10n.t('A vision-capable OpenRouter model id, e.g. google/gemini-2.5-flash.')}</span></label><input id="visionOpenRouterModel" data-setting="visionOpenRouterModel" type="text" list="openrouter-vision-models"></div><datalist id="openrouter-vision-models"></datalist>
-</div></section>
+</div>
+<div class="card"><h2>${vscode.l10n.t('Per-model vision preprocessing')}</h2><p class="hint">${vscode.l10n.t('For each model, choose whether the harness describes images with the backend above before sending them: Auto uses the model capability (native-vision models get raw images, text-only models get descriptions), Preprocess always describes first, and Native never describes.')}</p>${this._visionPerModelRows(state, (state.settings as Record<string, unknown>).visionPreprocessingMap as Record<string, boolean> | undefined)}</div>
+</section>
 <section id="pdf"><h1>${vscode.l10n.t('PDF')}</h1><p class="lead">${vscode.l10n.t('PDF limits apply only to PDF reads. Page ranges can be requested in English or Hebrew.')}</p><div class="card">${this._numberRow('pdfMaxFileSizeMB', vscode.l10n.t('Maximum PDF size (MB)'), '1', '1024', '1')}${this._numberRow('pdfMaxPages', vscode.l10n.t('Pages without an explicit range'), '1', '1000', '1')}${this._checkboxRow('pdfPageNotice', vscode.l10n.t('Show truncation notice'))}${this._checkboxRow('pdfSparseFallback', vscode.l10n.t('Use Gemini for sparse or scanned PDFs'))}${this._numberRow('pdfSparseThreshold', vscode.l10n.t('Sparse-document character threshold'), '1', '100000', '100')}</div></section>
 <section id="agents"><h1>${vscode.l10n.t('Agents')}</h1><p class="lead">${vscode.l10n.t('Assign a model and thinking effort to each built-in role. The recommended profile uses DeepSeek V4 Flash Responses for every role.')}</p><div class="card">${(['plan', 'explore', 'utility', 'utilitySmall', 'inlineChat'] as const).map(id => this._agentRow(id, ({ plan: vscode.l10n.t('Plan'), explore: vscode.l10n.t('Explore'), utility: vscode.l10n.t('Utility'), utilitySmall: vscode.l10n.t('Utility Small'), inlineChat: vscode.l10n.t('Inline Chat') } as Record<string, string>)[id], state)).join('')}</div><div class="actions"><button class="action" data-action="recommendedAgents">${vscode.l10n.t('Apply recommended mappings')}</button></div></section>
 <section id="indexing"><h1>${vscode.l10n.t('Indexing')}</h1><p class="lead">${vscode.l10n.t('Choose how Nika indexes this workspace. The default applies everywhere; a workspace-specific scheme overrides it here.')}</p><div class="card">
@@ -1825,9 +1946,9 @@ ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', 
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});const good=result?result.ok:configured;document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(good?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}
 // --- Provider wizard (Add Provider flow + provider cards) ---
-const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor',deepseekweb:'DeepSeek Web',openai:'OpenAI',anthropic:'Anthropic',chatgpt:'ChatGPT',claude:'Claude'};
-const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor','deepseekweb','openai','anthropic','chatgpt','claude'];
-const providerHints={deepseek:'Flash, Pro, Flash Vision, and Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota'};
+const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor',deepseekweb:'DeepSeek Web',openai:'OpenAI',anthropic:'Anthropic',chatgpt:'ChatGPT',claude:'Claude',zai:'Z.ai'};
+const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor','deepseekweb','openai','anthropic','chatgpt','claude','zai'];
+const providerHints={deepseek:'Flash, Pro, Flash Vision, and Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota',zai:'The GLM lineup on platform.z.ai (GLM-5.x, GLM-4.x, vision models)'};
 const providerModels=state.providerModels||{};
 const providerConfig=state.providers||{};
 const providersManaged=!!state.providersManaged;
@@ -1842,7 +1963,7 @@ function wizardState(){return (vscode.getState()||{}).wizard||null;}
 function setWizard(w){const saved=vscode.getState()||{};vscode.setState({...saved,wizard:w});}
 function modelNameFor(provider,id){
   let key=id;
-  ['deepseekweb/','gemini/','cursor/','openrouter/','ollama/','llamacpp/','openai/','anthropic/','chatgpt/','claude/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
+  ['deepseekweb/','gemini/','cursor/','openrouter/','ollama/','llamacpp/','openai/','anthropic/','chatgpt/','claude/','zai/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
   const list=providerModels[provider]||[];
   const entry=list.find(m=>m.id===key)||list.find(m=>m.id===id);
   return entry?(entry.name||key):id;
@@ -1888,7 +2009,7 @@ function wizardStepHtml(){
       html+='<div data-sub-flow="'+w.provider+'"></div>';
     }else{
       const manualHint=w.provider==='deepseekweb'?(state.isWeb?'Sign in at chat.deepseek.com in your browser, then paste your userToken here: open the browser console (F12) and run JSON.parse(localStorage.getItem("userToken")).value. Stored securely; never read back into this page.':'Sign in at chat.deepseek.com, then import your userToken: on desktop use “Import token from browser”; on web paste the value from the browser console (JSON.parse(localStorage.getItem("userToken")).value). Stored securely; never read back into this page.'):'Stored securely in Secret Storage; never read back into this page.';
-      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':manualHint)+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc(w.provider==='deepseekweb'?'Paste your userToken':'Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+      html+='<div class="row"><label><strong>'+esc(providerLabels[w.provider]+' API key')+'</strong><span class="hint">'+esc(w.provider==='cursor'?'Create a Cursor API key at cursor.com/settings/api-keys. Stored securely; never read back into this page.':w.provider==='zai'?'Create an API key at platform.z.ai. Stored securely; never read back into this page.':manualHint)+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardKey" placeholder="'+esc(w.provider==='deepseekweb'?'Paste your userToken':'Paste your API key')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
       if(w.provider==='deepseekweb'&&!state.isWeb){
         html+='<div class="actions"><button class="action secondary" data-wizard-web-signin>'+esc('Sign in in browser')+'</button><button class="action secondary" data-wizard-web-import>'+esc('Import token from browser')+'</button></div>';
       }
@@ -1897,12 +2018,13 @@ function wizardStepHtml(){
     return html;
   }
   const list=providerModels[w.provider]||[];
-  if((w.provider==='openrouter'||w.provider==='gemini'||w.provider==='cursor'||w.provider==='openai'||w.provider==='anthropic'||w.provider==='chatgpt'||w.provider==='claude')&&list.length>0){html+='<div class="controls"><input type="text" data-wizard-filter placeholder="'+esc('Filter models…')+'"></div>';}
+  if((w.provider==='openrouter'||w.provider==='gemini'||w.provider==='cursor'||w.provider==='openai'||w.provider==='anthropic'||w.provider==='chatgpt'||w.provider==='claude'||w.provider==='zai')&&list.length>0){html+='<div class="controls"><input type="text" data-wizard-filter placeholder="'+esc('Filter models…')+'"></div>';}
   if(!list.length&&w.provider==='openrouter'){html+='<p class="hint">'+esc('No catalog models available. Check that the OpenRouter key is valid.')+'</p>';}
   if(!list.length&&w.provider==='gemini'){html+='<p class="hint">'+esc('No catalog models available. Check that the Gemini API key is valid.')+'</p>';}
   if(!list.length&&w.provider==='cursor'){html+='<p class="hint">'+esc('No catalog models available. Check that the Cursor API key is valid.')+'</p>';}
   if(!list.length&&w.provider==='openai'){html+='<p class="hint">'+esc('No catalog models available. Check that the OpenAI API key is valid.')+'</p>';}
   if(!list.length&&w.provider==='anthropic'){html+='<p class="hint">'+esc('No catalog models available. Check that the Anthropic API key is valid.')+'</p>';}
+  if(!list.length&&w.provider==='zai'){html+='<p class="hint">'+esc('No catalog models available. Check that the Z.ai API key is valid.')+'</p>';}
   if(!list.length&&(w.provider==='chatgpt'||w.provider==='claude')){html+='<p class="hint">'+esc('No models available. Complete the sign-in first.')+'</p>';}
   if(!list.length&&(w.provider==='ollama'||w.provider==='llamacpp')){html+='<p class="hint">'+esc('No models found. Is the server running with models loaded? For Ollama, run ollama pull <model> to add one.')+'</p>';}
   html+='<div data-wizard-model-list></div>';
@@ -2026,6 +2148,7 @@ document.addEventListener('input',e=>{
 });
 function renderIndexing(){const i=state.indexing||{};const labels={idle:'Idle',building:'Building',indexing:'Indexing',synced:'Synced',error:'Error'};const s=i.status||'idle';document.querySelectorAll('[data-indexing-status]').forEach(el=>el.textContent=labels[s]||s);document.querySelectorAll('[data-indexing-progress]').forEach(el=>{el.textContent=(typeof i.indexedFileCount==='number'&&typeof i.totalFileCount==='number')?i.indexedFileCount+' / '+i.totalFileCount:'';});document.querySelectorAll('[data-indexing-error]').forEach(el=>{el.textContent=i.lastError||'';});document.querySelectorAll('[data-indexing-message]').forEach(el=>{el.textContent=i.message||'';});document.querySelectorAll('[data-indexing-scope]').forEach(el=>{el.textContent=i.workspaceOverride?'Workspace':'Default';});}renderIndexing();
 document.querySelectorAll('[data-setting]').forEach(el=>{const key=el.dataset.setting;if(el.type==='checkbox')el.checked=Boolean(settings[key]);else el.value=String(settings[key]??'');el.addEventListener('change',()=>{let value=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);post({type:'saveSetting',key,value});});});
+document.querySelectorAll('[data-vision-map]').forEach(el=>{const modelId=el.dataset.visionMap;el.addEventListener('change',()=>{if(el.value==='auto')post({type:'clearVisionMapEntry',modelId});else post({type:'saveVisionMapEntry',modelId,value:el.value==='preprocess'});});});
 const effortLabels={none:'None',low:'Low',medium:'Medium',high:'High',max:'Max'};
 function modelEfforts(modelId){const m=(state.modelChoices||[]).find(x=>x.id===modelId);return (m&&m.efforts)||[];}
 function refreshEffortSelect(select,modelId,currentValue){const efforts=modelEfforts(modelId);const hasCurrent=efforts.includes(currentValue);const fallback=hasCurrent?'':'<option value="'+esc(currentValue)+'">'+esc(currentValue)+'</option>';select.innerHTML=fallback+efforts.map(e=>'<option value="'+e+'">'+(effortLabels[e]||e)+'</option>').join('');select.disabled=efforts.length===0;select.value=hasCurrent?currentValue:(efforts[0]||currentValue);}
@@ -2054,7 +2177,7 @@ function renderUsage(){
   const lastProvider=u.lastProvider||'deepseek';
   if(peakEl){
     if(lastProvider==='deepseek'){const peak=u.peak;peakEl.innerHTML='<span class="peak-badge'+(peak?' peak':'')+'"><span class="dot"></span>'+(peak?'PEAK':'OFF-PEAK')+'</span>';}
-    else{const label=lastProvider==='openrouter'?'OpenRouter':lastProvider==='gemini'?'Gemini':lastProvider==='llamacpp'?'llama.cpp':lastProvider==='cursor'?'Cursor':lastProvider==='openai'?'OpenAI':lastProvider==='anthropic'?'Anthropic':lastProvider==='chatgpt'?'ChatGPT':lastProvider==='claude'?'Claude':lastProvider==='deepseekweb'?'DeepSeek Web':'Ollama';peakEl.innerHTML='<span class="peak-badge"><span class="dot"></span>'+label+'</span>';}
+    else{const label=lastProvider==='openrouter'?'OpenRouter':lastProvider==='gemini'?'Gemini':lastProvider==='llamacpp'?'llama.cpp':lastProvider==='cursor'?'Cursor':lastProvider==='openai'?'OpenAI':lastProvider==='anthropic'?'Anthropic':lastProvider==='chatgpt'?'ChatGPT':lastProvider==='claude'?'Claude':lastProvider==='deepseekweb'?'DeepSeek Web':lastProvider==='zai'?'Z.ai':'Ollama';peakEl.innerHTML='<span class="peak-badge"><span class="dot"></span>'+label+'</span>';}
   }
   renderRateCountdown();
   document.getElementById('usage-today-tokens').textContent=fmtTok(u.todayTokens);
@@ -2141,6 +2264,7 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			cursor: [vscode.l10n.t('Cursor'), vscode.l10n.t('Cursor API models billed to your Cursor account')],
 			chatgpt: [vscode.l10n.t('ChatGPT'), vscode.l10n.t('ChatGPT Plus/Pro sign-in; uses your plan quota')],
 			claude: [vscode.l10n.t('Claude'), vscode.l10n.t('Claude Pro/Max sign-in; uses your plan quota')],
+			zai: [vscode.l10n.t('Z.ai'), vscode.l10n.t('GLM models on the Z.ai platform (Zhipu)')],
 		};
 		const configured = (state.providersConfigured ?? {}) as Record<string, boolean>;
 		const ids = state.providersManaged
@@ -2167,6 +2291,7 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			case 'anthropic': return vscode.l10n.t('Anthropic');
 			case 'chatgpt': return vscode.l10n.t('ChatGPT');
 			case 'claude': return vscode.l10n.t('Claude');
+			case 'zai': return vscode.l10n.t('Z.ai');
 			default: return provider;
 		}
 	}
@@ -2252,6 +2377,27 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 	}
 
 	/**
+	 * Per-model vision-preprocessing rows. Each model in the flattened
+	 * `modelChoices` gets a three-state select: Auto (capability default),
+	 * Preprocess (always describe), Native (always send raw). Entries are
+	 * stored in `nika.visionPreprocessingMap` keyed by the bare model id (the
+	 * `nika/` display prefix is stripped for the request path).
+	 */
+	private _visionPerModelRows(state: Record<string, unknown>, map: Record<string, boolean> | undefined): string {
+		const entries = this._modelChoices(state);
+		if (entries.length === 0) {
+			return `<div class="empty">${vscode.l10n.t('No models available yet. Add a provider first.')}</div>`;
+		}
+		const current = map ?? {};
+		return entries.map(model => {
+			const bareId = model.id.replace(/^nika\//, '');
+			const value = current[bareId] === undefined ? 'auto' : current[bareId] ? 'preprocess' : 'native';
+			const providerPill = model.provider ? `<span class="pill">${this._providerLabel(model.provider)}</span>` : '';
+			return `<div class="row"><label><strong>${model.displayName}</strong><span class="hint">${bareId}</span></label><div class="controls"><select data-vision-map="${bareId}" aria-label="${vscode.l10n.t('Vision preprocessing for {0}', model.displayName)}"><option value="auto"${value === 'auto' ? ' selected' : ''}>${vscode.l10n.t('Auto')}</option><option value="preprocess"${value === 'preprocess' ? ' selected' : ''}>${vscode.l10n.t('Preprocess')}</option><option value="native"${value === 'native' ? ' selected' : ''}>${vscode.l10n.t('Native')}</option></select>${providerPill}</div></div>`;
+		}).join('');
+	}
+
+	/**
 	 * The image-description backend select. Options are the vision-capable
 	 * models fetched from the configured providers — the same lineup shown on
 	 * the Models page: native models plus the wizard-selected catalog models
@@ -2305,6 +2451,9 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 		const hasCurrentEffort = effortOptions.some(([value]) => value === currentEffort);
 		const effortFallback = hasCurrentEffort ? '' : `<option value="${currentEffort}">${currentEffort}</option>`;
 		const effortDisabled = effortOptions.length === 0 ? ' disabled' : '';
-		return `<div class="row"><label for="${modelKey}"><strong>${label}</strong></label><div class="agent-controls"><select id="${modelKey}" aria-label="${vscode.l10n.t('{0} model', label)}" data-setting="${modelKey}">${modelOptions}</select><select id="${effortKey}" aria-label="${vscode.l10n.t('{0} thinking effort', label)}" data-setting="${effortKey}"${effortDisabled}>${effortFallback}${effortOptions.map(([value, text]) => `<option value="${value}">${text}</option>`).join('')}</select></div></div>`;
+		const roleHint = role === 'utility'
+			? `<span class="hint">${vscode.l10n.t('Also the default for subagents your model spawns without a role assignment, such as background reading and other trivial work.')}</span>`
+			: '';
+		return `<div class="row"><label for="${modelKey}"><strong>${label}</strong>${roleHint}</label><div class="agent-controls"><select id="${modelKey}" aria-label="${vscode.l10n.t('{0} model', label)}" data-setting="${modelKey}">${modelOptions}</select><select id="${effortKey}" aria-label="${vscode.l10n.t('{0} thinking effort', label)}" data-setting="${effortKey}"${effortDisabled}>${effortFallback}${effortOptions.map(([value, text]) => `<option value="${value}">${text}</option>`).join('')}</select></div></div>`;
 	}
 }

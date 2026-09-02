@@ -17,6 +17,7 @@ export const NIKA_CURSOR_SECRET = 'nika.cursor.apiKey';
 export const NIKA_DEEPSEEK_WEB_SECRET = 'nika.deepseekWeb.token';
 export const NIKA_OPENAI_SECRET = 'nika.openai.apiKey';
 export const NIKA_ANTHROPIC_SECRET = 'nika.anthropic.apiKey';
+export const NIKA_ZAI_SECRET = 'nika.zai.apiKey';
 
 /**
  * Secret key holding the ChatGPT subscription (device-code OAuth) token
@@ -200,12 +201,34 @@ export const NIKA_CHATGPT_MODEL_PREFIX = 'chatgpt/';
 export const NIKA_CLAUDE_SUB_MODEL_PREFIX = 'claude/';
 
 /**
+ * Provider-group prefix for Z.ai (Zhipu GLM) catalog models contributed
+ * through the Nika provider. A model served by `api.z.ai/api/paas/v4` under
+ * raw id `glm-4.7` is exposed to the workbench as `zai/glm-4.7` (and
+ * `nika/zai/glm-4.7` once vendor-qualified).
+ */
+export const NIKA_ZAI_MODEL_PREFIX = 'zai/';
+
+/**
  * Master switch for GitHub Copilot integration. Off (the default) makes
  * NikaCode run entirely on BYOK models without a GitHub account: no sign-in
  * prompts, no Copilot utility models, no GitHub MCP server. Turn it on to
  * restore upstream Copilot behavior.
  */
 export const NIKA_GITHUB_ENABLED_CONFIG_KEY = 'nika.github.enabled';
+
+/**
+ * Per-model image-preprocessing map. Value is the key relative to the `nika`
+ * configuration section (callers use `workspace.getConfiguration('nika')`, so
+ * the full registered setting is `nika.visionPreprocessingMap`). Keys of the
+ * map are the bare (unqualified) model ids as seen by the request path
+ * (`deepseek-v4-flash`, `openrouter/<vendor>/<model>`, `llamacpp/<server-id>`, …).
+ * A boolean value overrides the per-model default: `true` = harness describes
+ * images with the vision backend first; `false` = the harness sends image
+ * parts through untouched. Absent entries fall back to the model's capability
+ * (V4 Flash Vision, Gemini, Claude, GPT-5/4o, llama.cpp/Cursor multimodal →
+ * native; text-only families → describe).
+ */
+export const NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY = 'visionPreprocessingMap';
 
 export type NikaModelId =
 	| 'deepseek-v4-flash'
@@ -222,7 +245,7 @@ export type NikaModelId =
  * The Nika provider families a user can add through the Providers wizard.
  * `gemma` (the legacy bare `gemma4:31b` id) maps to the Ollama connection.
  */
-export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude';
+export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
 
 /**
  * Per-provider model selection persisted in the `nika.providers` setting. A
@@ -318,7 +341,8 @@ export function isNikaModelId(value: string): boolean {
 		|| isNikaOpenAIModel(value)
 		|| isNikaAnthropicModel(value)
 		|| isNikaChatGptSubModel(value)
-		|| isNikaClaudeSubModel(value);
+		|| isNikaClaudeSubModel(value)
+		|| isNikaZaiModel(value);
 }
 
 /**
@@ -393,6 +417,15 @@ export function isNikaClaudeSubModel(value: string): boolean {
 }
 
 /**
+ * True for Z.ai catalog model ids exposed through the Nika provider
+ * (`zai/<model id>`). The raw id as served by `api.z.ai/api/paas/v4/models`
+ * follows the prefix, e.g. `zai/glm-4.7`.
+ */
+export function isNikaZaiModel(value: string): boolean {
+	return value.startsWith(NIKA_ZAI_MODEL_PREFIX);
+}
+
+/**
  * True for OpenRouter catalog model ids exposed through the Nika provider
  * (`openrouter/<vendor>/<model>`). The raw catalog id follows the prefix, e.g.
  * `openrouter/anthropic/claude-sonnet-4`.
@@ -441,7 +474,7 @@ export function isNikaThinkingEffort(value: unknown): value is NikaThinkingEffor
  * llama.cpp server's OpenAI-compatible endpoint; `ollama/…` ids are the
  * dynamic Ollama catalog form of the same family.
  */
-export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude';
+export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
 
 /**
  * Strips the optional `nika/` vendor prefix used in settings values (e.g.
@@ -497,6 +530,9 @@ export function getNikaModelProvider(id: string): NikaModelProvider | undefined 
 	if (isNikaClaudeSubModel(value)) {
 		return 'claude';
 	}
+	if (isNikaZaiModel(value)) {
+		return 'zai';
+	}
 	return undefined;
 }
 
@@ -527,6 +563,7 @@ export function getNikaEffortOptionsForModel(id: string): NikaThinkingEffort[] {
 		case 'deepseekweb':
 		case 'anthropic':
 		case 'claude':
+		case 'zai':
 			return [];
 		default:
 			return [];
@@ -545,7 +582,7 @@ export function parseNikaProviderConfig(value: unknown): NikaProviderConfig | un
 		return undefined;
 	}
 	const config: NikaProviderConfig = {};
-	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'cursor', 'deepseekweb', 'openai', 'anthropic', 'chatgpt', 'claude'] as const) {
+	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'cursor', 'deepseekweb', 'openai', 'anthropic', 'chatgpt', 'claude', 'zai'] as const) {
 		const entry = (value as Record<string, unknown>)[provider];
 		if (entry === undefined || entry === null || typeof entry !== 'object') {
 			continue;
