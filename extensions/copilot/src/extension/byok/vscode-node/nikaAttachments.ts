@@ -9,7 +9,6 @@ import { IFetcherService } from '../../../platform/networking/common/fetcherServ
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
 import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, getNikaModelProvider, isNikaDeepSeekVisionModel } from './nikaModels';
-import { CURSOR_BASE_URL } from './nikaCursorProvider';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
 
@@ -269,10 +268,11 @@ export class NikaAttachmentProcessor {
 					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, `${baseUrl}/v1/chat/completions`, 'nika-llamacpp-vision', 'llama.cpp', token);
 				}
 				case 'cursor': {
-					const model = raw.slice('cursor/'.length);
-					const key = await this._context.secrets.get(NIKA_CURSOR_SECRET);
-					if (!key) { throw new Error(vscode.l10n.t('Configure a Cursor key for the selected vision backend.')); }
-					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, `${CURSOR_BASE_URL}/v1/chat/completions`, 'nika-cursor-vision', 'Cursor', token);
+					// Cursor removed its OpenAI-compatible image endpoint along with
+					// chat-completions. Vision-capable Cursor models (Claude / GPT /
+					// Gemini families) accept images natively in chat, so a separate
+					// describe pass is neither possible nor needed for them.
+					throw new Error(vscode.l10n.t('Cursor models accept images natively in chat and cannot be used as a separate vision-describe backend. Pick another vision backend in Nika Settings (or attach the image to a vision-capable Cursor model).'));
 				}
 				case 'deepseekweb': {
 					// Images are uploaded to chat.deepseek.com and analyzed by the

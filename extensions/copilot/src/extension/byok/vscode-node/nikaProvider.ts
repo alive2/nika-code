@@ -1313,6 +1313,13 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				throw new Error(vscode.l10n.t('Configure a Cursor API key in Nika Settings before using this model.'));
 			}
 			const rawId = model.id.slice(NIKA_CURSOR_MODEL_PREFIX.length);
+			// Refresh the catalog so endpoint capabilities and the model's
+			// parameter schema (drives the agent request) are warm.
+			const catalog = await this._cursorProvider.getCatalog(key);
+			const entry = catalog.get(rawId);
+			const variants = entry?.variants;
+			const supportsReasoningEffort = entry?.capabilities.supportsReasoningEffort;
+			const nativeVision = entry?.capabilities.vision ?? false;
 
 			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
 			const disposeStream = this.usageTracker.trackStream(trackedProgress);
@@ -1320,14 +1327,22 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const title = extractPromptTitle(messages);
 			const workspace = currentWorkspaceName();
 			try {
-				const endpoint = this._cursorProvider.createEndpoint(rawId, key);
-				// Per-model vision preprocessing: Cursor serves frontier
-				// multimodal models that accept image parts directly, so
-				// images are preserved by default; the user can still opt into
-				// vision-backend descriptions. Only PDFs are converted.
-				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, true));
+				const endpoint = this._cursorProvider.createEndpoint(rawId, key, sessionId, variants);
+				// Per-model vision preprocessing: frontier Cursor models
+				// (Claude / GPT / Gemini) accept image parts directly, so
+				// images are preserved by default there; other families are
+				// described by the vision backend first. Only PDFs are always
+				// converted.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, nativeVision));
+				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
+				// Effort levels come from the catalog's own parameter schema;
+				// drop levels the model does not accept instead of letting the
+				// agent request fail at the API.
+				const effectiveOptions = isNikaThinkingEffort(requestedEffort) && supportsReasoningEffort?.includes(requestedEffort)
+					? { ...options, modelConfiguration: { ...options.modelConfiguration, reasoningEffort: requestedEffort } }
+					: options;
 				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
-				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
+				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, effectiveOptions, options.requestInitiator, trackedProgress, token);
 				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator });
 			} catch (error) {
 				this.usageTracker.record({

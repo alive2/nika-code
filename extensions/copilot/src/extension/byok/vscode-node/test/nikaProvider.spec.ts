@@ -913,13 +913,16 @@ describe('Nika Cursor support', () => {
 	]);
 
 	it('routes cursor models through the Cursor endpoint with native images', async () => {
-		const { provider, fakes } = createProvider({ keys: { 'nika.cursor.apiKey': 'cur-1' } });
+		const { provider, fakes } = createProvider({ keys: { 'nika.cursor.apiKey': 'cur-1' }, cursorCatalog: cursorCatalog() });
 		const model = { id: 'cursor/cursor-fast' } as NikaLanguageModelChatInformation;
 		const { messages, options, progress, token } = deepSeekRequestArgs();
 
 		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
 
-		expect(fakes.cursorProvider.createEndpoint).toHaveBeenCalledWith('cursor-fast', 'cur-1');
+		// The catalog is refreshed first so the model's parameter schema and
+		// per-model capabilities (vision here) drive the request.
+		expect(fakes.cursorProvider.getCatalog).toHaveBeenCalledWith('cur-1');
+		expect(fakes.cursorProvider.createEndpoint).toHaveBeenCalledWith('cursor-fast', 'cur-1', undefined, undefined);
 		// Cursor serves frontier multimodal models: images pass through
 		// untouched (only PDFs are converted to text).
 		expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token, { preserveImages: true });

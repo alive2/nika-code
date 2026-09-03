@@ -662,8 +662,9 @@ export class NikaSettingsEditor extends Disposable {
 				vision: model.capabilities.vision,
 				toolCalling: model.capabilities.toolCalling,
 				reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
-				// Cursor models have no reasoning-effort control.
-				efforts: [],
+				// Effort levels come from the model's own catalog parameters
+				// (e.g. `effort` low/medium/high/max on Claude Opus 5).
+				efforts: model.capabilities.supportsReasoningEffort ?? [],
 				provider: 'cursor',
 				priceLabel: '',
 				free: false,
@@ -2427,6 +2428,11 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 		const seen = new Set<string>();
 		for (const model of choices) {
 			if (!model.vision || seen.has(model.id) || (model.provider === 'deepseek' && !isNikaDeepSeekVisionModel(model.id))) {
+				continue;
+			}
+			// Cursor models accept images natively in chat but have no
+			// standalone describe endpoint, so they cannot be a backend.
+			if (model.provider === 'cursor') {
 				continue;
 			}
 			seen.add(model.id);
