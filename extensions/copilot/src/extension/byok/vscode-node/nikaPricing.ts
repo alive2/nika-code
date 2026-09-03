@@ -444,28 +444,35 @@ export function getAnthropicTokenCost(
 
 /**
  * Static Z.ai (Zhipu GLM) per-1M-token USD prices, keyed by the raw catalog
- * id as served by `api.z.ai/api/paas/v4/models`. Best-effort snapshot of
- * platform.z.ai pricing (2026-09-02); unknown ids cost $0 until added here.
- * The `-flash` entry mirrors the platform's published $0 flash tier. Cache
- * reads are 10% of the prompt price, matching the other static tables.
+ * id as served by `api.z.ai/api/paas/v4/models`. Snapshot of the platform
+ * pricing page (https://docs.z.ai/guides/overview/pricing.md, 2026-09-03);
+ * unknown ids cost $0 until added here. GLM-4.5-Flash, GLM-4.7-Flash and
+ * GLM-4.6V-Flash are free. Cache reads use the platform's published cached-
+ * input rate where listed, falling back to 10% of the prompt price (matching
+ * the other static tables) for ids the pricing page no longer carries.
  */
 export const NIKA_ZAI_PRICES: Readonly<Record<string, OpenRouterModelPricing>> = {
-	'glm-5.3': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.14, requestFee: 0, free: false },
-	'glm-5.3-flash': { promptPerMTok: 0.15, completionPerMTok: 0.5, cacheReadPerMTok: 0.015, requestFee: 0, free: false },
-	'glm-5.2': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.14, requestFee: 0, free: false },
-	'glm-5.1': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.14, requestFee: 0, free: false },
-	'glm-5': { promptPerMTok: 1, completionPerMTok: 3.2, cacheReadPerMTok: 0.1, requestFee: 0, free: false },
+	'glm-5.3': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.26, requestFee: 0, free: false },
+	'glm-5.3-flash': { promptPerMTok: 0.15, completionPerMTok: 0.5, cacheReadPerMTok: 0.03, requestFee: 0, free: false },
+	'glm-5.2': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.26, requestFee: 0, free: false },
+	'glm-5.1': { promptPerMTok: 1.4, completionPerMTok: 4.4, cacheReadPerMTok: 0.26, requestFee: 0, free: false },
+	'glm-5': { promptPerMTok: 1, completionPerMTok: 3.2, cacheReadPerMTok: 0.2, requestFee: 0, free: false },
 	'glm-5-turbo': { promptPerMTok: 1.2, completionPerMTok: 4, cacheReadPerMTok: 0.12, requestFee: 0, free: false },
 	'glm-5-code': { promptPerMTok: 1.2, completionPerMTok: 5, cacheReadPerMTok: 0.12, requestFee: 0, free: false },
-	'glm-4.7': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
-	'glm-4.7-flash': { promptPerMTok: 0.07, completionPerMTok: 0.4, cacheReadPerMTok: 0.007, requestFee: 0, free: false },
-	'glm-4.6': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
-	'glm-4.5': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
-	'glm-4.5-x': { promptPerMTok: 2.2, completionPerMTok: 8.9, cacheReadPerMTok: 0.22, requestFee: 0, free: false },
-	'glm-4.5-air': { promptPerMTok: 0.2, completionPerMTok: 1.1, cacheReadPerMTok: 0.02, requestFee: 0, free: false },
-	'glm-4.5-airx': { promptPerMTok: 1.1, completionPerMTok: 4.5, cacheReadPerMTok: 0.11, requestFee: 0, free: false },
+	'glm-4.7': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.11, requestFee: 0, free: false },
+	'glm-4.7-flash': { promptPerMTok: 0, completionPerMTok: 0, cacheReadPerMTok: 0, requestFee: 0, free: true },
+	'glm-4.7-flashx': { promptPerMTok: 0.07, completionPerMTok: 0.4, cacheReadPerMTok: 0.01, requestFee: 0, free: false },
+	'glm-4.6': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.11, requestFee: 0, free: false },
+	'glm-4.6v': { promptPerMTok: 0.3, completionPerMTok: 0.9, cacheReadPerMTok: 0.05, requestFee: 0, free: false },
+	'glm-4.6v-flash': { promptPerMTok: 0, completionPerMTok: 0, cacheReadPerMTok: 0, requestFee: 0, free: true },
+	'glm-4.6v-flashx': { promptPerMTok: 0.04, completionPerMTok: 0.4, cacheReadPerMTok: 0.004, requestFee: 0, free: false },
+	'glm-4.5': { promptPerMTok: 0.6, completionPerMTok: 2.2, cacheReadPerMTok: 0.11, requestFee: 0, free: false },
+	'glm-4.5-x': { promptPerMTok: 2.2, completionPerMTok: 8.9, cacheReadPerMTok: 0.45, requestFee: 0, free: false },
+	'glm-4.5-air': { promptPerMTok: 0.2, completionPerMTok: 1.1, cacheReadPerMTok: 0.03, requestFee: 0, free: false },
+	'glm-4.5-airx': { promptPerMTok: 1.1, completionPerMTok: 4.5, cacheReadPerMTok: 0.22, requestFee: 0, free: false },
 	'glm-4.5-flash': { promptPerMTok: 0, completionPerMTok: 0, cacheReadPerMTok: 0, requestFee: 0, free: true },
-	'glm-4.5v': { promptPerMTok: 0.6, completionPerMTok: 1.8, cacheReadPerMTok: 0.06, requestFee: 0, free: false },
+	'glm-4.5v': { promptPerMTok: 0.6, completionPerMTok: 1.8, cacheReadPerMTok: 0.11, requestFee: 0, free: false },
+	'glm-4-32B-0414-128K': { promptPerMTok: 0.1, completionPerMTok: 0.1, cacheReadPerMTok: 0, requestFee: 0, free: false },
 };
 
 /** USD cost of a Z.ai request from the static price table ($0 when unknown). */

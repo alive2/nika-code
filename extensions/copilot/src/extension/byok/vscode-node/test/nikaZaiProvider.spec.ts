@@ -5,13 +5,13 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { NikaZaiProvider, nikaZaiModelId, ZAI_BASE_URL } from '../nikaZaiProvider';
-import { OpenAIEndpoint } from '../../node/openAIEndpoint';
+import { ZaiEndpoint } from '../../node/zaiEndpoint';
 
 function catalogResponse() {
 	return {
 		data: [
 			{ id: 'glm-4.7', object: 'model', owned_by: 'zhipu' },
-			{ id: 'glm-4.5-flash', object: 'model', owned_by: 'zhipu' },
+			{ id: 'glm-5.3', object: 'model', owned_by: 'zhipu' },
 			// A release the enrichment table has not seen yet: the picker must
 			// still list it with sensible fallback capabilities.
 			{ id: 'glm-5.9', object: 'model', owned_by: 'zhipu' },
@@ -49,26 +49,64 @@ describe('NikaZaiProvider', () => {
 		const catalog = await provider.getCatalog('zai-key-1');
 
 		// Known id: enrichment sharpens the context window; the static price
-		// table adds the picker label.
+		// table adds the picker label. GLM models reason by default with a
+		// binary thinking switch, advertised as the levels `none`/`high`.
 		const glm47 = catalog.get('glm-4.7');
 		expect(glm47).toBeDefined();
 		expect(glm47!.name).toBe('glm-4.7');
 		expect(glm47!.contextWindow).toBe(200_000);
 		expect(glm47!.capabilities.toolCalling).toBe(true);
 		expect(glm47!.capabilities.vision).toBe(true); // GLM-4.7 is natively multimodal
+		expect(glm47!.capabilities.thinking).toBe(true);
+		expect(glm47!.capabilities.supportsReasoningEffort).toEqual(['none', 'high']);
+		expect(glm47!.capabilities.defaultReasoningEffort).toBe('high');
+		expect(glm47!.capabilities.reasoningEffortFormat).toBe('chat-completions');
 		expect(glm47!.capabilities.pricing).toEqual({
-			label: '$0.6/M in · $2.2/M out · cache $0.06/M',
+			label: '$0.6/M in · $2.2/M out · cache $0.11/M',
 			inputCost: 0.6,
 			outputCost: 2.2,
-			cacheCost: 0.06,
+			cacheCost: 0.11,
 		});
 		expect(glm47!.pricing).toBeDefined();
 		expect(glm47!.pricing!.free).toBe(false);
 
-		// Free model: zero-price table entry renders as Free.
+		// Forced-thinking id: only `high` is offered (thinking cannot be off).
+		const glm53 = catalog.get('glm-5.3');
+		expect(glm53!.capabilities.thinking).toBe(true);
+		expect(glm53!.capabilities.supportsReasoningEffort).toEqual(['high']);
+		expect(glm53!.capabilities.defaultReasoningEffort).toBe('high');
+
+		// Free model served outside `/models` (supplement): zero-price table
+		// entry renders as Free.
 		const free = catalog.get('glm-4.5-flash');
 		expect(free).toBeDefined();
 		expect(free!.capabilities.pricing!.label).toBe('Free');
+	});
+
+	it('merges callable models the /models endpoint omits', async () => {
+		const { provider } = createProvider({ json: { data: [{ id: 'glm-4.7', object: 'model', owned_by: 'zhipu' }] } });
+		const catalog = await provider.getCatalog('zai-key-1');
+
+		// api.z.ai serves these for chat but never lists them in /models; the
+		// picker must not hide them.
+		expect(catalog.size).toBe(10);
+		for (const id of ['glm-4.5-flash', 'glm-4.7-flash', 'glm-4.6v-flash', 'glm-4.5v', 'glm-4.6v', 'glm-4.6v-flashx', 'glm-4.7-flashx', 'glm-5-code', 'glm-4-32B-0414-128K']) {
+			expect(catalog.get(id)).toBeDefined();
+		}
+
+		const flash = catalog.get('glm-4.7-flash')!;
+		expect(flash.capabilities.vision).toBe(true);
+		expect(flash.capabilities.pricing!.label).toBe('Free');
+		const flashx = catalog.get('glm-4.7-flashx')!;
+		expect(flashx.capabilities.thinking).toBe(true);
+		expect(flashx.capabilities.pricing).toEqual({
+			label: '$0.07/M in · $0.4/M out · cache $0.01/M',
+			inputCost: 0.07,
+			outputCost: 0.4,
+			cacheCost: 0.01,
+		});
+		const legacy = catalog.get('glm-4-32B-0414-128K')!;
+		expect(legacy.capabilities.pricing!.label).toBe('$0.1/M in · $0.1/M out');
 	});
 
 	it('degrades unknown ids to fallback limits and flags future vision ids', async () => {
@@ -81,6 +119,10 @@ describe('NikaZaiProvider', () => {
 		expect(future!.capabilities.vision).toBe(false);
 		expect(future!.capabilities.pricing).toBeUndefined();
 		expect(future!.pricing).toBeUndefined();
+		// Unseen GLM generations still think (default), with the binary switch.
+		expect(future!.capabilities.thinking).toBe(true);
+		expect(future!.capabilities.supportsReasoningEffort).toEqual(['none', 'high']);
+		expect(future!.capabilities.defaultReasoningEffort).toBe('high');
 
 		// The `glm-…v` id shape marks vision models even when the table has
 		// not seen them yet; non-chat embeddings never claim vision.
@@ -126,7 +168,9 @@ describe('NikaZaiProvider', () => {
 
 		provider.createEndpoint('glm-4.7', 'zai-key-1');
 		const call = createInstance.mock.calls.at(-1)!;
-		expect(call[0]).toBe(OpenAIEndpoint);
+		// Requests route through the Z.ai endpoint, which translates the
+		// picker's thinking level into the platform's binary `thinking` field.
+		expect(call[0]).toBe(ZaiEndpoint);
 		// The wire model id is the raw catalog id (no `zai/` prefix).
 		expect((call[1] as { id: string }).id).toBe('glm-4.7');
 		expect(call[2]).toBe('zai-key-1');

@@ -694,8 +694,10 @@ export class NikaSettingsEditor extends Disposable {
 					vision: model.capabilities.vision,
 					toolCalling: model.capabilities.toolCalling,
 					reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
-					// Z.ai models have no reasoning-effort control.
-					efforts: [],
+					// Z.ai has a binary thinking switch, surfaced as the two
+					// levels `none` (thinking off) and `high` (thinking on);
+					// forced-thinking ids only carry `high`.
+					efforts: model.capabilities.supportsReasoningEffort ?? [],
 					provider: 'zai',
 					priceLabel: pricing ? formatOpenRouterPriceLabel(pricing) : '',
 					free: !!pricing?.free,

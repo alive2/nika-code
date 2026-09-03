@@ -143,8 +143,8 @@ describe('NikaUsageTracker', () => {
 		tracker.record({ provider: 'zai', model: 'glm-4.7', promptTokens: 400_000, completionTokens: 200_000, totalTokens: 600_000, cachedTokens: 100_000, reasoningTokens: 0, sessionId: 's' });
 		const event = tracker.events[0];
 		expect(event.peak).toBe(false); // Z.ai has no peak/off-peak split
-		// 0.3M miss * 0.6 + 0.1M cache * 0.06 + 0.2M out * 2.2 = 0.18 + 0.006 + 0.44
-		expect(event.cost).toBeCloseTo(0.626, 6);
+		// 0.3M miss * 0.6 + 0.1M cache * 0.11 + 0.2M out * 2.2 = 0.18 + 0.011 + 0.44
+		expect(event.cost).toBeCloseTo(0.631, 6);
 	});
 
 	it('does not record when tracking is disabled', () => {

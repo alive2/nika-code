@@ -10,7 +10,7 @@ import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { BYOKModelCapabilities, BYOKKnownModels, resolveModelInfo, resolveModelTokenLimits } from '../common/byokProvider';
 import { NIKA_PROVIDER_NAME, NIKA_ZAI_MODEL_PREFIX } from './nikaModels';
 import { formatOpenRouterPriceLabel, NIKA_ZAI_PRICES, OpenRouterModelPricing } from './nikaPricing';
-import { OpenAIEndpoint } from '../node/openAIEndpoint';
+import { ZaiEndpoint } from '../node/zaiEndpoint';
 
 /**
  * The Z.ai (Zhipu GLM) international platform host. API keys are created at
@@ -90,13 +90,19 @@ const NIKA_ZAI_KNOWN_MODELS: Readonly<Record<string, { readonly contextWindow?: 
 	'glm-4.5-air': { contextWindow: 128_000 },
 	'glm-4.5-airx': { contextWindow: 128_000 },
 	'glm-4.5-flash': { contextWindow: 128_000 },
+	// GLM-4.7-FlashX: the paid fast tier of the GLM-4.7 line, 200K context
+	// and native image input like the other GLM-4.7 members.
+	'glm-4.7-flashx': { contextWindow: 200_000, vision: true },
 	// GLM-4.5V / GLM-4.6V: vision line, 128K context.
 	'glm-4.5v': { contextWindow: 128_000, vision: true },
 	'glm-4.6v': { contextWindow: 128_000, vision: true },
 	'glm-4.6v-flash': { contextWindow: 128_000, vision: true },
+	'glm-4.6v-flashx': { contextWindow: 128_000, vision: true },
 	'glm-4v-flash': { contextWindow: 128_000, vision: true },
 	'glm-4.1v-thinking-flash': { contextWindow: 128_000, vision: true },
 	'glm-4.1v-thinking-flashx': { contextWindow: 128_000, vision: true },
+	// GLM-4-32B-0414: legacy 128K generation still served for chat.
+	'glm-4-32B-0414-128K': { contextWindow: 128_000 },
 };
 
 /**
@@ -106,6 +112,59 @@ const NIKA_ZAI_KNOWN_MODELS: Readonly<Record<string, { readonly contextWindow?: 
  */
 function isZaiVisionModel(id: string): boolean {
 	return NIKA_ZAI_KNOWN_MODELS[id]?.vision === true || /^glm[-_]?(4\.?[0-9.]*v|5v)/i.test(id);
+}
+
+/**
+ * Raw ids whose thinking cannot be turned off. The platform documents forced
+ * thinking for the GLM-5.3 pair (see docs.z.ai > Thinking Mode); for those,
+ * offering a `none` level would lie about what the API accepts.
+ */
+const ZAI_FORCED_THINKING: ReadonlySet<string> = new Set(['glm-5.3', 'glm-5.3-flash']);
+
+/**
+ * Chat model ids that api.z.ai serves but omits from `GET /models` (the
+ * catalog endpoint only advertises a subset of the platform lineup).
+ * Verified live on 2026-09-03 with an API key: the free pair return HTTP 200
+ * chat completions, GLM-4.6V-Flash answers HTTP 429 "overloaded" (free tier,
+ * model exists), and the paid entries answer HTTP 429 "insufficient balance"
+ * (model exists — the API returns "Unknown Model" HTTP 400 for ids it does
+ * not serve). Pricing follows the platform pricing page
+ * (https://docs.z.ai/guides/overview/pricing.md). The live `/models`
+ * response stays the primary source of truth; this supplement keeps the
+ * picker from hiding callable models. Drop an id here if Z.ai stops serving
+ * it (requests then fail with a clear model-not-found error and the entry
+ * can be removed).
+ */
+const ZAI_CATALOG_SUPPLEMENT: readonly string[] = [
+	// Free tier.
+	'glm-4.5-flash',
+	'glm-4.7-flash',
+	'glm-4.6v-flash',
+	// Paid tier (listed on the platform pricing page, absent from /models).
+	'glm-4.5v',
+	'glm-4.6v',
+	'glm-4.6v-flashx',
+	'glm-4.7-flashx',
+	'glm-5-code',
+	'glm-4-32B-0414-128K',
+];
+
+/**
+ * Resolve the thinking controls a raw Z.ai id accepts. GLM models reason by
+ * default and expose a binary `thinking: { type: 'enabled' | 'disabled' }`
+ * switch; there is no OpenAI-style `reasoning_effort` magnitude (the API
+ * ignores it), so the picker offers exactly two levels: `none` (thinking
+ * off) and `high` (thinking on — the platform default). Forced-thinking ids
+ * only offer `high`.
+ */
+function zaiThinkingCapabilities(id: string): Pick<BYOKModelCapabilities, 'thinking' | 'supportsReasoningEffort' | 'defaultReasoningEffort' | 'reasoningEffortFormat'> {
+	const forced = ZAI_FORCED_THINKING.has(id);
+	return {
+		thinking: true,
+		supportsReasoningEffort: forced ? ['high'] : ['none', 'high'],
+		defaultReasoningEffort: 'high',
+		reasoningEffortFormat: 'chat-completions',
+	};
 }
 
 /**
@@ -163,12 +222,14 @@ export class NikaZaiProvider extends Disposable {
 	/**
 	 * Build a chat-completions request endpoint for a raw Z.ai model id.
 	 * Capabilities resolve from the cached catalog when available so the wire
-	 * model matches the picker entry exactly.
+	 * model matches the picker entry exactly. Requests go through
+	 * {@link ZaiEndpoint}, which translates the picker's thinking selection
+	 * into the platform's binary `thinking` parameter.
 	 */
-	createEndpoint(modelId: string, apiKey: string): OpenAIEndpoint {
+	createEndpoint(modelId: string, apiKey: string): ZaiEndpoint {
 		const capabilities = this._catalogCache?.models.get(modelId)?.capabilities;
 		const modelInfo = resolveModelInfo(modelId, NIKA_PROVIDER_NAME, undefined, capabilities);
-		return this._instantiationService.createInstance(OpenAIEndpoint, modelInfo, apiKey, `${ZAI_BASE_URL}/chat/completions`);
+		return this._instantiationService.createInstance(ZaiEndpoint, modelInfo, apiKey, `${ZAI_BASE_URL}/chat/completions`);
 	}
 
 	/** Drop the cached model list (e.g. after the API key changed). */
@@ -187,14 +248,8 @@ export class NikaZaiProvider extends Disposable {
 		}
 		const body = await response.json() as { data?: unknown[] };
 		const models = new Map<string, NikaZaiCatalogModel>();
-		for (const entry of body.data ?? []) {
-			if (!entry || typeof entry !== 'object' || !('id' in entry)) {
-				continue;
-			}
-			const id = String(entry.id);
-			if (!id) {
-				continue;
-			}
+
+		const buildEntry = (id: string): NikaZaiCatalogModel => {
 			const known = NIKA_ZAI_KNOWN_MODELS[id] ?? {};
 			// The platform publishes per-generation context windows; unknown
 			// ids (new releases the enrichment table has not seen yet) fall
@@ -218,16 +273,36 @@ export class NikaZaiProvider extends Disposable {
 				// line accepts image parts natively while text-only models
 				// reject them with a clear error.
 				vision: isZaiVisionModel(id),
-				thinking: false,
+				// GLM models reason by default server-side; the binary thinking
+				// switch is mapped per request by {@link ZaiEndpoint}. Forced-
+				// thinking ids (GLM-5.3 pair) drop the `none` level.
+				...zaiThinkingCapabilities(id),
 				...(pricing ? { pricing: zaiPricingToCapabilities(pricing) } : {}),
 			};
-			models.set(id, {
+			return {
 				id,
 				name: capabilities.name,
 				capabilities,
 				pricing,
 				contextWindow: limits.contextWindow,
-			});
+			};
+		};
+
+		for (const entry of body.data ?? []) {
+			if (!entry || typeof entry !== 'object' || !('id' in entry)) {
+				continue;
+			}
+			const id = String(entry.id);
+			if (!id) {
+				continue;
+			}
+			models.set(id, buildEntry(id));
+		}
+		// Free-tier models the platform serves but leaves out of `/models`.
+		for (const id of ZAI_CATALOG_SUPPLEMENT) {
+			if (!models.has(id)) {
+				models.set(id, buildEntry(id));
+			}
 		}
 		return models;
 	}

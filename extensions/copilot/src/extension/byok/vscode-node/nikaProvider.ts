@@ -590,7 +590,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 						if (selected && !selected.includes(id)) {
 							continue;
 						}
-						const base = byokKnownModelToAPIInfo(NIKA_PROVIDER_NAME, id, model.capabilities);
+						// GLM models reason by default with a binary thinking
+						// switch (no effort magnitudes); capabilities carry the
+						// `none`/`high` levels the picker offers for it.
+						const base = byokKnownModelToAPIInfoWithEffort(NIKA_PROVIDER_NAME, id, model.capabilities);
 						entries.push({
 							...base,
 							name: model.name,
@@ -1360,6 +1363,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const entry = catalog.get(rawId);
 			const pricing = entry?.pricing;
 			const nativeVision = entry?.capabilities.vision ?? false;
+			const supportsReasoningEffort = entry?.capabilities.supportsReasoningEffort;
 
 			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
 			const disposeStream = this.usageTracker.trackStream(trackedProgress);
@@ -1373,10 +1377,16 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				// preserved by default there; text-only GLM models are described
 				// by the vision backend first. Only PDFs are always converted.
 				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, nativeVision));
+				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
+				// Z.ai offers a binary thinking switch, exposed as the levels
+				// `none` (thinking off) and `high` (thinking on); forced-
+				// thinking ids only accept `high`. Drop levels the model does
+				// not support instead of letting the request fail at the API.
+				const effectiveOptions = isNikaThinkingEffort(requestedEffort) && supportsReasoningEffort?.includes(requestedEffort)
+					? { ...options, modelConfiguration: { ...options.modelConfiguration, reasoningEffort: requestedEffort } }
+					: options;
 				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
-				// GLM models have no reasoning-effort control exposed through the
-				// Nika harness, so `options` pass through unchanged.
-				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
+				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, effectiveOptions, options.requestInitiator, trackedProgress, token);
 				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator }, pricing);
 			} catch (error) {
 				this.usageTracker.record({
