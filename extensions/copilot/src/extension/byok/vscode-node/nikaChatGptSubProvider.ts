@@ -49,13 +49,17 @@ const MIN_POLL_INTERVAL_SECONDS = 5;
 /**
  * Static catalog of ChatGPT subscription (codex backend) models exposed
  * through the Nika provider. Pinned from the codex CLI's bundled catalog
- * (`codex-rs/models-manager/models.json`, openai/codex main): the visible
- * GPT-5.6 family (Sol flagship / Terra balanced / Luna fast), GPT-5.5 and
- * GPT-5.2, plus the legacy GPT-5-Codex family the backend still accepts
- * (the CLI hides them from its picker but they keep working via `-m`).
- * Capabilities are uniform across the family.
+ * (`codex-rs/models-manager/models.json`, openai/codex main): GPT-6 Astra
+ * (the quality-first flagship the CLI now defaults to), the visible GPT-5.6
+ * family (Sol flagship / Terra balanced / Luna fast), GPT-5.5 and GPT-5.2,
+ * plus the legacy GPT-5-Codex family the backend still accepts (the CLI
+ * hides them from its picker but they keep working via `-m`). Capabilities
+ * are uniform across the family. The live `/models` catalog (fetched per
+ * account, merged over this list) stays the source of truth for models the
+ * backend advertises that are not listed here.
  */
 export const NIKA_CHATGPT_SUB_MODEL_IDS: readonly string[] = [
+	'gpt-6-astra',
 	'gpt-5.6-sol',
 	'gpt-5.6-terra',
 	'gpt-5.6-luna',
@@ -77,6 +81,7 @@ export const NIKA_CHATGPT_SUB_MODEL_IDS: readonly string[] = [
 export function resolveChatGptSubModelCapabilities(rawId: string, limits: NikaTokenLimits): BYOKModelCapabilities {
 	const displayName = rawId
 		.replace(/^gpt-/i, 'GPT-')
+		.replace(/-astra/i, ' Astra')
 		.replace(/-codex/i, ' Codex')
 		.replace(/-mini/i, ' Mini')
 		.replace(/-max/i, ' Max')

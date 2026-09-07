@@ -338,6 +338,7 @@ describe('ChatGPT subscription model catalog', () => {
 	});
 
 	it('prettifies the raw ids', () => {
+		expect(resolveChatGptSubModelCapabilities('gpt-6-astra', LIMITS).name).toBe('GPT-6 Astra');
 		expect(resolveChatGptSubModelCapabilities('gpt-5-codex-mini', LIMITS).name).toBe('GPT-5 Codex Mini');
 		expect(resolveChatGptSubModelCapabilities('gpt-5.1-codex', LIMITS).name).toBe('GPT-5.1 Codex');
 		expect(resolveChatGptSubModelCapabilities('gpt-5.1-codex-max', LIMITS).name).toBe('GPT-5.1 Codex Max');
@@ -351,6 +352,7 @@ describe('ChatGPT subscription model catalog', () => {
 	it('keys the catalog by raw id and prefixes the workbench ids', () => {
 		const catalog = chatGptSubKnownModels(LIMITS);
 		expect(Object.keys(catalog)).toEqual([
+			'gpt-6-astra',
 			'gpt-5.6-sol',
 			'gpt-5.6-terra',
 			'gpt-5.6-luna',
@@ -407,6 +409,7 @@ describe('ChatGPT subscription model catalog', () => {
 		expect(Object.keys(merged)).toEqual([
 			'gpt-5.6-sol',
 			'gpt-5.7',
+			'gpt-6-astra',
 			'gpt-5.6-terra',
 			'gpt-5.6-luna',
 			'gpt-5.5',
