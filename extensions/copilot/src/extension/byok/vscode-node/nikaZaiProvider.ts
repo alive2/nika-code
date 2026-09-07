@@ -115,11 +115,25 @@ function isZaiVisionModel(id: string): boolean {
 }
 
 /**
- * Raw ids whose thinking cannot be turned off. The platform documents forced
- * thinking for the GLM-5.3 pair (see docs.z.ai > Thinking Mode); for those,
- * offering a `none` level would lie about what the API accepts.
+ * Raw Z.ai ids that accept the OpenAI-style top-level `reasoning_effort`
+ * magnitude (GLM-5.2 and newer, see docs.z.ai > Deep Thinking). The parameter
+ * scales the reasoning depth inside the thinking chain.
+ *
+ * - GLM-5.3 / GLM-5.3-Flash use forced thinking: the API rejects
+ *   `thinking.type: 'disabled'` and accepts only `max`, `high` and `low`
+ *   (any other value errors).
+ * - GLM-5.2 additionally accepts `none` (stops thinking). Its documented
+ *   `xhigh`/`medium`/`minimal` values are aliases the platform folds into
+ *   `max`/`high`/`none`, so they are not offered.
+ *
+ * Levels are ordered low → high for the picker; `max` matches the platform
+ * default so picking nothing stays neutral.
  */
-const ZAI_FORCED_THINKING: ReadonlySet<string> = new Set(['glm-5.3', 'glm-5.3-flash']);
+const ZAI_REASONING_EFFORT_LEVELS: Readonly<Record<string, readonly string[]>> = {
+	'glm-5.3': ['low', 'high', 'max'],
+	'glm-5.3-flash': ['low', 'high', 'max'],
+	'glm-5.2': ['none', 'low', 'high', 'max'],
+};
 
 /**
  * Chat model ids that api.z.ai serves but omits from `GET /models` (the
@@ -150,18 +164,25 @@ const ZAI_CATALOG_SUPPLEMENT: readonly string[] = [
 ];
 
 /**
- * Resolve the thinking controls a raw Z.ai id accepts. GLM models reason by
- * default and expose a binary `thinking: { type: 'enabled' | 'disabled' }`
- * switch; there is no OpenAI-style `reasoning_effort` magnitude (the API
- * ignores it), so the picker offers exactly two levels: `none` (thinking
- * off) and `high` (thinking on — the platform default). Forced-thinking ids
- * only offer `high`.
+ * Resolve the thinking controls a raw Z.ai id accepts. GLM-5.2+ models
+ * advertise the native `reasoning_effort` levels they accept (see
+ * {@link ZAI_REASONING_EFFORT_LEVELS}); older generations expose only the
+ * binary `thinking: { type: 'enabled' | 'disabled' }` switch, advertised as
+ * `none` (thinking off) and `high` (thinking on — the platform default).
  */
 function zaiThinkingCapabilities(id: string): Pick<BYOKModelCapabilities, 'thinking' | 'supportsReasoningEffort' | 'defaultReasoningEffort' | 'reasoningEffortFormat'> {
-	const forced = ZAI_FORCED_THINKING.has(id);
+	const effortLevels = ZAI_REASONING_EFFORT_LEVELS[id];
+	if (effortLevels) {
+		return {
+			thinking: true,
+			supportsReasoningEffort: [...effortLevels],
+			defaultReasoningEffort: 'max',
+			reasoningEffortFormat: 'chat-completions',
+		};
+	}
 	return {
 		thinking: true,
-		supportsReasoningEffort: forced ? ['high'] : ['none', 'high'],
+		supportsReasoningEffort: ['none', 'high'],
 		defaultReasoningEffort: 'high',
 		reasoningEffortFormat: 'chat-completions',
 	};
@@ -223,8 +244,9 @@ export class NikaZaiProvider extends Disposable {
 	 * Build a chat-completions request endpoint for a raw Z.ai model id.
 	 * Capabilities resolve from the cached catalog when available so the wire
 	 * model matches the picker entry exactly. Requests go through
-	 * {@link ZaiEndpoint}, which translates the picker's thinking selection
-	 * into the platform's binary `thinking` parameter.
+	 * {@link ZaiEndpoint}, which translates the picker's thinking-effort
+	 * selection into the platform's binary `thinking` switch (older GLM
+	 * generations) or `reasoning_effort` magnitude (GLM-5.2+).
 	 */
 	createEndpoint(modelId: string, apiKey: string): ZaiEndpoint {
 		const capabilities = this._catalogCache?.models.get(modelId)?.capabilities;
@@ -273,9 +295,10 @@ export class NikaZaiProvider extends Disposable {
 				// line accepts image parts natively while text-only models
 				// reject them with a clear error.
 				vision: isZaiVisionModel(id),
-				// GLM models reason by default server-side; the binary thinking
-				// switch is mapped per request by {@link ZaiEndpoint}. Forced-
-				// thinking ids (GLM-5.3 pair) drop the `none` level.
+				// GLM models reason by default server-side; {@link ZaiEndpoint}
+				// maps the advertised levels onto the binary `thinking` switch
+				// (older generations) or the `reasoning_effort` magnitude
+				// (GLM-5.2+).
 				...zaiThinkingCapabilities(id),
 				...(pricing ? { pricing: zaiPricingToCapabilities(pricing) } : {}),
 			};

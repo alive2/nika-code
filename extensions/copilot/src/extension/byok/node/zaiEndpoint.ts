@@ -7,20 +7,28 @@ import { IChatEndpoint, ICreateEndpointBodyOptions, IEndpointBody } from '../../
 import { OpenAIEndpoint } from './openAIEndpoint';
 
 /**
- * Z.ai (Zhipu GLM) has no OpenAI-style `reasoning_effort` magnitudes: the
- * platform ignores that field entirely and exposes a binary thinking switch
- * instead — `thinking: { type: 'enabled' | 'disabled' }`. GLM-5.3 and
- * GLM-5.3-Flash force thinking on (it cannot be disabled); every other GLM
- * model thinks by default but accepts `disabled`.
+ * Z.ai (Zhipu GLM) exposes two thinking surfaces on its OpenAI-compatible
+ * `/chat/completions` endpoint:
  *
- * Nika's picker therefore advertises the levels `none` (thinking off) and
- * `high` (thinking on, the platform default) — forced-thinking models only
- * advertise `high` — and this endpoint translates the resolved level into
- * the wire parameter, then scrubs every effort field the generic
- * OpenAI-compatible base class would otherwise emit (Z.ai ignores
- * `reasoning_effort`, and some gateways reject unknown fields outright).
+ * - A binary switch — `thinking: { type: 'enabled' | 'disabled' }` — used by
+ *   older GLM generations (GLM-5.1 and below). These advertise the levels
+ *   `none` (thinking off) and `high` (thinking on).
+ * - An OpenAI-style top-level `reasoning_effort` magnitude — `max`/`high`/
+ *   `low` — accepted by GLM-5.2 and newer, alongside the switch. GLM-5.3 /
+ *   GLM-5.3-Flash force thinking on (the API rejects `disabled`), advertise
+ *   only `low`/`high`/`max`, and error on any other value; GLM-5.2 accepts
+ *   `none` as well, which stops thinking.
  *
- * See https://docs.z.ai/guides/capabilities/thinking-mode for the switch.
+ * Nika's picker advertises exactly the levels each model accepts (see the
+ * catalog in `nikaZaiProvider.ts`), and this endpoint translates the resolved
+ * level into the wire parameters. Effort-capable models keep the base class's
+ * `reasoning_effort` (declared-set validated); binary-switch models scrub
+ * every effort field the generic OpenAI-compatible base class would otherwise
+ * emit (older GLM ignores `reasoning_effort`, and some gateways reject
+ * unknown fields outright).
+ *
+ * See https://docs.z.ai/guides/capabilities/thinking-mode (switch) and
+ * https://docs.z.ai/guides/capabilities/thinking (reasoning_effort).
  */
 export class ZaiEndpoint extends OpenAIEndpoint {
 
@@ -29,20 +37,40 @@ export class ZaiEndpoint extends OpenAIEndpoint {
 	}
 
 	/**
+	 * Whether the model accepts the top-level `reasoning_effort` magnitude.
+	 * GLM-5.2+ models do (the catalog advertises their levels); binary-switch
+	 * generations advertise subsets of `none`/`high`, which never include
+	 * `max`, so the declared level set itself is the discriminator.
+	 */
+	private _supportsReasoningEffort(): boolean {
+		return (this.supportsReasoningEffort ?? []).includes('max');
+	}
+
+	/**
+	 * The thinking-effort selection for this request: the per-request model
+	 * picker value wins, then the global Nika thinking-effort setting. No
+	 * selection at all yields `undefined`, which leaves the wire param to the
+	 * platform default (GLM servers default to their deepest reasoning).
+	 */
+	private _requestedEffort(options: ICreateEndpointBodyOptions): string | undefined {
+		return options.modelCapabilities?.reasoningEffort
+			?? this._configurationService.getNonExtensionConfig<string>('nika.thinkingEffort');
+	}
+
+	/**
 	 * Resolve whether the request should run with thinking enabled. The
 	 * per-request selection (model picker) wins; otherwise fall back to the
 	 * Nika thinking effort setting so the global "thinking off" intent is
-	 * honored. Anything other than `none` maps to thinking on, and models
-	 * that never advertise `none` (forced thinking) stay enabled regardless.
+	 * honored. Only `none` turns thinking off, and only on models that
+	 * advertise it — forced-thinking models (GLM-5.3 pair) never do and stay
+	 * enabled regardless.
 	 */
 	private _thinkingEnabled(options: ICreateEndpointBodyOptions): boolean {
 		const declared = this.supportsReasoningEffort ?? [];
 		if (declared.length === 0) {
 			return true;
 		}
-		const requested = options.modelCapabilities?.reasoningEffort
-			?? this._configurationService.getNonExtensionConfig<string>('nika.thinkingEffort')
-			?? 'high';
+		const requested = this._requestedEffort(options);
 		return !(requested === 'none' && declared.includes('none'));
 	}
 
@@ -68,14 +96,36 @@ export class ZaiEndpoint extends OpenAIEndpoint {
 		// thinking is disabled, so restore it there from the Nika setting.
 		const thinkingDisabled = body.thinking?.type === 'disabled';
 		body.temperature = thinkingDisabled ? (this._configurationService.getNonExtensionConfig<number>('nika.temperature') ?? 0.7) : undefined;
-		// Z.ai ignores reasoning_effort; keep the wire clean and unambiguous.
-		body.reasoning_effort = undefined;
+		if (!this._supportsReasoningEffort()) {
+			// Binary-switch GLM generations ignore reasoning_effort; scrub it
+			// here again so nothing leaks past {@link _applyZaiThinking}.
+			body.reasoning_effort = undefined;
+		}
 		body.reasoning = undefined;
 	}
 
 	private _applyZaiThinking(body: IEndpointBody, options: ICreateEndpointBodyOptions): void {
 		const thinkingDisabled = !this._thinkingEnabled(options);
 		body.thinking = { type: thinkingDisabled ? 'disabled' : 'enabled' };
+		if (this._supportsReasoningEffort()) {
+			// GLM-5.2+ accepts the effort magnitude alongside the switch; keep
+			// whatever the base class already validated against the declared
+			// levels (override setting or per-request selection) and otherwise
+			// honor the Nika effort setting. While thinking is off the
+			// magnitude is meaningless, so drop it.
+			if (thinkingDisabled) {
+				body.reasoning_effort = undefined;
+			} else if (body.reasoning_effort === undefined) {
+				const requested = this._requestedEffort(options);
+				if (requested && this.supportsReasoningEffort!.includes(requested)) {
+					body.reasoning_effort = requested;
+				}
+			}
+			body.reasoning = undefined;
+			return;
+		}
+		// Older GLM generations reason only through the binary switch and
+		// ignore reasoning_effort; keep the wire clean and unambiguous.
 		body.reasoning_effort = undefined;
 		body.reasoning = undefined;
 	}

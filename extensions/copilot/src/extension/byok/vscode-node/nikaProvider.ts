@@ -1393,10 +1393,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 				// by the vision backend first. Only PDFs are always converted.
 				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, nativeVision));
 				const requestedEffort = options.modelOptions?._nikaThinkingEffort;
-				// Z.ai offers a binary thinking switch, exposed as the levels
-				// `none` (thinking off) and `high` (thinking on); forced-
-				// thinking ids only accept `high`. Drop levels the model does
-				// not support instead of letting the request fail at the API.
+				// Z.ai thinking controls are per-model: older GLM generations
+				// expose a binary switch (`none`/`high`), while GLM-5.2+ accept
+				// `reasoning_effort` levels (`low`/`high`/`max` — `none` only
+				// where thinking is not forced). Drop levels the model does not
+				// support instead of letting the request fail at the API.
 				const effectiveOptions = isNikaThinkingEffort(requestedEffort) && supportsReasoningEffort?.includes(requestedEffort)
 					? { ...options, modelConfiguration: { ...options.modelConfiguration, reasoningEffort: requestedEffort } }
 					: options;

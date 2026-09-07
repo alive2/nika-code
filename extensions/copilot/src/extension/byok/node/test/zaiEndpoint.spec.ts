@@ -71,17 +71,71 @@ describe('ZaiEndpoint', () => {
 
 	afterEach(() => disposables.clear());
 
-	it.each(['low', 'high', 'max'])('maps %s thinking to the enabled wire switch', effort => {
+	it.each(['low', 'high', 'max'])('maps %s thinking to the enabled wire switch on binary-switch models', effort => {
 		const endpoint = zaiEndpoint(instantiationService, 'glm-4.7', ['none', 'high']);
 		const body = endpoint.createRequestBody(options(effort));
 		endpoint.interceptBody(body);
 		expect(body.thinking).toEqual({ type: 'enabled' });
-		// Z.ai ignores reasoning_effort; it must never reach the wire.
+		// Older GLM generations ignore reasoning_effort; it must never reach the wire.
 		expect(body.reasoning_effort).toBeUndefined();
 		expect(body.reasoning).toBeUndefined();
 		expect(body.max_tokens).toBe(8_000);
 		expect(body.max_completion_tokens).toBeUndefined();
 		expect(body.temperature).toBeUndefined();
+	});
+
+	it.each(['low', 'high', 'max'])('sends %s as reasoning_effort on effort-capable models', effort => {
+		const endpoint = zaiEndpoint(instantiationService, 'glm-5.3-flash', ['low', 'high', 'max']);
+		const body = endpoint.createRequestBody(options(effort));
+		endpoint.interceptBody(body);
+		expect(body.thinking).toEqual({ type: 'enabled' });
+		// GLM-5.3 / GLM-5.3-Flash accept the top-level magnitude and keep it.
+		expect(body.reasoning_effort).toBe(effort);
+		expect(body.reasoning).toBeUndefined();
+		expect(body.max_tokens).toBe(8_000);
+		expect(body.max_completion_tokens).toBeUndefined();
+		expect(body.temperature).toBeUndefined();
+	});
+
+	it('drops reasoning_effort when thinking is off on effort-capable models', () => {
+		// GLM-5.2 understands the magnitude but still accepts `none` (off).
+		const endpoint = zaiEndpoint(instantiationService, 'glm-5.2', ['none', 'low', 'high', 'max']);
+		const body = endpoint.createRequestBody(options('none'));
+		endpoint.interceptBody(body);
+		expect(body.thinking).toEqual({ type: 'disabled' });
+		expect(body.reasoning_effort).toBeUndefined();
+		expect(body.temperature).toBe(0.7);
+	});
+
+	it('keeps forced-thinking ids enabled even for none', () => {
+		// GLM-5.3 / GLM-5.3-Flash cannot disable thinking and only accept
+		// low/high/max; the wire must never carry a disabled switch nor an
+		// out-of-list magnitude.
+		const endpoint = zaiEndpoint(instantiationService, 'glm-5.3', ['low', 'high', 'max']);
+		const body = endpoint.createRequestBody(options('none'));
+		endpoint.interceptBody(body);
+		expect(body.thinking).toEqual({ type: 'enabled' });
+		expect(body.reasoning_effort).toBeUndefined();
+		expect(body.temperature).toBeUndefined();
+	});
+
+	it('falls back to the Nika thinking effort setting for effort-capable models', () => {
+		const noSelection = { ...options('high'), modelCapabilities: undefined };
+		const endpoint = zaiEndpoint(instantiationService, 'glm-5.3-flash', ['low', 'high', 'max']);
+
+		thinkingEffortSetting = 'max';
+		let body = endpoint.createRequestBody(noSelection);
+		endpoint.interceptBody(body);
+		expect(body.thinking).toEqual({ type: 'enabled' });
+		expect(body.reasoning_effort).toBe('max');
+
+		// An out-of-list global value (e.g. a DeepSeek-only level) is dropped
+		// rather than sent — the platform default then applies.
+		thinkingEffortSetting = 'ultra';
+		body = endpoint.createRequestBody(noSelection);
+		endpoint.interceptBody(body);
+		expect(body.thinking).toEqual({ type: 'enabled' });
+		expect(body.reasoning_effort).toBeUndefined();
 	});
 
 	it('maps none to a disabled thinking switch with configured temperature', () => {
@@ -93,17 +147,6 @@ describe('ZaiEndpoint', () => {
 		// GLM only accepts temperature while thinking is off.
 		expect(body.temperature).toBe(0.7);
 		expect(body.max_tokens).toBe(8_000);
-	});
-
-	it('keeps forced-thinking ids enabled even for none', () => {
-		// GLM-5.3 / GLM-5.3-Flash cannot disable thinking; the catalog only
-		// advertises `high` for them, and `none` must not leak through.
-		const endpoint = zaiEndpoint(instantiationService, 'glm-5.3', ['high']);
-		const body = endpoint.createRequestBody(options('none'));
-		endpoint.interceptBody(body);
-		expect(body.thinking).toEqual({ type: 'enabled' });
-		expect(body.reasoning_effort).toBeUndefined();
-		expect(body.temperature).toBeUndefined();
 	});
 
 	it('falls back to the Nika thinking effort setting when no level is selected', () => {

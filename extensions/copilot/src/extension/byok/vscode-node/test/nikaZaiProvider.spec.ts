@@ -11,6 +11,7 @@ function catalogResponse() {
 	return {
 		data: [
 			{ id: 'glm-4.7', object: 'model', owned_by: 'zhipu' },
+			{ id: 'glm-5.2', object: 'model', owned_by: 'zhipu' },
 			{ id: 'glm-5.3', object: 'model', owned_by: 'zhipu' },
 			// A release the enrichment table has not seen yet: the picker must
 			// still list it with sensible fallback capabilities.
@@ -48,9 +49,8 @@ describe('NikaZaiProvider', () => {
 		const { provider } = createProvider();
 		const catalog = await provider.getCatalog('zai-key-1');
 
-		// Known id: enrichment sharpens the context window; the static price
-		// table adds the picker label. GLM models reason by default with a
-		// binary thinking switch, advertised as the levels `none`/`high`.
+		// Older GLM generations (below GLM-5.2) reason with the binary switch,
+		// advertised as the levels `none`/`high`.
 		const glm47 = catalog.get('glm-4.7');
 		expect(glm47).toBeDefined();
 		expect(glm47!.name).toBe('glm-4.7');
@@ -70,11 +70,20 @@ describe('NikaZaiProvider', () => {
 		expect(glm47!.pricing).toBeDefined();
 		expect(glm47!.pricing!.free).toBe(false);
 
-		// Forced-thinking id: only `high` is offered (thinking cannot be off).
+		// GLM-5.2 reasons with the native `reasoning_effort` magnitude and may
+		// still switch thinking off entirely.
+		const glm52 = catalog.get('glm-5.2');
+		expect(glm52).toBeDefined();
+		expect(glm52!.contextWindow).toBe(1_000_000);
+		expect(glm52!.capabilities.supportsReasoningEffort).toEqual(['none', 'low', 'high', 'max']);
+		expect(glm52!.capabilities.defaultReasoningEffort).toBe('max');
+
+		// Forced-thinking id with native reasoning effort: the GLM-5.3 pair
+		// cannot disable thinking, so only `low`/`high`/`max` are offered.
 		const glm53 = catalog.get('glm-5.3');
 		expect(glm53!.capabilities.thinking).toBe(true);
-		expect(glm53!.capabilities.supportsReasoningEffort).toEqual(['high']);
-		expect(glm53!.capabilities.defaultReasoningEffort).toBe('high');
+		expect(glm53!.capabilities.supportsReasoningEffort).toEqual(['low', 'high', 'max']);
+		expect(glm53!.capabilities.defaultReasoningEffort).toBe('max');
 
 		// Free model served outside `/models` (supplement): zero-price table
 		// entry renders as Free.
