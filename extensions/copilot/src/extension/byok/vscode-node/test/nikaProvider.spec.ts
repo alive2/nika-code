@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { CopilotLanguageModelWrapper } from '../../../conversation/vscode-node/languageModelAccess';
 import { DeepSeekEndpoint } from '../../node/deepSeekEndpoint';
@@ -54,7 +54,7 @@ vi.mock('vscode', async (importOriginal) => {
 		LanguageModelToolInformation: class LanguageModelToolInformation { },
 		workspace: {
 			getConfiguration: vi.fn(() => ({
-				get: (key: string, fallback: unknown) => key === 'openrouterFloor' ? floorEnabled : key === 'providers' ? providersConfig : key === 'sglang.servers' ? sglangServersConfig : fallback,
+				get: (key: string, fallback: unknown) => key === 'openrouterFloor' ? floorEnabled : key === 'providers' ? providersConfig : key === 'sglang.servers' ? sglangServersConfig : key === 'llamacpp.servers' ? llamaCppServersConfig : key === 'ollama.servers' ? ollamaServersConfig : fallback,
 				inspect: (_key: string) => undefined,
 			})),
 			onDidChangeConfiguration: configurationChange.event,
@@ -77,6 +77,8 @@ vi.mock('vscode', async (importOriginal) => {
 let floorEnabled = false;
 let providersConfig: unknown;
 let sglangServersConfig: unknown;
+let llamaCppServersConfig: unknown;
+let ollamaServersConfig: unknown;
 
 function createByokStorage() {
 	return {
@@ -434,14 +436,25 @@ describe('NikaLMProvider', () => {
 	});
 
 	it('still routes non-DeepSeek models to the Ollama fallback', async () => {
-		const { provider, fakes } = createProvider();
-		const model = { id: 'gemma4:31b' } as NikaLanguageModelChatInformation;
-		const { messages, options, progress, token } = deepSeekRequestArgs();
+		// The legacy bare Gemma id has no server segment: it is served by the
+		// first registered Ollama host.
+		ollamaServersConfig = [{ id: 'box1', label: 'Local', baseUrl: 'http://localhost:11434' }];
+		try {
+			const { provider, fakes } = createProvider();
+			const model = { id: 'gemma4:31b' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
 
-		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
 
-		expect(fakes.lmWrapper.provideLanguageModelResponse).not.toHaveBeenCalled();
-		expect(fakes.ollamaProvider.provideLanguageModelChatResponse).toHaveBeenCalledTimes(1);
+			expect(fakes.lmWrapper.provideLanguageModelResponse).not.toHaveBeenCalled();
+			expect(fakes.ollamaProvider.provideLanguageModelChatResponse).toHaveBeenCalledTimes(1);
+			expect(fakes.ollamaProvider.provideLanguageModelChatResponse).toHaveBeenCalledWith(
+				expect.objectContaining({ url: 'http://localhost:11434' }),
+				messages, options, progress, token,
+			);
+		} finally {
+			ollamaServersConfig = undefined;
+		}
 	});
 
 	it('throws for unknown Nika model ids', async () => {
@@ -581,9 +594,16 @@ describe('Nika OpenRouter support', () => {
 });
 
 describe('Nika llama.cpp support', () => {
-	it('routes llamacpp models through the llama.cpp endpoint with native images', async () => {
+	beforeEach(() => {
+		llamaCppServersConfig = [{ id: 'box1', label: 'GPU 1', baseUrl: 'http://localhost:8080' }];
+	});
+	afterEach(() => {
+		llamaCppServersConfig = undefined;
+	});
+
+	it('routes llamacpp models through the owning server endpoint with native images', async () => {
 		const { provider, fakes } = createProvider();
-		const model = { id: 'llamacpp/qwen2.5vl-7b' } as NikaLanguageModelChatInformation;
+		const model = { id: 'llamacpp/box1/qwen2.5vl-7b' } as NikaLanguageModelChatInformation;
 		const { messages, options, progress, token } = deepSeekRequestArgs();
 
 		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
@@ -598,7 +618,7 @@ describe('Nika llama.cpp support', () => {
 
 	it('creates an unauthenticated endpoint when no llama.cpp key is configured', async () => {
 		const { provider, fakes } = createProvider({ keys: { 'nika.llamacpp.apiKey': undefined } });
-		const model = { id: 'llamacpp/llama-3.2-3b' } as NikaLanguageModelChatInformation;
+		const model = { id: 'llamacpp/box1/llama-3.2-3b' } as NikaLanguageModelChatInformation;
 		const { messages, options, progress, token } = deepSeekRequestArgs();
 
 		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
@@ -607,55 +627,89 @@ describe('Nika llama.cpp support', () => {
 		expect(fakes.lmWrapper.provideLanguageModelResponse).toHaveBeenCalledTimes(1);
 	});
 
+	it('prefers a per-server key over the legacy shared llama.cpp key', async () => {
+		const { provider, fakes } = createProvider({ keys: { 'nika.llamacpp.apiKey': 'shared-key', 'nika.llamacpp.box1.apiKey': 'server-key' } });
+		const model = { id: 'llamacpp/box1/qwen2.5vl-7b' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+		expect(fakes.llamaCppProvider.createEndpoint).toHaveBeenCalledWith('qwen2.5vl-7b', 'http://localhost:8080', 'server-key');
+	});
+
 	it('records usage with the llamacpp provider (no pricing snapshot)', async () => {
 		const { provider, fakes } = createProvider();
 		fakes.lmWrapper.provideLanguageModelResponse.mockImplementation(async (_endpoint, _messages, _options, _initiator, progress) => {
 			progress.report(new vscode.LanguageModelDataPart(new TextEncoder().encode(JSON.stringify({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 })), CustomDataPartMimeTypes.Usage));
 		});
-		const model = { id: 'llamacpp/qwen2.5vl-7b' } as NikaLanguageModelChatInformation;
+		const model = { id: 'llamacpp/box1/qwen2.5vl-7b' } as NikaLanguageModelChatInformation;
 		const { messages, options, progress, token } = deepSeekRequestArgs();
 
 		await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
 
 		expect(provider.usageTracker.record).toHaveBeenCalledWith(expect.objectContaining({
-			model: 'llamacpp/qwen2.5vl-7b',
+			model: 'llamacpp/box1/qwen2.5vl-7b',
 			provider: 'llamacpp',
 			promptTokens: 10,
 			completionTokens: 5,
 		}));
 	});
 
-	it('appends llama.cpp server models to the model list when the server responds', async () => {
-		const { provider, fakes } = createProvider();
-		vi.mocked(fakes.llamaCppProvider.getCatalog).mockResolvedValue(new Map([[
-			'qwen2.5vl-7b',
-			{ id: 'qwen2.5vl-7b', name: 'qwen2.5vl-7b', contextWindow: 32768, capabilities: { name: 'qwen2.5vl-7b', toolCalling: true, vision: true, maxInputTokens: 28672, maxOutputTokens: 4096, contextWindow: 32768 } },
+	it('appends every registered server catalog under its own id segment', async () => {
+		llamaCppServersConfig = [
+			{ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:8080' },
+			{ id: 'box2', label: 'GPU 2', baseUrl: 'http://10.0.0.6:8080' },
+		];
+		const { provider, fakes } = createProvider({ keys: { 'nika.llamacpp.box1.apiKey': 'key-one' } });
+		vi.mocked(fakes.llamaCppProvider.getCatalog).mockImplementation(async (baseUrl: string) => new Map([[
+			baseUrl.includes('10.0.0.5') ? 'qwen2.5vl-7b' : 'llama-3.2-3b',
+			{ id: 'x', name: 'x', contextWindow: 32768, capabilities: { name: 'x', toolCalling: true, vision: true, maxInputTokens: 28672, maxOutputTokens: 4096, contextWindow: 32768 } },
 		]]) as never);
 
 		const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
 
-		expect(fakes.llamaCppProvider.getCatalog).toHaveBeenCalledWith('http://localhost:8080', 'test-key');
-		const llamaIds = models.filter(m => m.id.startsWith('llamacpp/'));
-		expect(llamaIds).toHaveLength(1);
-		expect(llamaIds[0].id).toBe('llamacpp/qwen2.5vl-7b');
-		expect(llamaIds[0].name).toBe('qwen2.5vl-7b');
-		expect(llamaIds[0].detail).toBe('Nika');
-		expect(llamaIds[0].isBYOK).toBe(true);
-		expect(llamaIds[0].capabilities.toolCalling).toBe(true);
-		// llama.cpp models accept images natively, so the picker entry must
-		// advertise image input (no vision-backend preprocessing happens).
-		expect(llamaIds[0].capabilities.imageInput).toBe(true);
-		expect(llamaIds[0].statusIcon).toBeDefined();
+		// Each server is fetched with its own key (box2 has none).
+		expect(fakes.llamaCppProvider.getCatalog).toHaveBeenCalledWith('http://10.0.0.5:8080', 'key-one');
+		expect(fakes.llamaCppProvider.getCatalog).toHaveBeenCalledWith('http://10.0.0.6:8080', undefined);
+		const llamaIds = models.filter(m => m.id.startsWith('llamacpp/')).map(m => m.id).sort();
+		expect(llamaIds).toEqual(['llamacpp/box1/qwen2.5vl-7b', 'llamacpp/box2/llama-3.2-3b']);
 	});
 
-	it('still lists models when the llama.cpp server is unreachable', async () => {
+	it('keeps one unreachable server from hiding the others', async () => {
+		llamaCppServersConfig = [
+			{ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:8080' },
+			{ id: 'box2', label: 'GPU 2', baseUrl: 'http://10.0.0.6:8080' },
+		];
 		const { provider, fakes } = createProvider();
-		vi.mocked(fakes.llamaCppProvider.getCatalog).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+		vi.mocked(fakes.llamaCppProvider.getCatalog).mockImplementation(async (baseUrl: string) => {
+			if (baseUrl.includes('10.0.0.5')) {
+				throw new Error('ECONNREFUSED');
+			}
+			return new Map([['llama-3.2-3b', { id: 'llama-3.2-3b', name: 'llama-3.2-3b', contextWindow: 32768, capabilities: { name: 'llama-3.2-3b', toolCalling: true, vision: true, maxInputTokens: 28672, maxOutputTokens: 4096, contextWindow: 32768 } }]]) as never;
+		});
 
 		const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
 
-		expect(models.length).toBeGreaterThan(0);
+		expect(models.filter(m => m.id.startsWith('llamacpp/')).map(m => m.id)).toEqual(['llamacpp/box2/llama-3.2-3b']);
+	});
+
+	it('lists no llama.cpp models when no server is registered', async () => {
+		llamaCppServersConfig = undefined;
+		const { provider, fakes } = createProvider();
+
+		const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+		expect(fakes.llamaCppProvider.getCatalog).not.toHaveBeenCalled();
 		expect(models.filter(m => m.id.startsWith('llamacpp/'))).toHaveLength(0);
+	});
+
+	it('rejects a request for a model whose server was removed', async () => {
+		llamaCppServersConfig = [{ id: 'box1', baseUrl: 'http://localhost:8080' }];
+		const { provider } = createProvider();
+		const model = { id: 'llamacpp/gone/qwen2.5vl-7b' } as NikaLanguageModelChatInformation;
+		const { messages, options, progress, token } = deepSeekRequestArgs();
+
+		await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow(/no longer configured/);
 	});
 });
 
@@ -928,7 +982,8 @@ describe('Nika provider-config gating (nika.providers)', () => {
 	});
 
 	it('pulls the wizard-selected Ollama models from the dynamic /api/tags catalog', async () => {
-		providersConfig = { ollama: { models: ['ollama/gemma4:31b', 'ollama/qwen3:8b'] } };
+		providersConfig = { ollama: { models: ['ollama/box1/gemma4:31b', 'ollama/box1/qwen3:8b'] } };
+		ollamaServersConfig = [{ id: 'box1', label: 'Local', baseUrl: 'http://localhost:11434' }];
 		try {
 			const fetcher = { fetch: vi.fn().mockResolvedValue({
 				ok: true,
@@ -939,9 +994,9 @@ describe('Nika provider-config gating (nika.providers)', () => {
 
 			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
 
-			expect(fetcher.fetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', { method: 'GET', callSite: 'nika-ollama-tags' });
+			expect(fetcher.fetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', { method: 'GET', headers: { Authorization: 'Bearer test-key' }, callSite: 'nika-ollama-tags' });
 			const ollamaIds = models.filter(m => m.id.startsWith('ollama/'));
-			expect(ollamaIds.map(m => m.id).sort()).toEqual(['ollama/gemma4:31b', 'ollama/qwen3:8b']);
+			expect(ollamaIds.map(m => m.id).sort()).toEqual(['ollama/box1/gemma4:31b', 'ollama/box1/qwen3:8b']);
 			expect(ollamaIds[0].name).toBe('gemma4:31b');
 			expect(ollamaIds[0].detail).toBe('Nika');
 			expect(ollamaIds[0].isBYOK).toBe(true);
@@ -950,11 +1005,60 @@ describe('Nika provider-config gating (nika.providers)', () => {
 			expect(ollamaIds[0].statusIcon).toBeDefined();
 		} finally {
 			providersConfig = undefined;
+			ollamaServersConfig = undefined;
+		}
+	});
+
+	it('lists every registered Ollama host under its own id segment', async () => {
+		providersConfig = { ollama: { models: ['ollama/box1/gemma4:31b', 'ollama/box2/qwen3:8b'] } };
+		ollamaServersConfig = [
+			{ id: 'box1', label: 'Local', baseUrl: 'http://localhost:11434' },
+			{ id: 'box2', label: 'Remote', baseUrl: 'http://10.0.0.9:11434' },
+		];
+		try {
+			const fetcher = { fetch: vi.fn().mockImplementation(async (url: string) => ({
+				ok: true,
+				status: 200,
+				json: async () => ({ models: url.includes('10.0.0.9') ? [{ name: 'qwen3:8b' }] : [{ name: 'gemma4:31b' }] }),
+			})) };
+			const { provider } = createProvider({ fetcher });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(models.filter(m => m.id.startsWith('ollama/')).map(m => m.id).sort()).toEqual(['ollama/box1/gemma4:31b', 'ollama/box2/qwen3:8b']);
+		} finally {
+			providersConfig = undefined;
+			ollamaServersConfig = undefined;
+		}
+	});
+
+	it('keeps one unreachable Ollama host from hiding the others', async () => {
+		providersConfig = { ollama: { models: ['ollama/box1/gemma4:31b', 'ollama/box2/qwen3:8b'] } };
+		ollamaServersConfig = [
+			{ id: 'box1', label: 'Local', baseUrl: 'http://localhost:11434' },
+			{ id: 'box2', label: 'Remote', baseUrl: 'http://10.0.0.9:11434' },
+		];
+		try {
+			const fetcher = { fetch: vi.fn().mockImplementation(async (url: string) => {
+				if (url.includes('10.0.0.9')) {
+					throw new Error('ECONNREFUSED');
+				}
+				return { ok: true, status: 200, json: async () => ({ models: [{ name: 'gemma4:31b' }] }) };
+			}) };
+			const { provider } = createProvider({ fetcher });
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(models.filter(m => m.id.startsWith('ollama/')).map(m => m.id)).toEqual(['ollama/box1/gemma4:31b']);
+		} finally {
+			providersConfig = undefined;
+			ollamaServersConfig = undefined;
 		}
 	});
 
 	it('keeps listing models when the Ollama host is unreachable in managed mode', async () => {
-		providersConfig = { deepseek: { models: ['deepseek-v4-flash'] }, ollama: { models: ['ollama/gemma4:31b'] } };
+		providersConfig = { deepseek: { models: ['deepseek-v4-flash'] }, ollama: { models: ['ollama/box1/gemma4:31b'] } };
+		ollamaServersConfig = [{ id: 'box1', baseUrl: 'http://localhost:11434' }];
 		try {
 			const fetcher = { fetch: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) };
 			const { provider } = createProvider({ keys: { 'nika.deepseek.apiKey': 'ds' }, fetcher });
@@ -964,6 +1068,7 @@ describe('Nika provider-config gating (nika.providers)', () => {
 			expect(models.map(m => m.id)).toEqual(['deepseek-v4-flash']);
 		} finally {
 			providersConfig = undefined;
+			ollamaServersConfig = undefined;
 		}
 	});
 
@@ -1050,7 +1155,8 @@ describe('Nika provider-config gating (nika.providers)', () => {
 	});
 
 	it('rejects the legacy bare Gemma id in managed mode (it is not in any selection)', async () => {
-		providersConfig = { ollama: { models: ['ollama/gemma4:31b'] } };
+		providersConfig = { ollama: { models: ['ollama/box1/gemma4:31b'] } };
+		ollamaServersConfig = [{ id: 'box1', baseUrl: 'http://localhost:11434' }];
 		try {
 			const { provider, fakes } = createProvider();
 			const model = { id: 'gemma4:31b' } as NikaLanguageModelChatInformation;
@@ -1061,6 +1167,7 @@ describe('Nika provider-config gating (nika.providers)', () => {
 			expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
 		} finally {
 			providersConfig = undefined;
+			ollamaServersConfig = undefined;
 		}
 	});
 

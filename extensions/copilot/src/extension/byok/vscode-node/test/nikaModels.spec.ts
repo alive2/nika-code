@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it } from 'vitest';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaChatGptSubModel, isNikaClaudeSubModel, isNikaDeepSeekModel, isNikaDeepSeekVisionModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaSglangModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, nikaSglangApiKeySecret, nikaSglangModelId, parseNikaProviderConfig, parseNikaSglangModelId, parseNikaSglangServers, resolveNikaTokenLimits, slugifyNikaSglangServerId } from '../nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaChatGptSubModel, isNikaClaudeSubModel, isNikaDeepSeekModel, isNikaDeepSeekVisionModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaSglangModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_LLAMACPP_SECRET, NIKA_LLAMACPP_SECRET_PREFIX, NIKA_OLLAMA_SECRET_PREFIX, NIKA_RESPONSES_MODEL, nikaLlamaCppApiKeySecret, nikaLlamaCppModelId, nikaOllamaApiKeySecret, nikaOllamaModelId, nikaSglangApiKeySecret, nikaSglangModelId, parseNikaLlamaCppModelId, parseNikaLlamaCppServers, parseNikaOllamaModelId, parseNikaOllamaServers, parseNikaProviderConfig, parseNikaSglangModelId, parseNikaSglangServers, resolveNikaTokenLimits, slugifyNikaSglangServerId } from '../nikaModels';
 
 describe('Nika model metadata', () => {
 	it('uses the documented default budgets', () => {
@@ -308,5 +308,48 @@ describe('Nika model metadata', () => {
 		const config = parseNikaProviderConfig({ sglang: { models: ['sglang/gpu-1/Qwen/Qwen3-32B', 42] } });
 		expect(config).toEqual({ sglang: { models: ['sglang/gpu-1/Qwen/Qwen3-32B'] } });
 		expect(getNikaSelectedModels(config, 'sglang')).toEqual(['sglang/gpu-1/Qwen/Qwen3-32B']);
+	});
+
+	it('parses the llama.cpp and Ollama server lists like SGLang', () => {
+		// All three multi-server families share one parser: objects, bare URL
+		// strings, a lone entry, and the `/v1` suffix are all handled.
+		expect(parseNikaLlamaCppServers([
+			{ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:8080/' },
+			'http://10.0.0.6:8080/v1',
+		])).toEqual([
+			{ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:8080' },
+			{ id: '10-0-0-6-8080', label: '10.0.0.6:8080', baseUrl: 'http://10.0.0.6:8080' },
+		]);
+		expect(parseNikaOllamaServers({ label: 'Local', baseUrl: 'http://localhost:11434' })).toEqual([
+			{ id: 'local', label: 'Local', baseUrl: 'http://localhost:11434' },
+		]);
+		expect(parseNikaLlamaCppServers(undefined)).toEqual([]);
+		expect(parseNikaOllamaServers('not-a-url')).toEqual([]);
+	});
+
+	it('round-trips the multi-server model ids with their server segment', () => {
+		expect(nikaLlamaCppModelId('box1', 'qwen2.5vl-7b')).toBe('llamacpp/box1/qwen2.5vl-7b');
+		expect(parseNikaLlamaCppModelId('llamacpp/box1/qwen2.5vl-7b')).toEqual({ serverId: 'box1', rawId: 'qwen2.5vl-7b' });
+		expect(parseNikaLlamaCppModelId('nika/llamacpp/box1/qwen2.5vl-7b')).toEqual({ serverId: 'box1', rawId: 'qwen2.5vl-7b' });
+		// A raw id may itself contain slashes (SGLang's `Qwen/Qwen3-32B`).
+		expect(parseNikaLlamaCppModelId('llamacpp/box1/org/model')).toEqual({ serverId: 'box1', rawId: 'org/model' });
+		// Malformed ids (no server segment) are rejected.
+		expect(parseNikaLlamaCppModelId('llamacpp/qwen2.5vl-7b')).toBeUndefined();
+		expect(parseNikaLlamaCppModelId('llamacpp/box1/')).toBeUndefined();
+		expect(parseNikaLlamaCppModelId('ollama/box1/gemma4:31b')).toBeUndefined();
+
+		expect(nikaOllamaModelId('box1', 'gemma4:31b')).toBe('ollama/box1/gemma4:31b');
+		expect(parseNikaOllamaModelId('nika/ollama/box1/gemma4:31b')).toEqual({ serverId: 'box1', rawId: 'gemma4:31b' });
+		expect(parseNikaOllamaModelId('ollama/gemma4:31b')).toBeUndefined();
+	});
+
+	it('keeps every multi-server API key in its own secret', () => {
+		expect(nikaLlamaCppApiKeySecret('box1')).toBe('nika.llamacpp.box1.apiKey');
+		expect(nikaOllamaApiKeySecret('box1')).toBe('nika.ollama.box1.apiKey');
+		expect(nikaSglangApiKeySecret('box1')).toBe('nika.sglang.box1.apiKey');
+		// The per-server prefixes must not collide with the legacy shared key.
+		expect(NIKA_LLAMACPP_SECRET_PREFIX).toBe('nika.llamacpp.');
+		expect(NIKA_LLAMACPP_SECRET).toBe('nika.llamacpp.apiKey');
+		expect(NIKA_OLLAMA_SECRET_PREFIX).toBe('nika.ollama.');
 	});
 });

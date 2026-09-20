@@ -3311,15 +3311,55 @@
             "default": true,
             "markdownDescription": "%nika.config.visionPreprocessingEnabled%"
           },
-          "nika.ollamaBaseUrl": {
-            "type": "string",
-            "default": "http://localhost:11434",
-            "markdownDescription": "%nika.config.ollamaBaseUrl%"
+          "nika.ollama.servers": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": [
+                "baseUrl"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "%nika.config.ollama.servers.id%"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "%nika.config.ollama.servers.label%"
+                },
+                "baseUrl": {
+                  "type": "string",
+                  "description": "%nika.config.ollama.servers.baseUrl%"
+                }
+              }
+            },
+            "markdownDescription": "%nika.config.ollama.servers%"
           },
-          "nika.llamaCppBaseUrl": {
-            "type": "string",
-            "default": "http://localhost:8080",
-            "markdownDescription": "%nika.config.llamaCppBaseUrl%"
+          "nika.llamacpp.servers": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": [
+                "baseUrl"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "%nika.config.llamacpp.servers.id%"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "%nika.config.llamacpp.servers.label%"
+                },
+                "baseUrl": {
+                  "type": "string",
+                  "description": "%nika.config.llamacpp.servers.baseUrl%"
+                }
+              }
+            },
+            "markdownDescription": "%nika.config.llamacpp.servers%"
           },
           "nika.sglang.servers": {
             "type": "array",

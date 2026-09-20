@@ -177,11 +177,6 @@ export class NikaLlamaCppProvider extends Disposable {
 	}
 }
 
-/** The workbench-facing id of a raw llama.cpp server model id under the Nika group. */
-export function nikaLlamaCppModelId(rawId: string): string {
-	return `${NIKA_LLAMACPP_MODEL_PREFIX}${rawId}`;
-}
-
 /**
  * Extract the served context (`--ctx-size`, `--ctx-size=<n>`, or `-c`) from
  * a llama.cpp model entry's launch args. Returns undefined when absent.

@@ -125,17 +125,21 @@ export const NIKA_OPENROUTER_MODEL_PREFIX = 'openrouter/';
 
 /**
  * Provider-group prefix for llama.cpp server models contributed through the
- * Nika provider. A model loaded on the server under id `qwen2.5vl-7b` is
- * exposed to the workbench as `llamacpp/qwen2.5vl-7b` (and
- * `nika/llamacpp/qwen2.5vl-7b` once vendor-qualified).
+ * Nika provider. llama.cpp is self-hosted, so several servers can be
+ * configured at different URLs at once; each gets its own id segment. A model
+ * loaded on the server registered as `box1` under id `qwen2.5vl-7b` is
+ * exposed to the workbench as `llamacpp/box1/qwen2.5vl-7b` (and
+ * `nika/llamacpp/box1/qwen2.5vl-7b` once vendor-qualified).
  */
 export const NIKA_LLAMACPP_MODEL_PREFIX = 'llamacpp/';
 
 /**
  * Provider-group prefix for Ollama models contributed through the Nika
- * provider. A model pulled on the local Ollama host under name `gemma4:31b`
- * is exposed to the workbench as `ollama/gemma4:31b` (and
- * `nika/ollama/gemma4:31b` once vendor-qualified).
+ * provider. Ollama is self-hosted, so several hosts can be configured at
+ * different URLs at once; each gets its own id segment. A model pulled on the
+ * host registered as `box1` under name `gemma4:31b` is exposed to the
+ * workbench as `ollama/box1/gemma4:31b` (and
+ * `nika/ollama/box1/gemma4:31b` once vendor-qualified).
  */
 export const NIKA_OLLAMA_MODEL_PREFIX = 'ollama/';
 
@@ -226,12 +230,37 @@ export const NIKA_SGLANG_MODEL_PREFIX = 'sglang/';
 export const NIKA_SGLANG_SECRET_PREFIX = 'nika.sglang.';
 
 /**
+ * Secret-key prefix for per-server llama.cpp API keys. A server registered
+ * under id `box1` stores its optional key under
+ * `nika.llamacpp.box1.apiKey`. The legacy shared `nika.llamacpp.apiKey`
+ * secret is still honoured as a fallback for servers without their own key.
+ */
+export const NIKA_LLAMACPP_SECRET_PREFIX = 'nika.llamacpp.';
+
+/**
+ * Secret-key prefix for per-server Ollama API keys. Ollama is normally
+ * unauthenticated, but a reverse proxy in front of it may require a bearer
+ * token, so each host can carry its own optional key.
+ */
+export const NIKA_OLLAMA_SECRET_PREFIX = 'nika.ollama.';
+
+/**
  * Secret key holding one SGLang server's optional API key. SGLang servers are
  * usually unauthenticated (local network), so a missing secret simply means
  * requests go out without an `Authorization` header.
  */
 export function nikaSglangApiKeySecret(serverId: string): string {
 	return `${NIKA_SGLANG_SECRET_PREFIX}${serverId}.apiKey`;
+}
+
+/** Secret key holding one llama.cpp server's optional API key. */
+export function nikaLlamaCppApiKeySecret(serverId: string): string {
+	return `${NIKA_LLAMACPP_SECRET_PREFIX}${serverId}.apiKey`;
+}
+
+/** Secret key holding one Ollama host's optional API key. */
+export function nikaOllamaApiKeySecret(serverId: string): string {
+	return `${NIKA_OLLAMA_SECRET_PREFIX}${serverId}.apiKey`;
 }
 
 /**
@@ -244,6 +273,13 @@ export interface NikaSglangServer {
 	readonly label: string;
 	readonly baseUrl: string;
 }
+
+/**
+ * One configured self-hosted server of any multi-server family (SGLang,
+ * llama.cpp, Ollama). Same shape as {@link NikaSglangServer}; the alias keeps
+ * the shared helpers readable without renaming the SGLang-specific type.
+ */
+export type NikaUrlServer = NikaSglangServer;
 
 /**
  * Turns a free-form server label (or URL) into a stable, secret-safe id slug:
@@ -262,13 +298,14 @@ export function slugifyNikaSglangServerId(value: string): string {
 }
 
 /**
- * Normalizes a user-supplied SGLang base URL: trims whitespace, drops
+ * Normalizes a user-supplied self-hosted base URL: trims whitespace, drops
  * trailing slashes and strips the OpenAI-compatible path suffixes that users
  * routinely paste along with the host (`/v1`, `/v1/models`,
- * `/v1/chat/completions`). The provider appends those itself, so keeping them
- * would request a doubled path such as `/v1/v1/models` and fail with a 404.
+ * `/v1/chat/completions`). The providers append those themselves, so keeping
+ * them would request a doubled path such as `/v1/v1/models` and fail with a
+ * 404.
  */
-function normalizeSglangBaseUrl(value: string): string {
+function normalizeServerBaseUrl(value: string): string {
 	return value.trim()
 		.replace(/\/+$/, '')
 		.replace(/\/v1\/chat\/completions$/i, '')
@@ -279,22 +316,23 @@ function normalizeSglangBaseUrl(value: string): string {
 }
 
 /**
- * Parses and normalizes the `nika.sglang.servers` setting. Accepts full
- * objects (`{ id?, label?, baseUrl }`) and bare URL strings, validates that
- * every entry has an http(s) base URL, derives missing ids from the label (or
- * the URL host) and guarantees unique ids by suffixing duplicates. A lone
- * entry given directly (instead of wrapped in an array) counts as a
- * one-element list. Returns an empty array for absent or malformed values, so
- * a hand-edited settings file degrades to "no SGLang servers" instead of
- * breaking model enumeration.
+ * Parses and normalizes a multi-server setting (`nika.sglang.servers`,
+ * `nika.llamacpp.servers`, `nika.ollama.servers`). Accepts full objects
+ * (`{ id?, label?, baseUrl }`) and bare URL strings, validates that every
+ * entry has an http(s) base URL, derives missing ids from the label (or the
+ * URL host) and guarantees unique ids by suffixing duplicates. A lone entry
+ * given directly (instead of wrapped in an array) counts as a one-element
+ * list. Returns an empty array for absent or malformed values, so a
+ * hand-edited settings file degrades to "no servers" instead of breaking
+ * model enumeration.
  */
-export function parseNikaSglangServers(value: unknown): NikaSglangServer[] {
+function parseNikaUrlServers(value: unknown): NikaUrlServer[] {
 	// Settings hand-written in JSON naturally spell a single server as one
 	// object (or one bare URL) rather than an array; reading that as "no
 	// servers" would leave the user with an empty model list and no
 	// explanation.
 	const entries: unknown[] = Array.isArray(value) ? value : (value === null || value === undefined ? [] : [value]);
-	const servers: NikaSglangServer[] = [];
+	const servers: NikaUrlServer[] = [];
 	const used = new Set<string>();
 	for (const entry of entries) {
 		const raw = typeof entry === 'string'
@@ -303,17 +341,18 @@ export function parseNikaSglangServers(value: unknown): NikaSglangServer[] {
 		if (!raw) {
 			continue;
 		}
-		const baseUrl = typeof raw.baseUrl === 'string' ? normalizeSglangBaseUrl(raw.baseUrl) : '';
+		const baseUrl = typeof raw.baseUrl === 'string' ? normalizeServerBaseUrl(raw.baseUrl) : '';
 		if (!/^https?:\/\/.+/i.test(baseUrl)) {
 			continue;
 		}
 		const rawLabel = typeof raw.label === 'string' ? raw.label.trim() : '';
 		const rawId = typeof raw.id === 'string' ? raw.id.trim() : '';
 		const label = rawLabel || rawId || hostLabel(baseUrl);
-		let id = slugifyNikaSglangServerId(rawId || rawLabel || hostLabel(baseUrl));
+		const seed = slugifyNikaSglangServerId(rawId || rawLabel || hostLabel(baseUrl));
+		let id = seed;
 		let suffix = 2;
 		while (used.has(id)) {
-			id = `${slugifyNikaSglangServerId(rawId || rawLabel || hostLabel(baseUrl))}-${suffix++}`;
+			id = `${seed}-${suffix++}`;
 		}
 		used.add(id);
 		servers.push({ id, label, baseUrl });
@@ -322,12 +361,63 @@ export function parseNikaSglangServers(value: unknown): NikaSglangServer[] {
 }
 
 /**
- * The exposed SGLang model id for a raw model served by a registered server:
- * `sglang/<server id>/<raw model id>`. Raw SGLang ids often contain slashes
+ * Parses and normalizes the `nika.sglang.servers` setting. See
+ * {@link parseNikaUrlServers} for the accepted shapes.
+ */
+export function parseNikaSglangServers(value: unknown): NikaSglangServer[] {
+	return parseNikaUrlServers(value);
+}
+
+/**
+ * Parses and normalizes the `nika.llamacpp.servers` setting. See
+ * {@link parseNikaUrlServers} for the accepted shapes.
+ */
+export function parseNikaLlamaCppServers(value: unknown): NikaUrlServer[] {
+	return parseNikaUrlServers(value);
+}
+
+/**
+ * Parses and normalizes the `nika.ollama.servers` setting. See
+ * {@link parseNikaUrlServers} for the accepted shapes.
+ */
+export function parseNikaOllamaServers(value: unknown): NikaUrlServer[] {
+	return parseNikaUrlServers(value);
+}
+
+/**
+ * The exposed model id for a raw model served by a registered multi-server
+ * family: `<prefix><server id>/<raw model id>`. Raw ids may contain slashes
  * (`Qwen/Qwen3-32B`); the server segment is always the first path segment.
  */
+function nikaUrlServerModelId(prefix: string, serverId: string, rawId: string): string {
+	return `${prefix}${serverId}/${rawId}`;
+}
+
+/**
+ * Splits an exposed multi-server model id (`<prefix><server id>/<raw id>`,
+ * with or without the `nika/` vendor prefix) back into its server and raw
+ * model segments. Returns undefined when the id does not belong to the
+ * family or carries no server segment.
+ */
+function parseNikaUrlServerModelId(prefix: string, value: string): { readonly serverId: string; readonly rawId: string } | undefined {
+	const id = value.startsWith('nika/') ? value.slice('nika/'.length) : value;
+	if (!id.startsWith(prefix)) {
+		return undefined;
+	}
+	const rest = id.slice(prefix.length);
+	const slash = rest.indexOf('/');
+	if (slash <= 0 || slash === rest.length - 1) {
+		return undefined;
+	}
+	return { serverId: rest.slice(0, slash), rawId: rest.slice(slash + 1) };
+}
+
+/**
+ * The exposed SGLang model id for a raw model served by a registered server:
+ * `sglang/<server id>/<raw model id>`.
+ */
 export function nikaSglangModelId(serverId: string, rawId: string): string {
-	return `${NIKA_SGLANG_MODEL_PREFIX}${serverId}/${rawId}`;
+	return nikaUrlServerModelId(NIKA_SGLANG_MODEL_PREFIX, serverId, rawId);
 }
 
 /**
@@ -336,16 +426,41 @@ export function nikaSglangModelId(serverId: string, rawId: string): string {
  * segments. Returns undefined when the id is not an SGLang model id.
  */
 export function parseNikaSglangModelId(value: string): { readonly serverId: string; readonly rawId: string } | undefined {
-	const id = value.startsWith('nika/') ? value.slice('nika/'.length) : value;
-	if (!id.startsWith(NIKA_SGLANG_MODEL_PREFIX)) {
-		return undefined;
-	}
-	const rest = id.slice(NIKA_SGLANG_MODEL_PREFIX.length);
-	const slash = rest.indexOf('/');
-	if (slash <= 0 || slash === rest.length - 1) {
-		return undefined;
-	}
-	return { serverId: rest.slice(0, slash), rawId: rest.slice(slash + 1) };
+	return parseNikaUrlServerModelId(NIKA_SGLANG_MODEL_PREFIX, value);
+}
+
+/**
+ * The exposed llama.cpp model id for a raw model loaded on a registered
+ * server: `llamacpp/<server id>/<raw model id>`.
+ */
+export function nikaLlamaCppModelId(serverId: string, rawId: string): string {
+	return nikaUrlServerModelId(NIKA_LLAMACPP_MODEL_PREFIX, serverId, rawId);
+}
+
+/**
+ * Splits an exposed llama.cpp model id (`llamacpp/<server id>/<raw model id>`,
+ * with or without the `nika/` vendor prefix) back into its server and raw
+ * model segments. Returns undefined when the id is not a llama.cpp model id.
+ */
+export function parseNikaLlamaCppModelId(value: string): { readonly serverId: string; readonly rawId: string } | undefined {
+	return parseNikaUrlServerModelId(NIKA_LLAMACPP_MODEL_PREFIX, value);
+}
+
+/**
+ * The exposed Ollama model id for a model pulled on a registered host:
+ * `ollama/<server id>/<model name>`.
+ */
+export function nikaOllamaModelId(serverId: string, name: string): string {
+	return nikaUrlServerModelId(NIKA_OLLAMA_MODEL_PREFIX, serverId, name);
+}
+
+/**
+ * Splits an exposed Ollama model id (`ollama/<server id>/<model name>`, with
+ * or without the `nika/` vendor prefix) back into its server and model name
+ * segments. Returns undefined when the id is not an Ollama model id.
+ */
+export function parseNikaOllamaModelId(value: string): { readonly serverId: string; readonly rawId: string } | undefined {
+	return parseNikaUrlServerModelId(NIKA_OLLAMA_MODEL_PREFIX, value);
 }
 
 /**
@@ -379,7 +494,8 @@ export const NIKA_GITHUB_ENABLED_CONFIG_KEY = 'nika.github.enabled';
  * configuration section (callers use `workspace.getConfiguration('nika')`, so
  * the full registered setting is `nika.visionPreprocessingMap`). Keys of the
  * map are the bare (unqualified) model ids as seen by the request path
- * (`deepseek-v4-flash`, `openrouter/<vendor>/<model>`, `llamacpp/<server-id>`, …).
+ * (`deepseek-v4-flash`, `openrouter/<vendor>/<model>`,
+ * `llamacpp/<server id>/<model>`, …).
  * A boolean value overrides the per-model default: `true` = harness describes
  * images with the vision backend first; `false` = the harness sends image
  * parts through untouched. Absent entries fall back to the model's capability
@@ -410,8 +526,8 @@ export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | '
  * provider's entry lists the bare (unqualified) model ids the user selected
  * in the wizard; only those models are exposed to chat, Agents, and the
  * settings dropdowns. Stored ids use the exposed form: `deepseek-v4-flash`,
- * `gemini-2.5-flash`, `openrouter/<vendor>/<model>`, `ollama/<name>`, and
- * `llamacpp/<server-id>`.
+ * `gemini-2.5-flash`, `openrouter/<vendor>/<model>`,
+ * `ollama/<server id>/<name>`, and `llamacpp/<server id>/<model>`.
  */
 export interface NikaProviderSelection {
 	readonly models: readonly string[];
@@ -506,8 +622,9 @@ export function isNikaModelId(value: string): boolean {
 
 /**
  * True for Ollama model ids exposed through the Nika provider
- * (`ollama/<name>`). The model name as reported by the Ollama host's
- * `/api/tags` endpoint follows the prefix, e.g. `ollama/gemma4:31b`.
+ * (`ollama/<server id>/<name>`). The model name as reported by the Ollama
+ * host's `/api/tags` endpoint follows the server segment, e.g.
+ * `ollama/box1/gemma4:31b`.
  */
 export function isNikaOllamaModel(value: string): boolean {
 	return value.startsWith(NIKA_OLLAMA_MODEL_PREFIX);
@@ -595,8 +712,9 @@ export function isNikaOpenRouterModel(value: string): boolean {
 
 /**
  * True for llama.cpp server model ids exposed through the Nika provider
- * (`llamacpp/<server-model-id>`). The raw id as reported by the server's
- * `/v1/models` endpoint follows the prefix, e.g. `llamacpp/qwen2.5vl-7b`.
+ * (`llamacpp/<server id>/<server-model-id>`). The raw id as reported by the
+ * server's `/v1/models` endpoint follows the server segment, e.g.
+ * `llamacpp/box1/qwen2.5vl-7b`.
  */
 export function isNikaLlamaCppModel(value: string): boolean {
 	return value.startsWith(NIKA_LLAMACPP_MODEL_PREFIX);
@@ -648,8 +766,8 @@ function unprefixNikaModelId(id: string): string {
  * Returns the provider family for a Nika model id. The id may carry the `nika/`
  * vendor prefix (as stored in `nika.defaultModel`) or the bare model id (the
  * chat-picker form). OpenRouter catalog ids are `openrouter/<vendor>/<model>`;
- * llama.cpp server ids are `llamacpp/<server-model-id>`. Returns `undefined`
- * for unknown ids.
+ * llama.cpp server ids are `llamacpp/<server id>/<server-model-id>`. Returns
+ * `undefined` for unknown ids.
  */
 export function getNikaModelProvider(id: string): NikaModelProvider | undefined {
 	const value = unprefixNikaModelId(id);

@@ -8,7 +8,7 @@ import { IVSCodeExtensionContext } from '../../../platform/extContext/common/ext
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
-import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, getNikaModelProvider, isNikaDeepSeekVisionModel, nikaSglangApiKeySecret, parseNikaSglangModelId, parseNikaSglangServers, slugifyNikaSglangServerId } from './nikaModels';
+import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, getNikaModelProvider, isNikaDeepSeekVisionModel, nikaLlamaCppApiKeySecret, nikaSglangApiKeySecret, parseNikaLlamaCppModelId, parseNikaLlamaCppServers, parseNikaOllamaModelId, parseNikaOllamaServers, parseNikaSglangModelId, parseNikaSglangServers, slugifyNikaSglangServerId } from './nikaModels';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
 
@@ -227,7 +227,7 @@ export class NikaAttachmentProcessor {
 			return this._describeWithGemini(data, mimeType, prompt, backend, key, token);
 		}
 		if (backend === 'gemma4:31b') {
-			return this._describeWithOllama(data, prompt, token, 'gemma4:31b');
+			return this._describeWithOllama(data, prompt, token, 'gemma4:31b', this._firstOllamaBaseUrl(config));
 		}
 		if (backend === 'openrouter') {
 			const model = config.get<string>('visionOpenRouterModel', '').trim();
@@ -250,10 +250,23 @@ export class NikaAttachmentProcessor {
 					return this._describeWithGemini(data, mimeType, prompt, model, key, token);
 				}
 				case 'gemma':
-					return this._describeWithOllama(data, prompt, token, 'gemma4:31b');
+					// The legacy bare Gemma id has no server segment; it is served
+					// by the first registered Ollama host.
+					return this._describeWithOllama(data, prompt, token, 'gemma4:31b', this._firstOllamaBaseUrl(config));
 				case 'ollama': {
-					const model = raw.slice('ollama/'.length);
-					return this._describeWithOllama(data, prompt, token, model);
+					// The model id carries its host (`ollama/<server id>/<name>`),
+					// so the description request goes to that host's URL.
+					const target = parseNikaOllamaModelId(raw);
+					if (!target) {
+						throw new Error(vscode.l10n.t('The selected Ollama vision model is not a valid Ollama model id.'));
+					}
+					const servers = parseNikaOllamaServers(config.get('ollama.servers'));
+					const server = servers.find(candidate => candidate.id === target.serverId)
+						?? servers.find(candidate => slugifyNikaSglangServerId(candidate.baseUrl) === target.serverId);
+					if (!server) {
+						throw new Error(vscode.l10n.t('The Ollama host behind the selected vision model is no longer configured.'));
+					}
+					return this._describeWithOllama(data, prompt, token, target.rawId, server.baseUrl);
 				}
 				case 'openrouter': {
 					const model = raw.slice('openrouter/'.length);
@@ -262,10 +275,22 @@ export class NikaAttachmentProcessor {
 					return this._describeWithOpenRouter(data, mimeType, prompt, model, key, token);
 				}
 				case 'llamacpp': {
-					const model = raw.slice('llamacpp/'.length);
-					const baseUrl = config.get<string>('llamaCppBaseUrl', 'http://localhost:8080').replace(/\/$/, '');
-					const key = await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined;
-					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, `${baseUrl}/v1/chat/completions`, 'nika-llamacpp-vision', 'llama.cpp', token);
+					// The model id carries its server (`llamacpp/<server id>/<raw id>`),
+					// so the description request goes to that server's URL with that
+					// server's own API key (falling back to the legacy shared key).
+					const target = parseNikaLlamaCppModelId(raw);
+					if (!target) {
+						throw new Error(vscode.l10n.t('The selected llama.cpp vision model is not a valid llama.cpp model id.'));
+					}
+					const servers = parseNikaLlamaCppServers(config.get('llamacpp.servers'));
+					const server = servers.find(candidate => candidate.id === target.serverId)
+						?? servers.find(candidate => slugifyNikaSglangServerId(candidate.baseUrl) === target.serverId);
+					if (!server) {
+						throw new Error(vscode.l10n.t('The llama.cpp server behind the selected vision model is no longer configured.'));
+					}
+					const key = await this._context.secrets.get(nikaLlamaCppApiKeySecret(server.id))
+						?? await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined;
+					return this._describeWithChatCompletions(data, mimeType, prompt, target.rawId, key, `${server.baseUrl}/v1/chat/completions`, 'nika-llamacpp-vision', 'llama.cpp', token);
 				}
 				case 'sglang': {
 					// The model id carries its server (`sglang/<server id>/<raw id>`),
@@ -374,11 +399,19 @@ export class NikaAttachmentProcessor {
 		}
 	}
 
-	private async _describeWithOllama(data: Uint8Array, prompt: string, token: vscode.CancellationToken, model: string): Promise<string> {
+	/**
+	 * The base URL of the first registered Ollama host, used by the legacy
+	 * bare `gemma4:31b` backend id which carries no server segment.
+	 */
+	private _firstOllamaBaseUrl(config: vscode.WorkspaceConfiguration): string {
+		const servers = parseNikaOllamaServers(config.get('ollama.servers'));
+		return servers[0]?.baseUrl ?? 'http://localhost:11434';
+	}
+
+	private async _describeWithOllama(data: Uint8Array, prompt: string, token: vscode.CancellationToken, model: string, baseUrl: string): Promise<string> {
 		const abort = this._fetcherService.makeAbortController();
 		const subscription = token.onCancellationRequested(() => abort.abort());
 		try {
-			const baseUrl = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
 			const response = await this._fetcherService.fetch(`${baseUrl}/api/chat`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },

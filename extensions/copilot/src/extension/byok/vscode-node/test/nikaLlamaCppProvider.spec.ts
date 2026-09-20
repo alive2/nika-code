@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it, vi } from 'vitest';
-import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, NikaLlamaCppProvider, nikaLlamaCppModelId } from '../nikaLlamaCppProvider';
+import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, NikaLlamaCppProvider } from '../nikaLlamaCppProvider';
+import { nikaLlamaCppModelId } from '../nikaModels';
 import { OpenAIEndpoint } from '../../node/openAIEndpoint';
 
 function modelsResponse() {
@@ -243,7 +244,7 @@ describe('NikaLlamaCppProvider', () => {
 		expect(call[2]).toBe('');
 	});
 
-	it('qualifies raw server ids with the llamacpp provider prefix', () => {
-		expect(nikaLlamaCppModelId('qwen2.5vl-7b')).toBe('llamacpp/qwen2.5vl-7b');
+	it('qualifies raw server ids with the llamacpp provider prefix and server segment', () => {
+		expect(nikaLlamaCppModelId('box1', 'qwen2.5vl-7b')).toBe('llamacpp/box1/qwen2.5vl-7b');
 	});
 });

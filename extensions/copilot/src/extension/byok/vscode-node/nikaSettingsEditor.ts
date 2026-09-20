@@ -9,7 +9,7 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekVisionModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_ZAI_MODEL_PREFIX, NIKA_ZAI_SECRET, NIKA_SGLANG_MODEL_PREFIX, NIKA_SGLANG_SECRET_PREFIX, NIKA_RESPONSES_MODEL, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaSglangServer, NikaTokenLimits, nikaSglangApiKeySecret, nikaSglangModelId, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, parseNikaSglangServers, resolveNikaTokenLimits } from './nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekVisionModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_LLAMACPP_SECRET_PREFIX, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OLLAMA_SECRET_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_ZAI_MODEL_PREFIX, NIKA_ZAI_SECRET, NIKA_SGLANG_MODEL_PREFIX, NIKA_SGLANG_SECRET_PREFIX, NIKA_RESPONSES_MODEL, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaSglangServer, NikaTokenLimits, NikaUrlServer, nikaLlamaCppApiKeySecret, nikaOllamaApiKeySecret, nikaSglangApiKeySecret, nikaSglangModelId, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaLlamaCppServers, parseNikaOllamaServers, parseNikaProviderConfig, parseNikaSglangServers, resolveNikaTokenLimits } from './nikaModels';
 import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour, NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES, NIKA_ZAI_PRICES } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { NikaOpenAIProvider } from './nikaOpenAIProvider';
@@ -32,7 +32,7 @@ type ConnectionResult = { readonly ok: boolean; readonly message: string; readon
 
 const SETTINGS = new Set([
 	'defaultModel', 'outputTokens', 'contextWindow', 'temperature', 'thinkingEffort', 'openrouterFloor',
-	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'ollamaBaseUrl', 'llamaCppBaseUrl', 'deepseekWeb.deleteSessionsAfterVision',
+	'visionModel', 'visionVSCodeModel', 'visionOpenRouterModel', 'deepseekWeb.deleteSessionsAfterVision',
 	'pdfMaxFileSizeMB', 'pdfMaxPages', 'pdfPageNotice', 'pdfSparseFallback', 'pdfSparseThreshold',
 	'agent.plan', 'agent.explore', 'agent.utility', 'agent.utilitySmall', 'agent.inlineChat',
 	'agent.planThinkingEffort', 'agent.exploreThinkingEffort', 'agent.utilityThinkingEffort', 'agent.utilitySmallThinkingEffort', 'agent.inlineChatThinkingEffort',
@@ -114,6 +114,10 @@ export class NikaSettingsEditor extends Disposable {
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
 	/** Per-server SGLang connection results, keyed by server id. */
 	private readonly _sglangConnections = new Map<string, ConnectionResult>();
+	/** Per-server llama.cpp connection results, keyed by server id. */
+	private readonly _llamaCppConnections = new Map<string, ConnectionResult>();
+	/** Per-host Ollama connection results, keyed by server id. */
+	private readonly _ollamaConnections = new Map<string, ConnectionResult>();
 	/** Cancels an in-flight device-code sign-in when a new one starts. */
 	private _subSignInSource: vscode.CancellationTokenSource | undefined;
 
@@ -156,7 +160,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET || event.key.startsWith(NIKA_SGLANG_SECRET_PREFIX)) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET || event.key.startsWith(NIKA_SGLANG_SECRET_PREFIX) || event.key.startsWith(NIKA_LLAMACPP_SECRET_PREFIX) || event.key.startsWith(NIKA_OLLAMA_SECRET_PREFIX)) {
 				void this._render(this._activeSection);
 			}
 		}));
@@ -339,22 +343,26 @@ export class NikaSettingsEditor extends Disposable {
 		const providers = parseNikaProviderConfig(config.get('providers'));
 		const providersManaged = providers !== undefined;
 		const openRouterCatalog = openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [];
-		const llamaCppBaseUrl = this._llamaCppBaseUrl();
-		const llamaCppCatalog = llamaCppBaseUrl ? await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined) : [];
+		// llama.cpp: every registered server contributes its own catalog, keyed
+		// by `llamacpp/<server id>/<raw model id>` so several servers coexist.
+		const llamaCppServers = this._llamaCppServers();
+		const llamaCppServerStates = await this._llamaCppServerStates(llamaCppServers);
+		const llamaCppCatalog = llamaCppServerStates.flatMap(state => state.models);
 		// SGLang: every registered server contributes its own catalog, keyed by
 		// `sglang/<server id>/<raw model id>` so several servers coexist.
 		const sglangServers = this._sglangServers();
 		const sglangServerStates = await this._sglangServerStates(sglangServers);
 		const sglangCatalog = sglangServerStates.flatMap(state => state.models);
-		const ollamaBaseUrl = value('ollamaBaseUrl', 'http://localhost:11434');
-		// Ollama needs no secret, so it cannot be keyed on one. Probe its host
-		// only when it is actually in use: added through the provider wizard
-		// (managed mode) or given an explicit host (legacy mode / wizard in
-		// progress, where the URL is saved before the provider entry). Probing
-		// the default `localhost:11434` on every open would otherwise warn
-		// about a refused connection for setups that never run Ollama.
-		const ollamaInUse = !!providers?.ollama || config.inspect<unknown>('ollamaBaseUrl')?.globalValue !== undefined;
-		const ollamaCatalog = ollamaInUse ? await this._ollamaCatalogState(ollamaBaseUrl) : [];
+		// Ollama: every registered host contributes its own catalog, keyed by
+		// `ollama/<server id>/<name>` so several hosts coexist. Probing the
+		// default `localhost:11434` on every open would warn about a refused
+		// connection for setups that never run Ollama, so hosts are only probed
+		// when the provider is in use (added through the wizard) or a server
+		// list is configured.
+		const ollamaServers = this._ollamaServers();
+		const ollamaInUse = !!providers?.ollama || ollamaServers.length > 0;
+		const ollamaServerStates = ollamaInUse ? await this._ollamaServerStates(ollamaServers) : [];
+		const ollamaCatalog = ollamaServerStates.flatMap(state => state.models);
 		const geminiCatalog = geminiKey ? await this._geminiCatalogState(geminiKey) : [];
 		const cursorCatalog = cursorKey ? await this._cursorCatalogState(cursorKey) : [];
 		const zaiCatalog = zaiKey ? await this._zaiCatalogState(zaiKey) : [];
@@ -387,8 +395,14 @@ export class NikaSettingsEditor extends Disposable {
 			geminiConfigured: !!geminiKey,
 			openrouterConfigured: !!openRouterKey,
 			openrouterModels: openRouterCatalog,
-			llamacppConfigured: !!llamaCppKey,
+			llamacppConfigured: llamaCppServers.length > 0,
 			llamacppModels: llamaCppCatalog,
+			llamacppServers: llamaCppServerStates.map(state => ({ id: state.server.id, label: state.server.label, baseUrl: state.server.baseUrl, configured: state.hasKey, models: state.models.length, error: state.error })),
+			llamacppConnections: Object.fromEntries(this._llamaCppConnections),
+			ollamaConfigured: ollamaServers.length > 0,
+			ollamaModels: ollamaCatalog,
+			ollamaServers: ollamaServerStates.map(state => ({ id: state.server.id, label: state.server.label, baseUrl: state.server.baseUrl, configured: state.hasKey, models: state.models.length, error: state.error })),
+			ollamaConnections: Object.fromEntries(this._ollamaConnections),
 			sglangConfigured: sglangServers.length > 0,
 			sglangServers: sglangServerStates.map(state => ({ id: state.server.id, label: state.server.label, baseUrl: state.server.baseUrl, configured: state.hasKey, models: state.models.length, error: state.error })),
 			sglangModels: sglangCatalog,
@@ -411,7 +425,7 @@ export class NikaSettingsEditor extends Disposable {
 			// the classic rules; managed mode reflects the added providers.
 			providersConfigured: providersManaged
 				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, sglang: !!providers.sglang, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb, openai: !!providers.openai, anthropic: !!providers.anthropic, chatgpt: !!providers.chatgpt, claude: !!providers.claude, zai: !!providers.zai }
-				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, sglang: sglangServers.length > 0, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken, openai: !!openAIKey, anthropic: !!anthropicKey, chatgpt: !!chatGptSubToken, claude: !!claudeSubToken, zai: !!zaiKey },
+				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: ollamaServers.length > 0, openrouter: !!openRouterKey, llamacpp: llamaCppServers.length > 0, sglang: sglangServers.length > 0, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken, openai: !!openAIKey, anthropic: !!anthropicKey, chatgpt: !!chatGptSubToken, claude: !!claudeSubToken, zai: !!zaiKey },
 			// Available models per provider for the wizard's selection step.
 			// Native entries are bare ids; catalog families carry their prefix
 			// so the wizard stores exactly what the picker gates on.
@@ -453,8 +467,8 @@ export class NikaSettingsEditor extends Disposable {
 			// Gemini catalog + Cursor + OpenAI + Anthropic).
 			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, sglangCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, openAICatalog, anthropicCatalog, zaiCatalog, chatGptSubModels, claudeSubModels, providers),
 			hasOllama: true,
-			ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
-			llamaCppBaseUrl,
+			ollamaBaseUrl: ollamaServers[0]?.baseUrl ?? 'http://localhost:11434',
+			llamaCppBaseUrl: llamaCppServers[0]?.baseUrl ?? 'http://localhost:8080',
 			sglangConnections: Object.fromEntries(this._sglangConnections),
 			appVersion: vscode.version,
 			extensionVersion: String((this._context.extension.packageJSON as { version?: string }).version ?? 'unknown'),
@@ -560,11 +574,12 @@ export class NikaSettingsEditor extends Disposable {
 	 * has no loaded models) degrades to an empty list rather than breaking
 	 * the whole settings page.
 	 */
-	private async _llamaCppCatalogState(baseUrl: string, apiKey: string | undefined): Promise<unknown[]> {
+	private async _llamaCppCatalogState(server: NikaUrlServer, apiKey: string | undefined): Promise<unknown[]> {
 		try {
-			const catalog = await this._llamaCppProvider.getCatalog(baseUrl, apiKey);
+			const catalog = await this._llamaCppProvider.getCatalog(server.baseUrl, apiKey);
 			return [...catalog.values()].map(model => ({
-				id: model.id,
+				// The server segment keeps several servers' models apart.
+				id: `${server.id}/${model.id}`,
 				name: model.name,
 				contextWindow: model.contextWindow,
 				vision: model.capabilities.vision,
@@ -573,13 +588,15 @@ export class NikaSettingsEditor extends Disposable {
 				// llama.cpp models have no reasoning-effort control.
 				efforts: [],
 				provider: 'llamacpp',
+				serverId: server.id,
+				serverLabel: server.label,
 				// Local inference is free: no price label.
 				priceLabel: '',
 				free: true,
 			}));
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
-			this.log('WARN', vscode.l10n.t('llama.cpp model list unavailable: {0}', detail));
+			this.log('WARN', vscode.l10n.t('llama.cpp server {0} unavailable: {1}', server.label, detail));
 			return [];
 		}
 	}
@@ -591,11 +608,15 @@ export class NikaSettingsEditor extends Disposable {
 	 * (or has no pulled models) degrades to an empty list rather than
 	 * breaking the whole settings page.
 	 */
-	private async _ollamaCatalogState(baseUrl: string): Promise<unknown[]> {
+	private async _ollamaCatalogState(server: NikaUrlServer, apiKey?: string): Promise<unknown[]> {
 		try {
-			const response = await this._fetcherService.fetch(`${baseUrl}/api/tags`, { method: 'GET', callSite: 'nika-ollama-tags' });
+			const response = await this._fetcherService.fetch(`${server.baseUrl}/api/tags`, {
+				method: 'GET',
+				headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+				callSite: 'nika-ollama-tags',
+			});
 			if (!response.ok) {
-				throw new Error(vscode.l10n.t('The Ollama host returned HTTP {0}.', response.status));
+				throw new Error(vscode.l10n.t('The Ollama host {0} returned HTTP {1}.', server.label, response.status));
 			}
 			const body = await response.json() as { models?: unknown[] };
 			const entries: unknown[] = (body.models ?? []).map(entry => {
@@ -607,7 +628,8 @@ export class NikaSettingsEditor extends Disposable {
 					return undefined;
 				}
 				return {
-					id: name,
+					// The server segment keeps several hosts' models apart.
+					id: `${server.id}/${name}`,
 					name,
 					contextWindow: LLAMACPP_DEFAULT_CONTEXT_WINDOW,
 					vision: true,
@@ -616,6 +638,8 @@ export class NikaSettingsEditor extends Disposable {
 					// Ollama models have no reasoning-effort control.
 					efforts: [],
 					provider: 'ollama',
+					serverId: server.id,
+					serverLabel: server.label,
 					// Local inference is free: no price label.
 					priceLabel: '',
 					free: true,
@@ -624,7 +648,7 @@ export class NikaSettingsEditor extends Disposable {
 			return entries.filter((entry): entry is Record<string, unknown> => entry !== undefined);
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
-			this.log('WARN', vscode.l10n.t('Ollama model list unavailable: {0}', detail));
+			this.log('WARN', vscode.l10n.t('Ollama host {0} unavailable: {1}', server.label, detail));
 			return [];
 		}
 	}
@@ -883,6 +907,231 @@ export class NikaSettingsEditor extends Disposable {
 		}
 	}
 
+	/**
+	 * Registers one llama.cpp server in `nika.llamacpp.servers` and stores its
+	 * optional API key under the per-server secret. Several servers coexist, so
+	 * this always appends: an already-configured URL is repointed to the new
+	 * label/key instead of being duplicated.
+	 */
+	private async _addLlamaCppServer(label: string, url: string, key: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const trimmedUrl = url.trim();
+		if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
+			throw new Error(vscode.l10n.t('Enter a full llama.cpp base URL, for example http://localhost:8080.'));
+		}
+		const trimmedLabel = label.trim();
+		const parsed = parseNikaLlamaCppServers([{ label: trimmedLabel || undefined, baseUrl: trimmedUrl }])[0];
+		if (!parsed) {
+			throw new Error(vscode.l10n.t('Enter a valid llama.cpp base URL.'));
+		}
+		const existing = this._llamaCppServers();
+		const duplicate = existing.find(server => server.baseUrl === parsed.baseUrl);
+		const usedIds = new Set(existing.filter(server => server !== duplicate).map(server => server.id));
+		let id = parsed.id;
+		let suffix = 2;
+		while (usedIds.has(id)) {
+			id = `${parsed.id}-${suffix++}`;
+		}
+		const server: NikaUrlServer = { id, label: trimmedLabel || parsed.label, baseUrl: parsed.baseUrl };
+		await config.update('llamacpp.servers', [...existing.filter(candidate => candidate.baseUrl !== server.baseUrl).map(candidate => ({ id: candidate.id, label: candidate.label, baseUrl: candidate.baseUrl })), { id: server.id, label: server.label, baseUrl: server.baseUrl }], vscode.ConfigurationTarget.Global);
+		if (key.trim()) {
+			await this._saveLlamaCppServerKey(server.id, key, false);
+		}
+		// A failed first fetch is reported to the log but does not block the
+		// save: the server may just be starting up.
+		const [state] = await this._llamaCppServerStates([server]);
+		this.log('INFO', vscode.l10n.t('Added the llama.cpp server {0} at {1} with {2} model(s).', server.label, server.baseUrl, state?.models.length ?? 0));
+		if (state?.error) {
+			void vscode.window.showWarningMessage(vscode.l10n.t('The llama.cpp server {0} could not be reached: {1}', server.label, state.error));
+		}
+		await this._render('providers');
+	}
+
+	/** Removes one llama.cpp server and its API key. Other servers stay untouched. */
+	private async _removeLlamaCppServer(id: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const existing = this._llamaCppServers();
+		const removed = existing.find(server => server.id === id);
+		if (!removed) {
+			return;
+		}
+		await config.update('llamacpp.servers', existing.filter(server => server.id !== id).map(server => ({ id: server.id, label: server.label, baseUrl: server.baseUrl })), vscode.ConfigurationTarget.Global);
+		await this._context.secrets.delete(nikaLlamaCppApiKeySecret(id));
+		this._llamaCppConnections.delete(id);
+		// The models of a removed server must stop being selectable (or a
+		// stale selection would fail every request).
+		const current = parseNikaProviderConfig(config.get('providers'));
+		if (current?.llamacpp) {
+			const models = current.llamacpp.models.filter(model => !model.startsWith(nikaLlamaCppModelId(id, '')));
+			await config.update('providers', { ...current, llamacpp: { models } }, vscode.ConfigurationTarget.Global);
+		}
+		this.log('INFO', vscode.l10n.t('Removed the llama.cpp server {0}.', removed.label));
+		void vscode.window.showInformationMessage(vscode.l10n.t('llama.cpp server {0} removed.', removed.label));
+		await this._render('providers');
+	}
+
+	/** Stores (or clears) one llama.cpp server's optional API key. */
+	private async _saveLlamaCppServerKey(id: string, value: string, notify = true): Promise<void> {
+		const server = this._llamaCppServers().find(candidate => candidate.id === id);
+		if (!server) {
+			throw new Error(vscode.l10n.t('The llama.cpp server is no longer configured.'));
+		}
+		const trimmed = value.trim();
+		if (trimmed) {
+			await this._context.secrets.store(nikaLlamaCppApiKeySecret(id), trimmed);
+		} else {
+			await this._context.secrets.delete(nikaLlamaCppApiKeySecret(id));
+		}
+		this._llamaCppConnections.delete(id);
+		if (notify) {
+			void vscode.window.showInformationMessage(trimmed
+				? vscode.l10n.t('llama.cpp key saved for {0}.', server.label)
+				: vscode.l10n.t('llama.cpp key cleared for {0}.', server.label));
+			await this._render('providers');
+		}
+	}
+
+	/** Probes one llama.cpp server's `/v1/models` endpoint and records the result. */
+	private async _testLlamaCppServer(id: string): Promise<boolean> {
+		const server = this._llamaCppServers().find(candidate => candidate.id === id);
+		let result: ConnectionResult;
+		if (!server) {
+			result = { ok: false, message: vscode.l10n.t('The llama.cpp server is no longer configured.'), checkedAt: new Date().toISOString() };
+		} else {
+			try {
+				const key = await this._llamaCppApiKey(server);
+				const response = await this._fetcherService.fetch(`${server.baseUrl}/v1/models`, {
+					method: 'GET',
+					headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+					callSite: 'nika-llamacpp-test',
+				});
+				if (!response.ok) {
+					throw new Error(vscode.l10n.t('Connection returned HTTP {0}.', response.status));
+				}
+				result = { ok: true, message: vscode.l10n.t('Connection successful'), checkedAt: new Date().toISOString() };
+			} catch (error) {
+				result = { ok: false, message: error instanceof Error ? error.message : String(error), checkedAt: new Date().toISOString() };
+			}
+		}
+		this._llamaCppConnections.set(id, result);
+		this.log(result.ok ? 'INFO' : 'ERROR', `llamacpp/${id}: ${result.message}`);
+		void vscode.window.showInformationMessage(result.ok
+			? vscode.l10n.t('llama.cpp connection successful for {0}.', server?.label ?? id)
+			: vscode.l10n.t('llama.cpp connection failed for {0}: {1}', server?.label ?? id, result.message));
+		await this._render();
+		return result.ok;
+	}
+
+	/**
+	 * Registers one Ollama host in `nika.ollama.servers` and stores its
+	 * optional API key. Several hosts coexist, so this always appends: an
+	 * already-configured URL is repointed instead of being duplicated.
+	 */
+	private async _addOllamaServer(label: string, url: string, key: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const trimmedUrl = url.trim();
+		if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
+			throw new Error(vscode.l10n.t('Enter a full Ollama base URL, for example http://localhost:11434.'));
+		}
+		const trimmedLabel = label.trim();
+		const parsed = parseNikaOllamaServers([{ label: trimmedLabel || undefined, baseUrl: trimmedUrl }])[0];
+		if (!parsed) {
+			throw new Error(vscode.l10n.t('Enter a valid Ollama base URL.'));
+		}
+		const existing = this._ollamaServers();
+		const duplicate = existing.find(server => server.baseUrl === parsed.baseUrl);
+		const usedIds = new Set(existing.filter(server => server !== duplicate).map(server => server.id));
+		let id = parsed.id;
+		let suffix = 2;
+		while (usedIds.has(id)) {
+			id = `${parsed.id}-${suffix++}`;
+		}
+		const server: NikaUrlServer = { id, label: trimmedLabel || parsed.label, baseUrl: parsed.baseUrl };
+		await config.update('ollama.servers', [...existing.filter(candidate => candidate.baseUrl !== server.baseUrl).map(candidate => ({ id: candidate.id, label: candidate.label, baseUrl: candidate.baseUrl })), { id: server.id, label: server.label, baseUrl: server.baseUrl }], vscode.ConfigurationTarget.Global);
+		if (key.trim()) {
+			await this._saveOllamaServerKey(server.id, key, false);
+		}
+		const [state] = await this._ollamaServerStates([server]);
+		this.log('INFO', vscode.l10n.t('Added the Ollama host {0} at {1} with {2} model(s).', server.label, server.baseUrl, state?.models.length ?? 0));
+		if (state?.error) {
+			void vscode.window.showWarningMessage(vscode.l10n.t('The Ollama host {0} could not be reached: {1}', server.label, state.error));
+		}
+		await this._render('providers');
+	}
+
+	/** Removes one Ollama host and its API key. Other hosts stay untouched. */
+	private async _removeOllamaServer(id: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const existing = this._ollamaServers();
+		const removed = existing.find(server => server.id === id);
+		if (!removed) {
+			return;
+		}
+		await config.update('ollama.servers', existing.filter(server => server.id !== id).map(server => ({ id: server.id, label: server.label, baseUrl: server.baseUrl })), vscode.ConfigurationTarget.Global);
+		await this._context.secrets.delete(nikaOllamaApiKeySecret(id));
+		this._ollamaConnections.delete(id);
+		const current = parseNikaProviderConfig(config.get('providers'));
+		if (current?.ollama) {
+			const models = current.ollama.models.filter(model => !model.startsWith(nikaOllamaModelId(id, '')));
+			await config.update('providers', { ...current, ollama: { models } }, vscode.ConfigurationTarget.Global);
+		}
+		this.log('INFO', vscode.l10n.t('Removed the Ollama host {0}.', removed.label));
+		void vscode.window.showInformationMessage(vscode.l10n.t('Ollama host {0} removed.', removed.label));
+		await this._render('providers');
+	}
+
+	/** Stores (or clears) one Ollama host's optional API key. */
+	private async _saveOllamaServerKey(id: string, value: string, notify = true): Promise<void> {
+		const server = this._ollamaServers().find(candidate => candidate.id === id);
+		if (!server) {
+			throw new Error(vscode.l10n.t('The Ollama host is no longer configured.'));
+		}
+		const trimmed = value.trim();
+		if (trimmed) {
+			await this._context.secrets.store(nikaOllamaApiKeySecret(id), trimmed);
+		} else {
+			await this._context.secrets.delete(nikaOllamaApiKeySecret(id));
+		}
+		this._ollamaConnections.delete(id);
+		if (notify) {
+			void vscode.window.showInformationMessage(trimmed
+				? vscode.l10n.t('Ollama key saved for {0}.', server.label)
+				: vscode.l10n.t('Ollama key cleared for {0}.', server.label));
+			await this._render('providers');
+		}
+	}
+
+	/** Probes one Ollama host's `/api/version` endpoint and records the result. */
+	private async _testOllamaServer(id: string): Promise<boolean> {
+		const server = this._ollamaServers().find(candidate => candidate.id === id);
+		let result: ConnectionResult;
+		if (!server) {
+			result = { ok: false, message: vscode.l10n.t('The Ollama host is no longer configured.'), checkedAt: new Date().toISOString() };
+		} else {
+			try {
+				const key = await this._context.secrets.get(nikaOllamaApiKeySecret(id)) ?? undefined;
+				const response = await this._fetcherService.fetch(`${server.baseUrl}/api/version`, {
+					method: 'GET',
+					headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+					callSite: 'nika-ollama-test',
+				});
+				if (!response.ok) {
+					throw new Error(vscode.l10n.t('Connection returned HTTP {0}.', response.status));
+				}
+				result = { ok: true, message: vscode.l10n.t('Connection successful'), checkedAt: new Date().toISOString() };
+			} catch (error) {
+				result = { ok: false, message: error instanceof Error ? error.message : String(error), checkedAt: new Date().toISOString() };
+			}
+		}
+		this._ollamaConnections.set(id, result);
+		this.log(result.ok ? 'INFO' : 'ERROR', `ollama/${id}: ${result.message}`);
+		void vscode.window.showInformationMessage(result.ok
+			? vscode.l10n.t('Ollama connection successful for {0}.', server?.label ?? id)
+			: vscode.l10n.t('Ollama connection failed for {0}: {1}', server?.label ?? id, result.message));
+		await this._render();
+		return result.ok;
+	}
+
 	/** Probes one SGLang server's `/v1/models` endpoint and records the result. */
 	private async _testSglangServer(id: string): Promise<boolean> {
 		const server = this._sglangServers().find(candidate => candidate.id === id);
@@ -975,7 +1224,7 @@ export class NikaSettingsEditor extends Disposable {
 				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number };
 				return {
 					id: `nika/${NIKA_LLAMACPP_MODEL_PREFIX}${entry.id}`,
-					displayName: entry.name,
+					displayName: entry.serverLabel ? `${entry.name} · ${entry.serverLabel}` : entry.name,
 					provider: 'llamacpp',
 					vision: entry.vision,
 					efforts: entry.efforts,
@@ -1015,7 +1264,7 @@ export class NikaSettingsEditor extends Disposable {
 				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number };
 				return {
 					id: `nika/${NIKA_OLLAMA_MODEL_PREFIX}${entry.id}`,
-					displayName: entry.name,
+					displayName: entry.serverLabel ? `${entry.name} · ${entry.serverLabel}` : entry.name,
 					provider: 'ollama',
 					vision: entry.vision,
 					efforts: entry.efforts,
@@ -1166,8 +1415,63 @@ export class NikaSettingsEditor extends Disposable {
 		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...sglangChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices, ...openAIChoices, ...anthropicChoices, ...zaiChoices, ...chatGptChoices, ...claudeChoices];
 	}
 
-	private _llamaCppBaseUrl(): string {
-		return vscode.workspace.getConfiguration('nika').get<string>('llamaCppBaseUrl', 'http://localhost:8080').replace(/\/$/, '');
+	/** The registered llama.cpp servers (`nika.llamacpp.servers`). */
+	private _llamaCppServers(): readonly NikaUrlServer[] {
+		return parseNikaLlamaCppServers(vscode.workspace.getConfiguration('nika').get('llamacpp.servers'));
+	}
+
+	/** The registered Ollama hosts (`nika.ollama.servers`). */
+	private _ollamaServers(): readonly NikaUrlServer[] {
+		return parseNikaOllamaServers(vscode.workspace.getConfiguration('nika').get('ollama.servers'));
+	}
+
+	/**
+	 * One llama.cpp server's API key: its own per-server secret when set,
+	 * otherwise the legacy shared `nika.llamacpp.apiKey`.
+	 */
+	private async _llamaCppApiKey(server: NikaUrlServer): Promise<string | undefined> {
+		const perServer = await this._context.secrets.get(nikaLlamaCppApiKeySecret(server.id));
+		if (perServer) {
+			return perServer;
+		}
+		return await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined;
+	}
+
+	/**
+	 * Per-server llama.cpp status for the settings page: whether an API key is
+	 * stored, the serialized catalog for the wizard, and the fetch error (if
+	 * any). A server that is unreachable degrades to an empty model list plus
+	 * an error string instead of breaking the whole page.
+	 */
+	private async _llamaCppServerStates(servers: readonly NikaUrlServer[]): Promise<{ server: NikaUrlServer; hasKey: boolean; models: unknown[]; error?: string }[]> {
+		return Promise.all(servers.map(async server => {
+			const key = await this._llamaCppApiKey(server);
+			try {
+				return { server, hasKey: !!key, models: await this._llamaCppCatalogState(server, key) };
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				this.log('WARN', vscode.l10n.t('llama.cpp server {0} unavailable: {1}', server.label, detail));
+				return { server, hasKey: !!key, models: [], error: detail };
+			}
+		}));
+	}
+
+	/**
+	 * Per-host Ollama status for the settings page. Mirrors
+	 * {@link _llamaCppServerStates}: an unreachable host degrades to an empty
+	 * model list plus an error string.
+	 */
+	private async _ollamaServerStates(servers: readonly NikaUrlServer[]): Promise<{ server: NikaUrlServer; hasKey: boolean; models: unknown[]; error?: string }[]> {
+		return Promise.all(servers.map(async server => {
+			const key = await this._context.secrets.get(nikaOllamaApiKeySecret(server.id)) ?? undefined;
+			try {
+				return { server, hasKey: !!key, models: await this._ollamaCatalogState(server, key) };
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				this.log('WARN', vscode.l10n.t('Ollama host {0} unavailable: {1}', server.label, detail));
+				return { server, hasKey: !!key, models: [], error: detail };
+			}
+		}));
 	}
 
 	/** The registered SGLang servers (`nika.sglang.servers`). */
@@ -1340,6 +1644,46 @@ export class NikaSettingsEditor extends Disposable {
 				case 'testSglangServer':
 					if (typeof message.id === 'string' && message.id) {
 						await this._testSglangServer(message.id);
+					}
+					break;
+				case 'addLlamaCppServer':
+					if (typeof message.url === 'string') {
+						await this._addLlamaCppServer(typeof message.label === 'string' ? message.label : '', message.url, typeof message.value === 'string' ? message.value : '');
+					}
+					break;
+				case 'removeLlamaCppServer':
+					if (typeof message.id === 'string' && message.id) {
+						await this._removeLlamaCppServer(message.id);
+					}
+					break;
+				case 'saveLlamaCppServerKey':
+					if (typeof message.id === 'string' && message.id && typeof message.value === 'string') {
+						await this._saveLlamaCppServerKey(message.id, message.value);
+					}
+					break;
+				case 'testLlamaCppServer':
+					if (typeof message.id === 'string' && message.id) {
+						await this._testLlamaCppServer(message.id);
+					}
+					break;
+				case 'addOllamaServer':
+					if (typeof message.url === 'string') {
+						await this._addOllamaServer(typeof message.label === 'string' ? message.label : '', message.url, typeof message.value === 'string' ? message.value : '');
+					}
+					break;
+				case 'removeOllamaServer':
+					if (typeof message.id === 'string' && message.id) {
+						await this._removeOllamaServer(message.id);
+					}
+					break;
+				case 'saveOllamaServerKey':
+					if (typeof message.id === 'string' && message.id && typeof message.value === 'string') {
+						await this._saveOllamaServerKey(message.id, message.value);
+					}
+					break;
+				case 'testOllamaServer':
+					if (typeof message.id === 'string' && message.id) {
+						await this._testOllamaServer(message.id);
 					}
 					break;
 				case 'deepSeekWebSignIn':
@@ -1578,10 +1922,12 @@ export class NikaSettingsEditor extends Disposable {
 			const catalog = await this._openRouterCatalogState(openRouterKey);
 			seed.openrouter = { models: (catalog as { id: string }[]).map(model => `${NIKA_OPENROUTER_MODEL_PREFIX}${model.id}`) };
 		}
-		const llamaCppBaseUrl = this._llamaCppBaseUrl();
-		if (llamaCppBaseUrl) {
-			const catalog = await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined);
-			seed.llamacpp = { models: (catalog as { id: string }[]).map(model => `${NIKA_LLAMACPP_MODEL_PREFIX}${model.id}`) };
+		// Every registered llama.cpp server is seeded with its own models (the ids
+		// already carry the server segment).
+		const llamaCppServers = this._llamaCppServers();
+		if (llamaCppServers.length > 0) {
+			const llamaCppStates = await this._llamaCppServerStates(llamaCppServers);
+			seed.llamacpp = { models: llamaCppStates.flatMap(state => state.models.map(model => `${NIKA_LLAMACPP_MODEL_PREFIX}${(model as { id: string }).id}`)) };
 		}
 		// Every registered SGLang server is seeded with its own models (the ids
 		// already carry the server segment).
@@ -1590,21 +1936,13 @@ export class NikaSettingsEditor extends Disposable {
 			const sglangStates = await this._sglangServerStates(sglangServers);
 			seed.sglang = { models: sglangStates.flatMap(state => state.models.map(model => `${NIKA_SGLANG_MODEL_PREFIX}${(model as { id: string }).id}`)) };
 		}
-		const ollamaConfig = vscode.workspace.getConfiguration('nika');
-		const ollamaBaseUrl = ollamaConfig.get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
-		// Probe only when a host is explicitly configured; otherwise seed the
-		// classic always-visible Gemma model without touching the network (a
-		// refused default-`localhost` probe would otherwise warn while saving
-		// an unrelated provider for the first time).
-		const ollamaCatalog = ollamaConfig.inspect<string>('ollamaBaseUrl')?.globalValue !== undefined
-			? await this._ollamaCatalogState(ollamaBaseUrl)
-			: [];
-		// The classic setup always exposed Gemma; seed at least that, and all
-		// pulled models when the host is reachable.
-		const ollamaModels = (ollamaCatalog as { id: string }[]).length > 0
-			? (ollamaCatalog as { id: string }[]).map(model => `${NIKA_OLLAMA_MODEL_PREFIX}${model.id}`)
-			: [`${NIKA_OLLAMA_MODEL_PREFIX}${NIKA_GEMMA_MODEL_ID}`];
-		seed.ollama = { models: ollamaModels };
+		// Every registered Ollama host is seeded with its own models. The
+		// classic setup always exposed Gemma, so a setup with no host at all
+		// still seeds that one id.
+		const ollamaServers = this._ollamaServers();
+		const ollamaStates = ollamaServers.length > 0 ? await this._ollamaServerStates(ollamaServers) : [];
+		const ollamaModels = ollamaStates.flatMap(state => state.models.map(model => `${NIKA_OLLAMA_MODEL_PREFIX}${(model as { id: string }).id}`));
+		seed.ollama = { models: ollamaModels.length > 0 ? ollamaModels : [`${NIKA_OLLAMA_MODEL_PREFIX}${NIKA_GEMMA_MODEL_ID}`] };
 		if (cursorKey) {
 			const catalog = await this._cursorCatalogState(cursorKey);
 			seed.cursor = { models: (catalog as { id: string }[]).map(model => `${NIKA_CURSOR_MODEL_PREFIX}${model.id}`) };
@@ -1751,10 +2089,11 @@ export class NikaSettingsEditor extends Disposable {
 		if (provider === 'chatgpt' || provider === 'claude') {
 			await this._subSignOut(provider);
 		}
-		if (provider === 'ollama') {
-			// Ollama's only configuration is its host; drop it with the
-			// provider so the settings page stops probing the server.
-			await config.update('ollamaBaseUrl', undefined, vscode.ConfigurationTarget.Global);
+		if (provider === 'ollama' || provider === 'llamacpp' || provider === 'sglang') {
+			// The multi-server families are configured entirely by their server
+			// list; drop it with the provider so the settings page stops probing
+			// those servers.
+			await config.update(`${provider}.servers`, undefined, vscode.ConfigurationTarget.Global);
 		}
 		void vscode.window.showInformationMessage(vscode.l10n.t('{0} removed. Its models no longer appear in chat or agents.', providerDisplayName(provider)));
 	}
@@ -1925,9 +2264,24 @@ export class NikaSettingsEditor extends Disposable {
 				if (!key) { throw new Error(vscode.l10n.t('No OpenRouter key is configured.')); }
 				response = await this._fetcherService.fetch('https://openrouter.ai/api/v1/models', { method: 'GET', headers: { Authorization: `Bearer ${key}` }, callSite: 'nika-openrouter-test' });
 			} else if (provider === 'llamacpp') {
-				const url = this._llamaCppBaseUrl();
-				const key = await this._context.secrets.get(NIKA_LLAMACPP_SECRET);
-				response = await this._fetcherService.fetch(`${url}/v1/models`, { method: 'GET', headers: key ? { Authorization: `Bearer ${key}` } : undefined, callSite: 'nika-llamacpp-test' });
+				// llama.cpp is multi-server: probe every registered server and
+				// report an aggregate result, keeping the per-server outcomes in
+				// the servers card rows.
+				const servers = this._llamaCppServers();
+				if (servers.length === 0) {
+					throw new Error(vscode.l10n.t('No llama.cpp server is configured.'));
+				}
+				const results = await Promise.all(servers.map(server => this._testLlamaCppServer(server.id)));
+				const failures = servers.filter((_, index) => !results[index]).map(server => server.label);
+				if (failures.length === 0) {
+					response = { ok: true, status: 200 };
+					this._connections.set(provider, { ok: true, message: servers.length === 1 ? vscode.l10n.t('Connection successful') : vscode.l10n.t('All {0} servers reachable.', servers.length), checkedAt: new Date().toISOString() });
+					this.log('INFO', `llamacpp: all ${servers.length} server(s) reachable`);
+					void vscode.window.showInformationMessage(vscode.l10n.t('All {0} llama.cpp servers are reachable.', servers.length));
+					await this._render();
+					return true;
+				}
+				throw new Error(vscode.l10n.t('Unreachable server(s): {0}', failures.join(', ')));
 			} else if (provider === 'sglang') {
 				// SGLang is multi-server: probe every registered server and report
 				// an aggregate result, keeping the per-server outcomes in the
@@ -1985,8 +2339,24 @@ export class NikaSettingsEditor extends Disposable {
 				}
 				response = { ok: true, status: 200 };
 			} else {
-				const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
-				response = await this._fetcherService.fetch(`${url}/api/version`, { method: 'GET', callSite: 'nika-ollama-test' });
+				// Ollama is multi-host: probe every registered host and report an
+				// aggregate result, keeping the per-host outcomes in the servers
+				// card rows.
+				const servers = this._ollamaServers();
+				if (servers.length === 0) {
+					throw new Error(vscode.l10n.t('No Ollama host is configured.'));
+				}
+				const results = await Promise.all(servers.map(server => this._testOllamaServer(server.id)));
+				const failures = servers.filter((_, index) => !results[index]).map(server => server.label);
+				if (failures.length === 0) {
+					response = { ok: true, status: 200 };
+					this._connections.set(provider, { ok: true, message: servers.length === 1 ? vscode.l10n.t('Connection successful') : vscode.l10n.t('All {0} hosts reachable.', servers.length), checkedAt: new Date().toISOString() });
+					this.log('INFO', `ollama: all ${servers.length} host(s) reachable`);
+					void vscode.window.showInformationMessage(vscode.l10n.t('All {0} Ollama hosts are reachable.', servers.length));
+					await this._render();
+					return true;
+				}
+				throw new Error(vscode.l10n.t('Unreachable host(s): {0}', failures.join(', ')));
 			}
 			if (!response.ok) {
 				throw new Error(vscode.l10n.t('Connection returned HTTP {0}.', response.status));
@@ -2115,6 +2485,9 @@ export class NikaSettingsEditor extends Disposable {
 			providers: state.providers,
 			openrouterModelCount: (state.openrouterModels as unknown[]).length,
 			llamacppModelCount: (state.llamacppModels as unknown[]).length,
+			llamacppServers: state.llamacppServers,
+			ollamaModelCount: (state.ollamaModels as unknown[]).length,
+			ollamaServers: state.ollamaServers,
 			sglangModelCount: (state.sglangModels as unknown[]).length,
 			connections: state.connections,
 			settings: state.settings,
@@ -2164,6 +2537,8 @@ ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Provide
 <div class="card"><h2>${vscode.l10n.t('GitHub')}</h2><p class="hint">${vscode.l10n.t('NikaCode runs fully on your own models without a GitHub account. Turn GitHub on to restore Copilot integration.')}</p>${this._checkboxRow('github.enabled', vscode.l10n.t('Enable GitHub Copilot integration'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When off (default), no GitHub sign-in is required anywhere: chat, agent mode, inline chat, and the Agents window all use your Nika models. When on, GitHub sign-in prompts, Copilot utility models, and the GitHub MCP server are restored.')}</span></label></div></div></section>
 <section id="providers"><h1>${vscode.l10n.t('Providers')}</h1><p class="lead">${vscode.l10n.t('Add only the providers you use. The models you select are the only ones that appear in chat, Agents, and the model dropdowns.')}</p>
 <div data-provider-cards></div>
+<div data-llamacpp-servers></div>
+<div data-ollama-servers></div>
 <div data-sglang-servers></div>
 <div class="actions"><button class="action" data-wizard-add>${vscode.l10n.t('Add Provider')}</button></div>
 <div data-wizard></div>
@@ -2200,9 +2575,7 @@ function status(id,configured){const result=state.connections[id];const text=res
 // --- Provider wizard (Add Provider flow + provider cards) ---
 const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',sglang:'SGLang',cursor:'Cursor',deepseekweb:'DeepSeek Web',openai:'OpenAI',anthropic:'Anthropic',chatgpt:'ChatGPT',claude:'Claude',zai:'Z.ai'};
 const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','sglang','cursor','deepseekweb','openai','anthropic','chatgpt','claude','zai'];
-const providerHints={deepseek:'Flash, Pro, Flash Vision, and Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',sglang:'Every model served by your registered SGLang servers (add one entry per server URL)',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota',zai:'The GLM lineup on platform.z.ai (GLM-5.x, GLM-4.x, vision models)'};
-const sglangServers=state.sglangServers||[];
-const sglangConnections=state.sglangConnections||{};
+const providerHints={deepseek:'Flash, Pro, Flash Vision, and Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Every model pulled on your registered Ollama hosts (add one entry per host URL)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Every model loaded on your registered llama.cpp servers (add one entry per server URL)',sglang:'Every model served by your registered SGLang servers (add one entry per server URL)',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota',zai:'The GLM lineup on platform.z.ai (GLM-5.x, GLM-4.x, vision models)'};
 const providerModels=state.providerModels||{};
 const providerConfig=state.providers||{};
 const providersManaged=!!state.providersManaged;
@@ -2236,42 +2609,47 @@ function renderProviderCards(){
     ids.forEach(id=>status(id,true));
   });
 }
-// SGLang is the only multi-server provider: every registered URL keeps its
-// own models and its own optional API key. The manager renders once a server
-// exists (or the provider was added through the wizard), so setups that never
-// run SGLang see nothing extra.
-function renderSglangServers(){
-  const hosts=document.querySelectorAll('[data-sglang-servers]');
+// SGLang, llama.cpp, and Ollama are multi-server providers: every registered
+// URL keeps its own models and its own optional API key. One shared renderer
+// draws all three, so setups that never register a server see nothing extra.
+const multiServerConfigs=[
+  {provider:'sglang',host:'[data-sglang-servers]',servers:state.sglangServers||[],connections:state.sglangConnections||{},prefix:'sglang/',placeholder:'http://localhost:30000',title:'SGLang',noun:'server',keyHint:'Only if the server requires one'},
+  {provider:'llamacpp',host:'[data-llamacpp-servers]',servers:state.llamacppServers||[],connections:state.llamacppConnections||{},prefix:'llamacpp/',placeholder:'http://localhost:8080',title:'llama.cpp',noun:'server',keyHint:'Only if the server requires one'},
+  {provider:'ollama',host:'[data-ollama-servers]',servers:state.ollamaServers||[],connections:state.ollamaConnections||{},prefix:'ollama/',placeholder:'http://localhost:11434',title:'Ollama',noun:'host',keyHint:'Only if a proxy in front of Ollama requires one'}
+];
+function renderMultiServers(cfg){
+  const hosts=document.querySelectorAll(cfg.host);
   if(!hosts.length){return;}
-  const managed=providersManaged&&!!providerConfig.sglang;
-  if(!sglangServers.length&&!managed){hosts.forEach(el=>{el.innerHTML='';});return;}
+  const managed=providersManaged&&!!providerConfig[cfg.provider];
+  if(!cfg.servers.length&&!managed){hosts.forEach(el=>{el.innerHTML='';});return;}
   // Managed mode lists a provider card (and its Manage models button) only
   // once the provider itself was added, so a freshly registered server would
   // otherwise have no way to reach model selection. Offer it right here.
-  const needProvider=providersManaged&&!providerConfig.sglang;
-  const selectButton=needProvider?'<button class="action" data-manage-models="sglang">'+esc('Select models')+'</button>':'';
-  const cards=sglangServers.map(s=>{
-    const result=sglangConnections[s.id];
+  const needProvider=providersManaged&&!providerConfig[cfg.provider];
+  const selectButton=needProvider?'<button class="action" data-manage-models="'+cfg.provider+'">'+esc('Select models')+'</button>':'';
+  const cards=cfg.servers.map(s=>{
+    const result=cfg.connections[s.id];
     const badge=result?(' <span class="pill'+(result.ok?' ok':'')+'"><span class="dot"></span></span> '+esc(result.ok?'Connected':result.message)):'';
     const modelText=s.models===0?esc('No models reported'):esc(s.models===1?'1 model':s.models+' models');
     const err=s.error?'<div class="row"><label><strong>'+esc('Last error')+'</strong></label><span class="hint" style="color:var(--vscode-errorForeground)">'+esc(s.error)+'</span></div>':'';
-    return '<div class="card"><div class="row"><label><strong>'+esc(s.label)+'</strong><span class="hint">'+esc(s.baseUrl)+' &middot; '+modelText+badge+'</span></label><div class="controls wrap">'+selectButton+'<button class="action secondary" data-sglang-test="'+esc(s.id)+'">'+esc('Test')+'</button><button class="action danger" data-sglang-remove="'+esc(s.id)+'">'+esc('Remove')+'</button></div></div>'+err+
-      '<div class="row"><label for="sglangKey-'+esc(s.id)+'"><strong>'+esc('API key (optional)')+'</strong><span class="hint">'+esc(s.configured?'A key is stored for this server.':'No key stored - requests are sent unauthenticated.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="sglangKey-'+esc(s.id)+'" placeholder="'+esc('New key, or empty to clear')+'"><button class="action secondary" data-sglang-key-save="'+esc(s.id)+'">'+esc('Save key')+'</button></div></div></div>';
+    return '<div class="card"><div class="row"><label><strong>'+esc(s.label)+'</strong><span class="hint">'+esc(s.baseUrl)+' &middot; '+modelText+badge+'</span></label><div class="controls wrap">'+selectButton+'<button class="action secondary" data-multi-test="'+cfg.provider+'" data-multi-id="'+esc(s.id)+'">'+esc('Test')+'</button><button class="action danger" data-multi-remove="'+cfg.provider+'" data-multi-id="'+esc(s.id)+'">'+esc('Remove')+'</button></div></div>'+err+
+      '<div class="row"><label for="multiKey-'+cfg.provider+'-'+esc(s.id)+'"><strong>'+esc('API key (optional)')+'</strong><span class="hint">'+esc(s.configured?'A key is stored for this '+cfg.noun+'.':'No key stored - requests are sent unauthenticated.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="multiKey-'+cfg.provider+'-'+esc(s.id)+'" placeholder="'+esc('New key, or empty to clear')+'"><button class="action secondary" data-multi-key-save="'+cfg.provider+'" data-multi-id="'+esc(s.id)+'">'+esc('Save key')+'</button></div></div></div>';
   }).join('');
-  const add='<div class="card"><h2>'+esc('Add SGLang server')+'</h2><p class="hint">'+esc('Register another SGLang server URL. Each server keeps its own models and its own optional API key, so several boxes can run side by side.')+'</p>'
-    +'<div class="row"><label for="sglangAddUrl"><strong>'+esc('Server URL')+'</strong></label><div class="controls"><input id="sglangAddUrl" type="text" placeholder="http://localhost:30000"></div></div>'
-    +'<div class="row"><label for="sglangAddName"><strong>'+esc('Name (optional)')+'</strong><span class="hint">'+esc('Shown in the model picker to tell your servers apart.')+'</span></label><div class="controls"><input id="sglangAddName" type="text" placeholder="'+esc('Defaults to the host and port')+'"></div></div>'
-    +'<div class="row"><label for="sglangAddKey"><strong>'+esc('API key (optional)')+'</strong></label><div class="controls"><input id="sglangAddKey" type="password" autocomplete="off" placeholder="'+esc('Only if the server requires one')+'"></div></div>'
-    +'<div class="actions"><button class="action" data-sglang-add>'+esc('Add server')+'</button><button class="action secondary" data-sglang-test-all>'+esc('Test all servers')+'</button></div></div>';
-  hosts.forEach(el=>{el.innerHTML=(cards||'<div class="empty">'+esc('No SGLang server registered yet.')+'</div>')+add;});
+  const add='<div class="card"><h2>'+esc('Add '+cfg.title+' '+cfg.noun)+'</h2><p class="hint">'+esc('Register another '+cfg.title+' URL. Each '+cfg.noun+' keeps its own models and its own optional API key, so several can run side by side.')+'</p>'
+    +'<div class="row"><label for="multiAddUrl-'+cfg.provider+'"><strong>'+esc('Server URL')+'</strong></label><div class="controls"><input id="multiAddUrl-'+cfg.provider+'" type="text" placeholder="'+esc(cfg.placeholder)+'"></div></div>'
+    +'<div class="row"><label for="multiAddName-'+cfg.provider+'"><strong>'+esc('Name (optional)')+'</strong><span class="hint">'+esc('Shown in the model picker to tell your '+cfg.noun+'s apart.')+'</span></label><div class="controls"><input id="multiAddName-'+cfg.provider+'" type="text" placeholder="'+esc('Defaults to the host and port')+'"></div></div>'
+    +'<div class="row"><label for="multiAddKey-'+cfg.provider+'"><strong>'+esc('API key (optional)')+'</strong></label><div class="controls"><input id="multiAddKey-'+cfg.provider+'" type="password" autocomplete="off" placeholder="'+esc(cfg.keyHint)+'"></div></div>'
+    +'<div class="actions"><button class="action" data-multi-add="'+cfg.provider+'">'+esc('Add '+cfg.noun)+'</button><button class="action secondary" data-multi-test-all="'+cfg.provider+'">'+esc('Test all')+'</button></div></div>';
+  hosts.forEach(el=>{el.innerHTML=(cards||'<div class="empty">'+esc('No '+cfg.title+' '+cfg.noun+' registered yet.')+'</div>')+add;});
 }
+function renderSglangServers(){multiServerConfigs.forEach(renderMultiServers);}
 function wizardStepHtml(){
   const w=wizardState();if(!w){return '';}
   const label=providerLabels[w.provider]||'';
   let html='<h2>'+esc(w.step==='pick'?'Add Provider':(w.step==='models'?label+' · Select models':label))+'</h2>';
   if(w.step==='pick'){
     const available=providerOrder.filter(id=>!providersManaged||!providerConfig[id]);
-    const credentialPill={chatgpt:'Subscription',claude:'Subscription',deepseekweb:'Web token',ollama:'Local',llamacpp:'Local',sglang:'Multi-server'};
+    const credentialPill={chatgpt:'Subscription',claude:'Subscription',deepseekweb:'Web token',ollama:'Multi-server',llamacpp:'Multi-server',sglang:'Multi-server'};
     const riskPill={chatgpt:'&#9888; Risk',claude:'&#9888; Risk'};
     html+=available.length?available.map(id=>{
       const pill=credentialPill[id]||'API key';
@@ -2282,10 +2660,13 @@ function wizardStepHtml(){
   }
   if(w.step==='config'){
     if(w.provider==='ollama'){
-      html+='<div class="row"><label for="wizardOllamaUrl"><strong>'+esc('Ollama host')+'</strong><span class="hint">'+esc('The host that runs Ollama.')+'</span></label><div class="controls"><input id="wizardOllamaUrl" type="text" value="'+esc(settings.ollamaBaseUrl||'http://localhost:11434')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
+      html+='<div class="row"><label for="wizardOllamaUrl"><strong>'+esc('Ollama host URL')+'</strong><span class="hint">'+esc('The OpenAI-compatible Ollama host, for example http://localhost:11434. Add one entry per host; each gets its own models.')+'</span></label><div class="controls"><input id="wizardOllamaUrl" type="text" placeholder="http://localhost:11434"><button class="action" data-wizard-next>'+esc('Add & Next')+'</button></div></div>';
+      html+='<div class="row"><label for="wizardOllamaLabel"><strong>'+esc('Host name (optional)')+'</strong><span class="hint">'+esc('Shown in the model picker to tell your hosts apart, e.g. gpu-rig.')+'</span></label><div class="controls"><input id="wizardOllamaLabel" type="text" placeholder="'+esc('Defaults to the host and port')+'"></div></div>';
+      html+='<div class="row"><label><strong>'+esc('Ollama API key (optional)')+'</strong><span class="hint">'+esc('Only needed when a proxy in front of Ollama requires one. Leave empty otherwise.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardOllamaKey" placeholder="'+esc('Paste the API key')+'"></div></div>';
     }else if(w.provider==='llamacpp'){
-      html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp host')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server (default http://localhost:8080).')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" value="'+esc(state.llamaCppBaseUrl||'http://localhost:8080')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
-      html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Leave empty for no authentication.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste your API key')+'"></div></div>';
+      html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp server URL')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server, for example http://localhost:8080. Add one entry per server; each gets its own models and optional key.')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" placeholder="http://localhost:8080"><button class="action" data-wizard-next>'+esc('Add & Next')+'</button></div></div>';
+      html+='<div class="row"><label for="wizardLlamaCppLabel"><strong>'+esc('Server name (optional)')+'</strong><span class="hint">'+esc('Shown in the model picker to tell your servers apart, e.g. gpu-rig.')+'</span></label><div class="controls"><input id="wizardLlamaCppLabel" type="text" placeholder="'+esc('Defaults to the host and port')+'"></div></div>';
+      html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Only needed when the server was launched with --api-key. Leave empty otherwise.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste the server API key')+'"></div></div>';
     }else if(w.provider==='sglang'){
       html+='<div class="row"><label for="wizardSglangUrl"><strong>'+esc('SGLang server URL')+'</strong><span class="hint">'+esc('The OpenAI-compatible SGLang server, for example http://localhost:30000. Add one entry per server; each gets its own models and optional key.')+'</span></label><div class="controls"><input id="wizardSglangUrl" type="text" placeholder="http://localhost:30000"><button class="action" data-wizard-next>'+esc('Add & Next')+'</button></div></div>';
       html+='<div class="row"><label for="wizardSglangLabel"><strong>'+esc('Server name (optional)')+'</strong><span class="hint">'+esc('Shown in the model picker to tell your servers apart, e.g. gpu-rig.')+'</span></label><div class="controls"><input id="wizardSglangLabel" type="text" placeholder="'+esc('Defaults to the host and port')+'"></div></div>';
@@ -2313,10 +2694,15 @@ function wizardStepHtml(){
   if(!list.length&&w.provider==='anthropic'){html+='<p class="hint">'+esc('No catalog models available. Check that the Anthropic API key is valid.')+'</p>';}
   if(!list.length&&w.provider==='zai'){html+='<p class="hint">'+esc('No catalog models available. Check that the Z.ai API key is valid.')+'</p>';}
   if(!list.length&&(w.provider==='chatgpt'||w.provider==='claude')){html+='<p class="hint">'+esc('No models available. Complete the sign-in first.')+'</p>';}
-  if(!list.length&&(w.provider==='ollama'||w.provider==='llamacpp')){html+='<p class="hint">'+esc('No models found. Is the server running with models loaded? For Ollama, run ollama pull <model> to add one.')+'</p>';}
-  if(!list.length&&w.provider==='sglang'){
-    const failures=sglangServers.filter(s=>s.error).map(s=>s.label+': '+s.error).join(' · ');
-    html+='<p class="hint">'+esc('No models found on the registered SGLang servers.'+(failures?' '+failures:' Check the server URLs and that each server is running with a model loaded.'))+'</p>';
+  if(!list.length&&(w.provider==='ollama'||w.provider==='llamacpp'||w.provider==='sglang')){
+    // Every multi-server family reports each unreachable server's own error,
+    // so a dead box is explained instead of guessed at.
+    const cfg=multiServerConfigs.find(c=>c.provider===w.provider);
+    const failures=cfg?cfg.servers.filter(s=>s.error).map(s=>s.label+': '+s.error).join(' · '):'';
+    const fallback=w.provider==='ollama'
+      ?' Check the host URLs and that each host is running with models pulled (ollama pull <model>).'
+      :' Check the server URLs and that each server is running with a model loaded.';
+    html+='<p class="hint">'+esc('No models found on the registered '+cfg.title+' '+cfg.noun+'s.'+(failures?' '+failures:fallback))+'</p>';
   }
   html+='<div data-wizard-model-list></div>';
   html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button><button class="action secondary" data-wizard-test>'+esc('Test connection')+'</button><button class="action" data-wizard-done>'+esc('Done')+'</button></div>';
@@ -2340,9 +2726,17 @@ function renderWizard(){
   });
 }
 renderProviderCards();renderSglangServers();renderWizard();
-const sglangAddBtn=document.querySelectorAll('[data-sglang-add]');
-sglangAddBtn.forEach(btn=>btn.addEventListener('click',()=>{const url=document.getElementById('sglangAddUrl');const name=document.getElementById('sglangAddName');const key=document.getElementById('sglangAddKey');post({type:'addSglangServer',label:name?name.value:'',url:url?url.value:'',value:key?key.value:''});}));
-document.querySelectorAll('[data-sglang-test-all]').forEach(btn=>btn.addEventListener('click',()=>post({type:'testConnection',provider:'sglang'})));
+// Multi-server add/test-all buttons are wired per provider through the shared
+// data-multi-* attributes, so one listener covers SGLang, llama.cpp, Ollama.
+document.querySelectorAll('[data-multi-add]').forEach(btn=>btn.addEventListener('click',()=>{
+  const p=btn.dataset.multiAdd;
+  const url=document.getElementById('multiAddUrl-'+p);
+  const name=document.getElementById('multiAddName-'+p);
+  const key=document.getElementById('multiAddKey-'+p);
+  post({type:'add'+multiServerType(p)+'Server',label:name?name.value:'',url:url?url.value:'',value:key?key.value:''});
+}));
+document.querySelectorAll('[data-multi-test-all]').forEach(btn=>btn.addEventListener('click',()=>post({type:'testConnection',provider:btn.dataset.multiTestAll})));
+function multiServerType(provider){return provider==='sglang'?'Sglang':(provider==='llamacpp'?'LlamaCpp':'Ollama');}
 document.querySelectorAll('[data-wizard-add]').forEach(btn=>btn.addEventListener('click',()=>{setWizard({step:'pick'});renderWizard();}));
 document.addEventListener('click',e=>{
   const pick=e.target.closest('[data-wizard-pick]');
@@ -2351,9 +2745,9 @@ document.addEventListener('click',e=>{
   if(back){const w=wizardState();if(!w)return;setWizard({provider:w.provider,step:w.step==='config'?'pick':'config',models:w.models||[]});renderWizard();return;}
   const next=e.target.closest('[data-wizard-next]');
   if(next){const w=wizardState();if(!w)return;
-    if(w.provider==='ollama'){const input=document.getElementById('wizardOllamaUrl');post({type:'saveSetting',key:'ollamaBaseUrl',value:input?input.value:'http://localhost:11434'});}
+    if(w.provider==='ollama'){const host=document.getElementById('wizardOllamaUrl');const name=document.getElementById('wizardOllamaLabel');const key=document.getElementById('wizardOllamaKey');post({type:'addOllamaServer',label:name?name.value:'',url:host?host.value:'',value:key?key.value:''});}
     else if(w.provider==='sglang'){const host=document.getElementById('wizardSglangUrl');const name=document.getElementById('wizardSglangLabel');const key=document.getElementById('wizardSglangKey');post({type:'addSglangServer',label:name?name.value:'',url:host?host.value:'',value:key?key.value:''});}
-    else if(w.provider==='llamacpp'){const host=document.getElementById('wizardLlamaCppUrl');post({type:'saveSetting',key:'llamaCppBaseUrl',value:host?host.value:'http://localhost:8080'});const key=document.getElementById('wizardLlamaCppKey');if(key&&key.value.trim()){post({type:'saveSecret',provider:'llamacpp',value:key.value});}}
+    else if(w.provider==='llamacpp'){const host=document.getElementById('wizardLlamaCppUrl');const name=document.getElementById('wizardLlamaCppLabel');const key=document.getElementById('wizardLlamaCppKey');post({type:'addLlamaCppServer',label:name?name.value:'',url:host?host.value:'',value:key?key.value:''});}
     else{const input=document.getElementById('wizardKey');post({type:'saveSecret',provider:w.provider,value:input?input.value:''});}
     setWizard({provider:w.provider,step:'models',models:[]});
     return;
@@ -2380,12 +2774,12 @@ document.addEventListener('click',e=>{
   if(manage){const id=manage.dataset.manageModels;const existing=providerConfig[id]?providerConfig[id].models:[];setWizard({provider:id,step:'models',models:existing.slice()});renderWizard();renderWizardModelList('');return;}
   const remove=e.target.closest('[data-remove-provider]');
   if(remove){post({type:'removeProvider',provider:remove.dataset.removeProvider});return;}
-  const sglangRemove=e.target.closest('[data-sglang-remove]');
-  if(sglangRemove){post({type:'removeSglangServer',id:sglangRemove.dataset.sglangRemove});return;}
-  const sglangTest=e.target.closest('[data-sglang-test]');
-  if(sglangTest){post({type:'testSglangServer',id:sglangTest.dataset.sglangTest});return;}
-  const sglangKey=e.target.closest('[data-sglang-key-save]');
-  if(sglangKey){const id=sglangKey.dataset.sglangKeySave;const input=document.getElementById('sglangKey-'+id);post({type:'saveSglangServerKey',id:id,value:input?input.value:''});if(input){input.value='';}return;}
+  const multiRemove=e.target.closest('[data-multi-remove]');
+  if(multiRemove){post({type:'remove'+multiServerType(multiRemove.dataset.multiRemove)+'Server',id:multiRemove.dataset.multiId});return;}
+  const multiTest=e.target.closest('[data-multi-test]');
+  if(multiTest){post({type:'test'+multiServerType(multiTest.dataset.multiTest)+'Server',id:multiTest.dataset.multiId});return;}
+  const multiKey=e.target.closest('[data-multi-key-save]');
+  if(multiKey){const p=multiKey.dataset.multiKeySave;const id=multiKey.dataset.multiId;const input=document.getElementById('multiKey-'+p+'-'+id);post({type:'save'+multiServerType(p)+'ServerKey',id:id,value:input?input.value:''});if(input){input.value='';}return;}
 });
 // Subscription device-flow state is declared above (before the first render);
 // renderSubFlow renders the live flow card for the wizard's config step.
@@ -2560,8 +2954,8 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			deepseek: [vscode.l10n.t('DeepSeek'), vscode.l10n.t('Flash, Pro, Flash Vision, and Responses')],
 			gemini: [vscode.l10n.t('Gemini'), vscode.l10n.t('Every Gemini model on the Google catalog')],
 			openrouter: [vscode.l10n.t('OpenRouter'), vscode.l10n.t('The full model catalog at OpenRouter prices')],
-			ollama: [vscode.l10n.t('Ollama'), vscode.l10n.t('Models pulled on the configured host')],
-			llamacpp: [vscode.l10n.t('llama.cpp'), vscode.l10n.t('Models loaded on the configured llama.cpp server')],
+			ollama: [vscode.l10n.t('Ollama'), vscode.l10n.t('Models pulled on your registered Ollama hosts')],
+			llamacpp: [vscode.l10n.t('llama.cpp'), vscode.l10n.t('Models loaded on your registered llama.cpp servers')],
 			sglang: [vscode.l10n.t('SGLang'), vscode.l10n.t('Models served by your registered SGLang servers')],
 			cursor: [vscode.l10n.t('Cursor'), vscode.l10n.t('Cursor API models billed to your Cursor account')],
 			chatgpt: [vscode.l10n.t('ChatGPT'), vscode.l10n.t('ChatGPT Plus/Pro sign-in; uses your plan quota')],
@@ -2571,9 +2965,10 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 		const configured = (state.providersConfigured ?? {}) as Record<string, boolean>;
 		const ids = state.providersManaged
 			? Object.keys(configured).filter(id => configured[id])
-			// Legacy mode keeps the classic rows; SGLang joins them only once a
-			// server URL is configured (it has no classic key to key off).
-			: [...['deepseek', 'gemini', 'openrouter', 'ollama', 'llamacpp', 'cursor'], ...(configured.sglang ? ['sglang'] : [])];
+			// Legacy mode keeps the classic rows; the multi-server families join
+			// them only once a server URL is configured (they have no classic
+			// key to key off).
+			: [...['deepseek', 'gemini', 'openrouter', 'cursor'], ...['ollama', 'llamacpp', 'sglang'].filter(id => configured[id])];
 		if (ids.length === 0) {
 			return `<div class="empty">${vscode.l10n.t('No providers added yet.')}</div>`;
 		}

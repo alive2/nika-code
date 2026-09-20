@@ -54,7 +54,9 @@ import {
 	NIKA_GEMMA_MODEL_ID,
 	NIKA_LLAMACPP_MODEL_PREFIX,
 	NIKA_LLAMACPP_SECRET,
+	NIKA_LLAMACPP_SECRET_PREFIX,
 	NIKA_OLLAMA_MODEL_PREFIX,
+	NIKA_OLLAMA_SECRET_PREFIX,
 	NIKA_OPENAI_MODEL_PREFIX,
 	NIKA_OPENAI_SECRET,
 	NIKA_OPENROUTER_MODEL_PREFIX,
@@ -70,13 +72,22 @@ import {
 	NikaModelId,
 	NikaProviderConfig,
 	NikaSglangServer,
+	NikaUrlServer,
+	nikaLlamaCppApiKeySecret,
+	nikaLlamaCppModelId,
+	nikaOllamaApiKeySecret,
+	nikaOllamaModelId,
 	nikaSglangApiKeySecret,
 	nikaSglangModelId,
 	parseNikaChatGptSubscriptionToken,
 	parseNikaClaudeSubscriptionToken,
+	parseNikaLlamaCppModelId,
+	parseNikaOllamaModelId,
 	parseNikaProviderConfig,
 	parseNikaSglangModelId,
 	parseNikaSglangServers,
+	parseNikaLlamaCppServers,
+	parseNikaOllamaServers,
 	resolveNikaTokenLimits,
 	slugifyNikaSglangServerId,
 } from './nikaModels';
@@ -85,7 +96,7 @@ import { NikaOpenAIProvider, nikaOpenAIModelId, resolveOpenAIModelCapabilities }
 import { NikaAnthropicProvider, nikaAnthropicModelId, resolveAnthropicModelCapabilities } from './nikaAnthropicProvider';
 import { NikaChatGptSubProvider, nikaChatGptModelId, resolveChatGptSubModelCapabilities } from './nikaChatGptSubProvider';
 import { NikaClaudeSubProvider, nikaClaudeModelId } from './nikaClaudeSubProvider';
-import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, NikaLlamaCppProvider, nikaLlamaCppModelId } from './nikaLlamaCppProvider';
+import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, NikaLlamaCppProvider } from './nikaLlamaCppProvider';
 import { NikaSglangProvider } from './nikaSglangProvider';
 import { NikaCursorProvider, nikaCursorModelId } from './nikaCursorProvider';
 import { NikaZaiProvider, nikaZaiModelId } from './nikaZaiProvider';
@@ -142,7 +153,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private readonly _anthropicProvider: NikaAnthropicProvider;
 	private readonly _chatGptSubProvider: NikaChatGptSubProvider;
 	private readonly _claudeSubProvider: NikaClaudeSubProvider;
-	private _ollamaCatalogCache: { readonly fetchedAt: number; readonly models: ReadonlyMap<string, OllamaCatalogModel> } | undefined;
+	private _ollamaCatalogCache = new Map<string, { readonly fetchedAt: number; readonly models: ReadonlyMap<string, OllamaCatalogModel> }>();
 	private _chatGptRefresh: Promise<NikaChatGptSubscriptionToken | undefined> | undefined;
 	private _claudeRefresh: Promise<NikaClaudeSubscriptionToken | undefined> | undefined;
 	readonly settingsEditor: NikaSettingsEditor;
@@ -177,7 +188,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._register(this._instantiationService.createInstance(NikaUsageStatus, this.settingsEditor, this.usageTracker));
 
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET || event.key.startsWith(NIKA_SGLANG_SECRET_PREFIX)) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET || event.key.startsWith(NIKA_SGLANG_SECRET_PREFIX) || event.key.startsWith(NIKA_LLAMACPP_SECRET_PREFIX) || event.key.startsWith(NIKA_OLLAMA_SECRET_PREFIX)) {
 				if (event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET) {
 					// A changed key must never reuse a stale catalog fetch.
 					this._openRouterProvider.invalidateCache();
@@ -188,6 +199,14 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 					// SGLang keys are per server (`nika.sglang.<id>.apiKey`), so the
 					// change cannot be matched by equality; every catalog is dropped.
 					this._sglangProvider.invalidateCache();
+				}
+				if (event.key.startsWith(NIKA_LLAMACPP_SECRET_PREFIX)) {
+					// llama.cpp keys are per server (`nika.llamacpp.<id>.apiKey`).
+					this._llamaCppProvider.invalidateCache();
+				}
+				if (event.key.startsWith(NIKA_OLLAMA_SECRET_PREFIX)) {
+					// Ollama keys are per host (`nika.ollama.<id>.apiKey`).
+					this._ollamaCatalogCache.clear();
 				}
 				if (event.key === NIKA_GEMINI_SECRET) {
 					this._geminiCatalogProvider.invalidateCache();
@@ -215,12 +234,13 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			if (event.affectsConfiguration('nika.providers')) {
 				this._onDidChange.fire();
 			}
-			if (event.affectsConfiguration('nika.outputTokens') || event.affectsConfiguration('nika.contextWindow') || event.affectsConfiguration('nika.thinkingEffort') || event.affectsConfiguration('nika.ollamaBaseUrl')) {
-				this._ollamaCatalogCache = undefined;
+			if (event.affectsConfiguration('nika.outputTokens') || event.affectsConfiguration('nika.contextWindow') || event.affectsConfiguration('nika.thinkingEffort') || event.affectsConfiguration('nika.ollama.servers')) {
+				this._ollamaCatalogCache.clear();
 				this._ollamaProvider.updateKnownModels(this._gemmaKnownModels());
 				this._onDidChange.fire();
 			}
-			if (event.affectsConfiguration('nika.llamaCppBaseUrl')) {
+			if (event.affectsConfiguration('nika.llamacpp.servers')) {
+				// Servers can be added, removed, or repointed: every catalog goes.
 				this._llamaCppProvider.invalidateCache();
 				this._onDidChange.fire();
 			}
@@ -233,11 +253,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	async provideLanguageModelChatInformation(_options: vscode.PrepareLanguageModelChatModelOptions, _token: vscode.CancellationToken): Promise<NikaLanguageModelChatInformation[]> {
-		const [deepseekKey, geminiKey, openRouterKey, llamaCppKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, chatGptSubToken, claudeSubToken, zaiKey] = await Promise.all([
+		const [deepseekKey, geminiKey, openRouterKey, cursorKey, deepSeekWebToken, openAIKey, anthropicKey, chatGptSubToken, claudeSubToken, zaiKey] = await Promise.all([
 			this._context.secrets.get(NIKA_DEEPSEEK_SECRET),
 			this._context.secrets.get(NIKA_GEMINI_SECRET),
 			this._context.secrets.get(NIKA_OPENROUTER_SECRET),
-			this._context.secrets.get(NIKA_LLAMACPP_SECRET),
 			this._context.secrets.get(NIKA_CURSOR_SECRET),
 			this._context.secrets.get(NIKA_DEEPSEEK_WEB_SECRET),
 			this._context.secrets.get(NIKA_OPENAI_SECRET),
@@ -524,14 +543,36 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			}
 		}
 
-		const llamaCppBaseUrl = this._llamaCppBaseUrl();
-		if (llamaCppBaseUrl) {
+		// llama.cpp catalogs: several servers can be registered at once, each with
+		// its own base URL and optional API key, and each contributing its own
+		// model id space (`llamacpp/<server id>/<raw id>`). Managed mode exposes
+		// exactly the wizard-selected models; legacy mode exposes every model
+		// whenever at least one server is configured. A server that is
+		// unreachable must not hide the models of the other servers, so each
+		// catalog fetch is isolated.
+		const llamaCppServers = this._llamaCppServers();
+		if (llamaCppServers.length > 0) {
 			const selected = getNikaSelectedModels(providerConfig, 'llamacpp');
 			if (selected === undefined ? providerConfig === undefined : selected.length > 0) {
-				try {
-					const catalog = await this._llamaCppProvider.getCatalog(llamaCppBaseUrl, llamaCppKey ?? undefined);
+				const apiKeys = await Promise.all(llamaCppServers.map(server => this._llamaCppApiKey(server)));
+				const catalogs = await Promise.all(llamaCppServers.map(async (server, index) => {
+					try {
+						return await this._llamaCppProvider.getCatalog(server.baseUrl, apiKeys[index]);
+					} catch (error) {
+						// Isolated per server: one unreachable box must not hide the
+						// models served by the others.
+						this.logLlamaCppError(error, server);
+						return undefined;
+					}
+				}));
+				for (let index = 0; index < llamaCppServers.length; index++) {
+					const server = llamaCppServers[index];
+					const catalog = catalogs[index];
+					if (!catalog) {
+						continue;
+					}
 					for (const [rawId, model] of catalog) {
-						const id = nikaLlamaCppModelId(rawId);
+						const id = nikaLlamaCppModelId(server.id, rawId);
 						if (selected && !selected.includes(id)) {
 							continue;
 						}
@@ -540,7 +581,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 							...base,
 							name: model.name,
 							detail: vscode.l10n.t('Nika'),
-							tooltip: this._llamaCppTooltip(rawId, llamaCppBaseUrl),
+							tooltip: this._llamaCppTooltip(rawId, server),
 							// llama.cpp models are multimodal-capable: image parts ride
 							// through natively as image_url data URIs with no vision
 							// backend preprocessing.
@@ -553,10 +594,6 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 							statusIcon: new vscode.ThemeIcon('server'),
 						});
 					}
-				} catch (error) {
-					// A server that is unreachable (or a server without any loaded
-					// models) must not hide the other Nika models: log and continue.
-					this.logLlamaCppError(error);
 				}
 			}
 		}
@@ -696,18 +733,33 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			}
 		}
 
-		// Dynamic Ollama catalog: managed mode exposes exactly the wizard-
-		// selected models pulled on the configured host. Legacy mode needs no
-		// catalog here — the classic Gemma id is already part of the native
-		// entries above.
-		if (providerConfig) {
+		// Dynamic Ollama catalogs: several hosts can be registered at once, each
+		// contributing its own model id space (`ollama/<server id>/<name>`).
+		// Managed mode exposes exactly the wizard-selected models pulled on the
+		// configured hosts. Legacy mode needs no catalog here — the classic
+		// Gemma id is already part of the native entries above. An unreachable
+		// host must not hide the models of the others, so each fetch is isolated.
+		const ollamaServers = this._ollamaServers();
+		if (providerConfig && ollamaServers.length > 0) {
 			const selected = getNikaSelectedModels(providerConfig, 'ollama');
 			if (selected && selected.length > 0) {
-				const ollamaBaseUrl = this._ollamaBaseUrl();
-				try {
-					const catalog = await this._ollamaCatalog(ollamaBaseUrl);
+				const apiKeys = await Promise.all(ollamaServers.map(server => this._ollamaApiKey(server)));
+				const catalogs = await Promise.all(ollamaServers.map(async (server, index) => {
+					try {
+						return await this._ollamaCatalog(server, apiKeys[index]);
+					} catch (error) {
+						this.logOllamaError(error, server);
+						return undefined;
+					}
+				}));
+				for (let index = 0; index < ollamaServers.length; index++) {
+					const server = ollamaServers[index];
+					const catalog = catalogs[index];
+					if (!catalog) {
+						continue;
+					}
 					for (const [name, model] of catalog) {
-						const id = `${NIKA_OLLAMA_MODEL_PREFIX}${name}`;
+						const id = nikaOllamaModelId(server.id, name);
 						if (!selected.includes(id)) {
 							continue;
 						}
@@ -716,7 +768,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 							...base,
 							name: model.name,
 							detail: vscode.l10n.t('Nika'),
-							tooltip: this._ollamaTooltip(name, ollamaBaseUrl),
+							tooltip: this._ollamaTooltip(name, server),
 							capabilities: {
 								...base.capabilities,
 								imageInput: true,
@@ -726,9 +778,6 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 							statusIcon: new vscode.ThemeIcon('server'),
 						});
 					}
-				} catch (error) {
-					// An unreachable host must not hide the other Nika models.
-					this.logOllamaError(error);
 				}
 			}
 		}
@@ -785,8 +834,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return rawId;
 	}
 
-	private _llamaCppTooltip(rawId: string, baseUrl: string): string {
-		return vscode.l10n.t('{0} served by llama.cpp at {1}. Images pass through natively (no vision backend).', rawId, baseUrl);
+	private _llamaCppTooltip(rawId: string, server: NikaUrlServer): string {
+		return vscode.l10n.t('{0} served by the llama.cpp server {1} at {2}. Images pass through natively (no vision backend).', rawId, server.label, server.baseUrl);
 	}
 
 	private _sglangTooltip(rawId: string, server: NikaSglangServer): string {
@@ -805,16 +854,73 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return vscode.l10n.t('{0} served by the Z.ai (GLM) API with catalog pricing.', rawId);
 	}
 
-	private _ollamaTooltip(name: string, baseUrl: string): string {
-		return vscode.l10n.t('{0} served by Ollama at {1}. Images pass through natively (no vision backend).', name, baseUrl);
+	private _ollamaTooltip(name: string, server: NikaUrlServer): string {
+		return vscode.l10n.t('{0} served by the Ollama host {1} at {2}. Images pass through natively (no vision backend).', name, server.label, server.baseUrl);
 	}
 
-	private _llamaCppBaseUrl(): string {
-		return vscode.workspace.getConfiguration('nika').get<string>('llamaCppBaseUrl', 'http://localhost:8080').replace(/\/$/, '');
+	/**
+	 * The registered llama.cpp servers (`nika.llamacpp.servers`). Several
+	 * servers can be active at once; each contributes its own catalog and id
+	 * space (`llamacpp/<server id>/<raw id>`).
+	 */
+	private _llamaCppServers(): readonly NikaUrlServer[] {
+		return parseNikaLlamaCppServers(vscode.workspace.getConfiguration('nika').get('llamacpp.servers'));
 	}
 
-	private _ollamaBaseUrl(): string {
-		return vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
+	/**
+	 * The registered Ollama hosts (`nika.ollama.servers`). Several hosts can be
+	 * active at once; each contributes its own catalog and id space
+	 * (`ollama/<server id>/<name>`).
+	 */
+	private _ollamaServers(): readonly NikaUrlServer[] {
+		return parseNikaOllamaServers(vscode.workspace.getConfiguration('nika').get('ollama.servers'));
+	}
+
+	/**
+	 * Resolve the server and raw model id behind an exposed llama.cpp model id
+	 * (`llamacpp/<server id>/<raw id>`). Matches by server id first, then falls
+	 * back to the slug of the server URL so an id that was derived differently
+	 * (hand-edited settings, renamed label) still routes to the right host.
+	 */
+	private _resolveLlamaCppTarget(id: string): { readonly server: NikaUrlServer; readonly rawId: string } | undefined {
+		return this._resolveUrlServerTarget(id, parseNikaLlamaCppModelId(id), this._llamaCppServers());
+	}
+
+	/**
+	 * Resolve the server and model name behind an exposed Ollama model id
+	 * (`ollama/<server id>/<name>`). Matches by server id first, then falls
+	 * back to the slug of the server URL.
+	 */
+	private _resolveOllamaTarget(id: string): { readonly server: NikaUrlServer; readonly rawId: string } | undefined {
+		return this._resolveUrlServerTarget(id, parseNikaOllamaModelId(id), this._ollamaServers());
+	}
+
+	/** Shared id → server resolution for the multi-server families. */
+	private _resolveUrlServerTarget(id: string, parsed: { readonly serverId: string; readonly rawId: string } | undefined, servers: readonly NikaUrlServer[]): { readonly server: NikaUrlServer; readonly rawId: string } | undefined {
+		if (!parsed) {
+			return undefined;
+		}
+		const server = servers.find(candidate => candidate.id === parsed.serverId)
+			?? servers.find(candidate => slugifyNikaSglangServerId(candidate.baseUrl) === parsed.serverId);
+		return server ? { server, rawId: parsed.rawId } : undefined;
+	}
+
+	/**
+	 * One llama.cpp server's API key: its own per-server secret when set,
+	 * otherwise the legacy shared `nika.llamacpp.apiKey` so existing installs
+	 * keep authenticating after the move to per-server entries.
+	 */
+	private async _llamaCppApiKey(server: NikaUrlServer): Promise<string | undefined> {
+		const perServer = await this._context.secrets.get(nikaLlamaCppApiKeySecret(server.id));
+		if (perServer) {
+			return perServer;
+		}
+		return await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined;
+	}
+
+	/** One Ollama host's optional API key (a reverse proxy may require one). */
+	private async _ollamaApiKey(server: NikaUrlServer): Promise<string | undefined> {
+		return await this._context.secrets.get(nikaOllamaApiKeySecret(server.id)) ?? undefined;
 	}
 
 	/**
@@ -843,18 +949,23 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	}
 
 	/**
-	 * The model list of the configured Ollama host, keyed by model name.
-	 * Cached for {@link OLLAMA_CATALOG_TTL_MS}; a changed host (or an expired
-	 * cache) triggers a refetch.
+	 * The model list of one configured Ollama host, keyed by model name.
+	 * Cached per host for {@link OLLAMA_CATALOG_TTL_MS}; a changed host (or an
+	 * expired cache) triggers a refetch.
 	 */
-	private async _ollamaCatalog(baseUrl: string): Promise<ReadonlyMap<string, OllamaCatalogModel>> {
-		const cache = this._ollamaCatalogCache;
+	private async _ollamaCatalog(server: NikaUrlServer, apiKey?: string): Promise<ReadonlyMap<string, OllamaCatalogModel>> {
+		const cacheKey = `${server.id}|${server.baseUrl}`;
+		const cache = this._ollamaCatalogCache.get(cacheKey);
 		if (cache && Date.now() - cache.fetchedAt < OLLAMA_CATALOG_TTL_MS) {
 			return cache.models;
 		}
-		const response = await this._fetcherService.fetch(`${baseUrl}/api/tags`, { method: 'GET', callSite: 'nika-ollama-tags' });
+		const response = await this._fetcherService.fetch(`${server.baseUrl}/api/tags`, {
+			method: 'GET',
+			headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+			callSite: 'nika-ollama-tags',
+		});
 		if (!response.ok) {
-			throw new Error(vscode.l10n.t('The Ollama host returned HTTP {0}.', response.status));
+			throw new Error(vscode.l10n.t('The Ollama host {0} returned HTTP {1}.', server.label, response.status));
 		}
 		const body = await response.json() as { models?: unknown[] };
 		const models = new Map<string, OllamaCatalogModel>();
@@ -884,18 +995,18 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			};
 			models.set(name, { name, capabilities });
 		}
-		this._ollamaCatalogCache = { fetchedAt: Date.now(), models };
+		this._ollamaCatalogCache.set(cacheKey, { fetchedAt: Date.now(), models });
 		return models;
 	}
 
-	private logOllamaError(error: unknown): void {
+	private logOllamaError(error: unknown, server?: NikaUrlServer): void {
 		const detail = error instanceof Error ? error.message : String(error);
-		console.warn(`[Nika] Ollama model list failed: ${detail}`);
+		console.warn(`[Nika] Ollama model list failed${server ? ` for ${server.label} (${server.baseUrl})` : ''}: ${detail}`);
 	}
 
-	private logLlamaCppError(error: unknown): void {
+	private logLlamaCppError(error: unknown, server?: NikaUrlServer): void {
 		const detail = error instanceof Error ? error.message : String(error);
-		console.warn(`[Nika] llama.cpp model list failed: ${detail}`);
+		console.warn(`[Nika] llama.cpp model list failed${server ? ` for ${server.label} (${server.baseUrl})` : ''}: ${detail}`);
 	}
 
 	private logSglangError(error: unknown, server?: NikaSglangServer): void {
@@ -1379,9 +1490,12 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		}
 
 		if (isNikaLlamaCppModel(model.id)) {
-			const baseUrl = this._llamaCppBaseUrl();
-			const key = await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined;
-			const rawId = model.id.slice(NIKA_LLAMACPP_MODEL_PREFIX.length);
+			const target = this._resolveLlamaCppTarget(model.id);
+			if (!target) {
+				throw new Error(vscode.l10n.t('The llama.cpp server this model belongs to is no longer configured. Re-add it in Nika Settings → Providers.'));
+			}
+			const key = await this._llamaCppApiKey(target.server);
+			const rawId = target.rawId;
 
 			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
 			const disposeStream = this.usageTracker.trackStream(trackedProgress);
@@ -1389,7 +1503,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const title = extractPromptTitle(messages);
 			const workspace = currentWorkspaceName();
 			try {
-				const endpoint = this._llamaCppProvider.createEndpoint(rawId, baseUrl, key);
+				const endpoint = this._llamaCppProvider.createEndpoint(rawId, target.server.baseUrl, key);
 				// Per-model vision preprocessing: llama.cpp models are
 				// multimodal (image_url data URIs pass through), so images are
 				// preserved by default; the user can still opt into
@@ -1637,13 +1751,29 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return;
 		}
 
-		const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
+		// The legacy bare Gemma id (`gemma4:31b`) carries no server segment: it is
+		// served by the first registered Ollama host, which is also what the
+		// classic single-host setup produced.
+		const target = this._resolveOllamaTarget(model.id) ?? this._firstOllamaTarget();
+		if (!target) {
+			throw new Error(vscode.l10n.t('No Ollama host is configured. Add one in Nika Settings → Providers.'));
+		}
+		const url = target.server.baseUrl;
 		const delegate: OpenAICompatibleLanguageModelChatInformation<OllamaConfig> = {
 			...model,
 			url,
 			configuration: { url },
 		};
 		return this._ollamaProvider.provideLanguageModelChatResponse(delegate, messages, options, progress, token);
+	}
+
+	/**
+	 * The first registered Ollama host, used by the legacy bare `gemma4:31b`
+	 * id which carries no server segment.
+	 */
+	private _firstOllamaTarget(): { readonly server: NikaUrlServer; readonly rawId: string } | undefined {
+		const server = this._ollamaServers()[0];
+		return server ? { server, rawId: NIKA_GEMMA_MODEL_ID } : undefined;
 	}
 
 	async provideTokenCount(model: NikaLanguageModelChatInformation, text: string | vscode.LanguageModelChatMessage | vscode.LanguageModelChatMessage2, token: vscode.CancellationToken): Promise<number> {
@@ -1695,7 +1825,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return this._lmWrapper.provideTokenCount(endpoint, text);
 		}
 		if (isNikaLlamaCppModel(model.id)) {
-			const endpoint = this._llamaCppProvider.createEndpoint(model.id.slice(NIKA_LLAMACPP_MODEL_PREFIX.length), this._llamaCppBaseUrl(), await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined);
+			const target = this._resolveLlamaCppTarget(model.id);
+			if (!target) {
+				throw new Error(vscode.l10n.t('The llama.cpp server this model belongs to is no longer configured. Re-add it in Nika Settings → Providers.'));
+			}
+			const endpoint = this._llamaCppProvider.createEndpoint(target.rawId, target.server.baseUrl, await this._llamaCppApiKey(target.server));
 			return this._lmWrapper.provideTokenCount(endpoint, text);
 		}
 		if (isNikaSglangModel(model.id)) {
@@ -1722,7 +1856,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const endpoint = this._deepSeekWebProvider.createEndpoint(model.id, token, undefined);
 			return this._lmWrapper.provideTokenCount(endpoint, text);
 		}
-		const url = vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
+		const target = this._resolveOllamaTarget(model.id);
+		if (!target) {
+			throw new Error(vscode.l10n.t('The Ollama host this model belongs to is no longer configured. Re-add it in Nika Settings → Providers.'));
+		}
+		const url = target.server.baseUrl;
 		return this._ollamaProvider.provideTokenCount({ ...model, url, configuration: { url } }, text, token);
 	}
 
