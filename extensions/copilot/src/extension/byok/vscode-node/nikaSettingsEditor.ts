@@ -2245,12 +2245,17 @@ function renderSglangServers(){
   if(!hosts.length){return;}
   const managed=providersManaged&&!!providerConfig.sglang;
   if(!sglangServers.length&&!managed){hosts.forEach(el=>{el.innerHTML='';});return;}
+  // Managed mode lists a provider card (and its Manage models button) only
+  // once the provider itself was added, so a freshly registered server would
+  // otherwise have no way to reach model selection. Offer it right here.
+  const needProvider=providersManaged&&!providerConfig.sglang;
+  const selectButton=needProvider?'<button class="action" data-manage-models="sglang">'+esc('Select models')+'</button>':'';
   const cards=sglangServers.map(s=>{
     const result=sglangConnections[s.id];
     const badge=result?(' <span class="pill'+(result.ok?' ok':'')+'"><span class="dot"></span></span> '+esc(result.ok?'Connected':result.message)):'';
     const modelText=s.models===0?esc('No models reported'):esc(s.models===1?'1 model':s.models+' models');
     const err=s.error?'<div class="row"><label><strong>'+esc('Last error')+'</strong></label><span class="hint" style="color:var(--vscode-errorForeground)">'+esc(s.error)+'</span></div>':'';
-    return '<div class="card"><div class="row"><label><strong>'+esc(s.label)+'</strong><span class="hint">'+esc(s.baseUrl)+' &middot; '+modelText+badge+'</span></label><div class="controls wrap"><button class="action secondary" data-sglang-test="'+esc(s.id)+'">'+esc('Test')+'</button><button class="action danger" data-sglang-remove="'+esc(s.id)+'">'+esc('Remove')+'</button></div></div>'+err+
+    return '<div class="card"><div class="row"><label><strong>'+esc(s.label)+'</strong><span class="hint">'+esc(s.baseUrl)+' &middot; '+modelText+badge+'</span></label><div class="controls wrap">'+selectButton+'<button class="action secondary" data-sglang-test="'+esc(s.id)+'">'+esc('Test')+'</button><button class="action danger" data-sglang-remove="'+esc(s.id)+'">'+esc('Remove')+'</button></div></div>'+err+
       '<div class="row"><label for="sglangKey-'+esc(s.id)+'"><strong>'+esc('API key (optional)')+'</strong><span class="hint">'+esc(s.configured?'A key is stored for this server.':'No key stored - requests are sent unauthenticated.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="sglangKey-'+esc(s.id)+'" placeholder="'+esc('New key, or empty to clear')+'"><button class="action secondary" data-sglang-key-save="'+esc(s.id)+'">'+esc('Save key')+'</button></div></div></div>';
   }).join('');
   const add='<div class="card"><h2>'+esc('Add SGLang server')+'</h2><p class="hint">'+esc('Register another SGLang server URL. Each server keeps its own models and its own optional API key, so several boxes can run side by side.')+'</p>'
@@ -2309,7 +2314,10 @@ function wizardStepHtml(){
   if(!list.length&&w.provider==='zai'){html+='<p class="hint">'+esc('No catalog models available. Check that the Z.ai API key is valid.')+'</p>';}
   if(!list.length&&(w.provider==='chatgpt'||w.provider==='claude')){html+='<p class="hint">'+esc('No models available. Complete the sign-in first.')+'</p>';}
   if(!list.length&&(w.provider==='ollama'||w.provider==='llamacpp')){html+='<p class="hint">'+esc('No models found. Is the server running with models loaded? For Ollama, run ollama pull <model> to add one.')+'</p>';}
-  if(!list.length&&w.provider==='sglang'){html+='<p class="hint">'+esc('No models found on the registered SGLang servers. Check the server URLs and that each server is running with a model loaded.')+'</p>';}
+  if(!list.length&&w.provider==='sglang'){
+    const failures=sglangServers.filter(s=>s.error).map(s=>s.label+': '+s.error).join(' · ');
+    html+='<p class="hint">'+esc('No models found on the registered SGLang servers.'+(failures?' '+failures:' Check the server URLs and that each server is running with a model loaded.'))+'</p>';
+  }
   html+='<div data-wizard-model-list></div>';
   html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button><button class="action secondary" data-wizard-test>'+esc('Test connection')+'</button><button class="action" data-wizard-done>'+esc('Done')+'</button></div>';
   return html;

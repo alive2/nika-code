@@ -282,17 +282,21 @@ function normalizeSglangBaseUrl(value: string): string {
  * Parses and normalizes the `nika.sglang.servers` setting. Accepts full
  * objects (`{ id?, label?, baseUrl }`) and bare URL strings, validates that
  * every entry has an http(s) base URL, derives missing ids from the label (or
- * the URL host) and guarantees unique ids by suffixing duplicates. Returns an
- * empty array for absent or malformed values, so a hand-edited settings file
- * degrades to "no SGLang servers" instead of breaking model enumeration.
+ * the URL host) and guarantees unique ids by suffixing duplicates. A lone
+ * entry given directly (instead of wrapped in an array) counts as a
+ * one-element list. Returns an empty array for absent or malformed values, so
+ * a hand-edited settings file degrades to "no SGLang servers" instead of
+ * breaking model enumeration.
  */
 export function parseNikaSglangServers(value: unknown): NikaSglangServer[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
+	// Settings hand-written in JSON naturally spell a single server as one
+	// object (or one bare URL) rather than an array; reading that as "no
+	// servers" would leave the user with an empty model list and no
+	// explanation.
+	const entries: unknown[] = Array.isArray(value) ? value : (value === null || value === undefined ? [] : [value]);
 	const servers: NikaSglangServer[] = [];
 	const used = new Set<string>();
-	for (const entry of value) {
+	for (const entry of entries) {
 		const raw = typeof entry === 'string'
 			? { baseUrl: entry }
 			: (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined);

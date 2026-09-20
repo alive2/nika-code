@@ -254,7 +254,16 @@ describe('Nika model metadata', () => {
 	it('parses and normalizes nika.sglang.servers into unique servers', () => {
 		// Absent or malformed values mean "no servers".
 		expect(parseNikaSglangServers(undefined)).toEqual([]);
-		expect(parseNikaSglangServers('http://localhost:30000')).toEqual([]);
+		expect(parseNikaSglangServers(null)).toEqual([]);
+		expect(parseNikaSglangServers(42)).toEqual([]);
+		// A lone entry is read as a one-element list: hand-written settings
+		// spell a single server as one object (or one bare URL).
+		expect(parseNikaSglangServers({ id: 'arbelai', label: 'ArbelAI', baseUrl: 'http://192.168.2.70:8010' })).toEqual([
+			{ id: 'arbelai', label: 'ArbelAI', baseUrl: 'http://192.168.2.70:8010' },
+		]);
+		expect(parseNikaSglangServers('http://192.168.2.70:8010/v1')).toEqual([
+			{ id: '192-168-2-70-8010', label: '192.168.2.70:8010', baseUrl: 'http://192.168.2.70:8010' },
+		]);
 		// Entries without an http(s) base URL are dropped.
 		expect(parseNikaSglangServers([{ label: 'no url' }, 'localhost:30000', '', 42, null])).toEqual([]);
 		// Objects and bare URL strings are both accepted; ids derive from the
