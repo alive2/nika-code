@@ -137,7 +137,11 @@ export class NikaSglangProvider extends Disposable {
 			callSite: 'nika-sglang-models',
 		});
 		if (!response.ok) {
-			throw new Error(vscode.l10n.t('The SGLang server {0} returned HTTP {1}.', server.label, response.status));
+			// A 404 almost always means the base URL carries a path (commonly a
+			// trailing `/v1`) that the requested `/v1/models` is appended to.
+			throw new Error(response.status === 404
+				? vscode.l10n.t('The SGLang server {0} returned HTTP 404. Check that the base URL points at the server root, without a /v1 path.', server.label)
+				: vscode.l10n.t('The SGLang server {0} returned HTTP {1}.', server.label, response.status));
 		}
 		const body = await response.json() as { data?: unknown[] };
 		const models = new Map<string, NikaSglangCatalogModel>();

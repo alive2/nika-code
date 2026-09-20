@@ -272,6 +272,29 @@ describe('Nika model metadata', () => {
 		]);
 	});
 
+	it('strips a pasted /v1 path from the SGLang base URL', () => {
+		// Copied URLs commonly carry the OpenAI-compatible path the provider
+		// appends itself; keeping it would request `/v1/v1/models` and 404.
+		expect(parseNikaSglangServers([
+			{ label: 'Box A', baseUrl: 'http://192.168.2.70:8010/v1' },
+			{ label: 'Box B', baseUrl: 'http://192.168.2.70:8011/v1/' },
+			{ label: 'Box C', baseUrl: 'http://192.168.2.70:8012/V1/models' },
+			{ label: 'Box D', baseUrl: 'http://192.168.2.70:8013/v1/chat/completions' },
+			{ label: 'Box E', baseUrl: 'http://192.168.2.70:8014' },
+		])).toEqual([
+			{ id: 'box-a', label: 'Box A', baseUrl: 'http://192.168.2.70:8010' },
+			{ id: 'box-b', label: 'Box B', baseUrl: 'http://192.168.2.70:8011' },
+			{ id: 'box-c', label: 'Box C', baseUrl: 'http://192.168.2.70:8012' },
+			{ id: 'box-d', label: 'Box D', baseUrl: 'http://192.168.2.70:8013' },
+			{ id: 'box-e', label: 'Box E', baseUrl: 'http://192.168.2.70:8014' },
+		]);
+		// Only the trailing OpenAI path is stripped: a genuine sub-path stays
+		// (the derived label/id are always host and port).
+		expect(parseNikaSglangServers(['http://host:9000/sglang/v1'])).toEqual([
+			{ id: 'host-9000', label: 'host:9000', baseUrl: 'http://host:9000/sglang' },
+		]);
+	});
+
 	it('accepts SGLang in the managed provider config', () => {
 		const config = parseNikaProviderConfig({ sglang: { models: ['sglang/gpu-1/Qwen/Qwen3-32B', 42] } });
 		expect(config).toEqual({ sglang: { models: ['sglang/gpu-1/Qwen/Qwen3-32B'] } });

@@ -800,7 +800,10 @@ export class NikaSettingsEditor extends Disposable {
 	 */
 	private async _addSglangServer(label: string, url: string, key: string): Promise<void> {
 		const config = vscode.workspace.getConfiguration('nika');
-		const trimmedUrl = url.trim().replace(/\/+$/, '');
+		// `parseNikaSglangServers` normalizes the URL (trailing slashes and a
+		// pasted `/v1` path are stripped), so the stored entry is always the
+		// server root and keeps matching on re-add.
+		const trimmedUrl = url.trim();
 		if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
 			throw new Error(vscode.l10n.t('Enter a full SGLang base URL, for example http://localhost:30000.'));
 		}

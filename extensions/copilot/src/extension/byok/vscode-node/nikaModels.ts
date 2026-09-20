@@ -262,6 +262,23 @@ export function slugifyNikaSglangServerId(value: string): string {
 }
 
 /**
+ * Normalizes a user-supplied SGLang base URL: trims whitespace, drops
+ * trailing slashes and strips the OpenAI-compatible path suffixes that users
+ * routinely paste along with the host (`/v1`, `/v1/models`,
+ * `/v1/chat/completions`). The provider appends those itself, so keeping them
+ * would request a doubled path such as `/v1/v1/models` and fail with a 404.
+ */
+function normalizeSglangBaseUrl(value: string): string {
+	return value.trim()
+		.replace(/\/+$/, '')
+		.replace(/\/v1\/chat\/completions$/i, '')
+		.replace(/\/v1\/completions$/i, '')
+		.replace(/\/v1\/models$/i, '')
+		.replace(/\/v1$/i, '')
+		.replace(/\/+$/, '');
+}
+
+/**
  * Parses and normalizes the `nika.sglang.servers` setting. Accepts full
  * objects (`{ id?, label?, baseUrl }`) and bare URL strings, validates that
  * every entry has an http(s) base URL, derives missing ids from the label (or
@@ -282,7 +299,7 @@ export function parseNikaSglangServers(value: unknown): NikaSglangServer[] {
 		if (!raw) {
 			continue;
 		}
-		const baseUrl = typeof raw.baseUrl === 'string' ? raw.baseUrl.trim().replace(/\/+$/, '') : '';
+		const baseUrl = typeof raw.baseUrl === 'string' ? normalizeSglangBaseUrl(raw.baseUrl) : '';
 		if (!/^https?:\/\/.+/i.test(baseUrl)) {
 			continue;
 		}
