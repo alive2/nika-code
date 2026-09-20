@@ -35,6 +35,7 @@ import {
 	isNikaOllamaModel,
 	isNikaOpenAIModel,
 	isNikaOpenRouterModel,
+	isNikaSglangModel,
 	isNikaThinkingEffort,
 	isNikaZaiModel,
 	NIKA_CURSOR_MODEL_PREFIX,
@@ -63,14 +64,21 @@ import {
 	NIKA_PROVIDER_ID,
 	NIKA_PROVIDER_NAME,
 	NIKA_RESPONSES_MODEL,
+	NIKA_SGLANG_SECRET_PREFIX,
 	NikaChatGptSubscriptionToken,
 	NikaClaudeSubscriptionToken,
 	NikaModelId,
 	NikaProviderConfig,
+	NikaSglangServer,
+	nikaSglangApiKeySecret,
+	nikaSglangModelId,
 	parseNikaChatGptSubscriptionToken,
 	parseNikaClaudeSubscriptionToken,
 	parseNikaProviderConfig,
+	parseNikaSglangModelId,
+	parseNikaSglangServers,
 	resolveNikaTokenLimits,
+	slugifyNikaSglangServerId,
 } from './nikaModels';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { NikaOpenAIProvider, nikaOpenAIModelId, resolveOpenAIModelCapabilities } from './nikaOpenAIProvider';
@@ -78,6 +86,7 @@ import { NikaAnthropicProvider, nikaAnthropicModelId, resolveAnthropicModelCapab
 import { NikaChatGptSubProvider, nikaChatGptModelId, resolveChatGptSubModelCapabilities } from './nikaChatGptSubProvider';
 import { NikaClaudeSubProvider, nikaClaudeModelId } from './nikaClaudeSubProvider';
 import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, LLAMACPP_DEFAULT_MAX_OUTPUT_TOKENS, NikaLlamaCppProvider, nikaLlamaCppModelId } from './nikaLlamaCppProvider';
+import { NikaSglangProvider } from './nikaSglangProvider';
 import { NikaCursorProvider, nikaCursorModelId } from './nikaCursorProvider';
 import { NikaZaiProvider, nikaZaiModelId } from './nikaZaiProvider';
 import { NikaGeminiProvider, nikaGeminiModelId } from './nikaGeminiProvider';
@@ -124,6 +133,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private readonly _attachmentProcessor: NikaAttachmentProcessor;
 	private readonly _openRouterProvider: NikaOpenRouterProvider;
 	private readonly _llamaCppProvider: NikaLlamaCppProvider;
+	private readonly _sglangProvider: NikaSglangProvider;
 	private readonly _geminiCatalogProvider: NikaGeminiProvider;
 	private readonly _cursorProvider: NikaCursorProvider;
 	private readonly _zaiProvider: NikaZaiProvider;
@@ -151,6 +161,7 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._ollamaProvider.updateKnownModels(this._gemmaKnownModels());
 		this._openRouterProvider = this._register(this._instantiationService.createInstance(NikaOpenRouterProvider));
 		this._llamaCppProvider = this._register(this._instantiationService.createInstance(NikaLlamaCppProvider));
+		this._sglangProvider = this._register(this._instantiationService.createInstance(NikaSglangProvider));
 		this._geminiCatalogProvider = this._register(this._instantiationService.createInstance(NikaGeminiProvider));
 		this._cursorProvider = this._register(this._instantiationService.createInstance(NikaCursorProvider));
 		this._zaiProvider = this._register(this._instantiationService.createInstance(NikaZaiProvider));
@@ -160,18 +171,23 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		this._chatGptSubProvider = this._register(this._instantiationService.createInstance(NikaChatGptSubProvider));
 		this._claudeSubProvider = this._register(this._instantiationService.createInstance(NikaClaudeSubProvider));
 		this.usageTracker = this._register(this._instantiationService.createInstance(NikaUsageTracker));
-		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider, this._llamaCppProvider, this._geminiCatalogProvider, this._cursorProvider, this._deepSeekWebProvider, this._openAIProvider, this._anthropicProvider, this._chatGptSubProvider, this._claudeSubProvider, this._zaiProvider));
+		this.settingsEditor = this._register(this._instantiationService.createInstance(NikaSettingsEditor, this.usageTracker, this._openRouterProvider, this._llamaCppProvider, this._sglangProvider, this._geminiCatalogProvider, this._cursorProvider, this._deepSeekWebProvider, this._openAIProvider, this._anthropicProvider, this._chatGptSubProvider, this._claudeSubProvider, this._zaiProvider));
 		this._attachmentProcessor = this._instantiationService.createInstance(NikaAttachmentProcessor, this.settingsEditor, this._deepSeekWebProvider);
 		this._register(this._instantiationService.createInstance(NikaIndexingStatus, this.settingsEditor));
 		this._register(this._instantiationService.createInstance(NikaUsageStatus, this.settingsEditor, this.usageTracker));
 
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET || event.key.startsWith(NIKA_SGLANG_SECRET_PREFIX)) {
 				if (event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET) {
 					// A changed key must never reuse a stale catalog fetch.
 					this._openRouterProvider.invalidateCache();
 					this._llamaCppProvider.invalidateCache();
 					this._cursorProvider.invalidateCache();
+				}
+				if (event.key.startsWith(NIKA_SGLANG_SECRET_PREFIX)) {
+					// SGLang keys are per server (`nika.sglang.<id>.apiKey`), so the
+					// change cannot be matched by equality; every catalog is dropped.
+					this._sglangProvider.invalidateCache();
 				}
 				if (event.key === NIKA_GEMINI_SECRET) {
 					this._geminiCatalogProvider.invalidateCache();
@@ -206,6 +222,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			}
 			if (event.affectsConfiguration('nika.llamaCppBaseUrl')) {
 				this._llamaCppProvider.invalidateCache();
+				this._onDidChange.fire();
+			}
+			if (event.affectsConfiguration('nika.sglang.servers')) {
+				// Servers can be added, removed, or repointed: every catalog goes.
+				this._sglangProvider.invalidateCache();
 				this._onDidChange.fire();
 			}
 		}));
@@ -540,6 +561,61 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			}
 		}
 
+		// SGLang catalogs: several servers can be registered at once, each with
+		// its own base URL and optional API key, and each contributing its own
+		// model id space (`sglang/<server id>/<raw id>`). Managed mode exposes
+		// exactly the wizard-selected models; legacy mode exposes every model
+		// whenever at least one server is configured. A server that is
+		// unreachable must not hide the models of the other servers, so each
+		// catalog fetch is isolated.
+		const sglangServers = this._sglangServers();
+		if (sglangServers.length > 0) {
+			const selected = getNikaSelectedModels(providerConfig, 'sglang');
+			if (selected === undefined ? providerConfig === undefined : selected.length > 0) {
+				const apiKeys = await Promise.all(sglangServers.map(server => this._context.secrets.get(nikaSglangApiKeySecret(server.id))));
+				const catalogs = await Promise.all(sglangServers.map(async (server, index) => {
+					try {
+						return await this._sglangProvider.getCatalog(server, apiKeys[index] ?? undefined);
+					} catch (error) {
+						// Isolated per server: one unreachable box must not hide the
+						// models served by the others.
+						this.logSglangError(error, server);
+						return undefined;
+					}
+				}));
+				for (let index = 0; index < sglangServers.length; index++) {
+					const server = sglangServers[index];
+					const catalog = catalogs[index];
+					if (!catalog) {
+						continue;
+					}
+					for (const [rawId, model] of catalog) {
+						const id = nikaSglangModelId(server.id, rawId);
+						if (selected && !selected.includes(id)) {
+							continue;
+						}
+						const base = byokKnownModelToAPIInfo(NIKA_PROVIDER_NAME, id, model.capabilities);
+						entries.push({
+							...base,
+							name: model.name,
+							detail: vscode.l10n.t('Nika'),
+							tooltip: this._sglangTooltip(rawId, server),
+							// SGLang serves multimodal models (Qwen-VL, InternVL,
+							// Llama-4, ...) that accept image parts natively; the
+							// server rejects them for text-only models.
+							capabilities: {
+								...base.capabilities,
+								imageInput: true,
+							},
+							isBYOK: true,
+							isDefault: id === defaultModel,
+							statusIcon: new vscode.ThemeIcon('server'),
+						});
+					}
+				}
+			}
+		}
+
 		// Cursor API catalog: managed mode exposes exactly the wizard-selected
 		// models; legacy mode exposes the full catalog whenever a key exists.
 		if (cursorKey) {
@@ -713,6 +789,10 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		return vscode.l10n.t('{0} served by llama.cpp at {1}. Images pass through natively (no vision backend).', rawId, baseUrl);
 	}
 
+	private _sglangTooltip(rawId: string, server: NikaSglangServer): string {
+		return vscode.l10n.t('{0} served by the SGLang server {1} at {2}. Images pass through natively (no vision backend).', rawId, server.label, server.baseUrl);
+	}
+
 	private _geminiCatalogTooltip(rawId: string): string {
 		return vscode.l10n.t('{0} from the Google Gemini catalog with native image and document input.', rawId);
 	}
@@ -735,6 +815,31 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 
 	private _ollamaBaseUrl(): string {
 		return vscode.workspace.getConfiguration('nika').get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
+	}
+
+	/**
+	 * The registered SGLang servers (`nika.sglang.servers`). Several servers
+	 * can be active at once; each contributes its own catalog and id space.
+	 */
+	private _sglangServers(): readonly NikaSglangServer[] {
+		return parseNikaSglangServers(vscode.workspace.getConfiguration('nika').get('sglang.servers'));
+	}
+
+	/**
+	 * Resolve the server and raw model id behind an exposed SGLang model id
+	 * (`sglang/<server id>/<raw id>`). Matches by server id first, then falls
+	 * back to the slug of the server URL so an id that was derived differently
+	 * (hand-edited settings, renamed label) still routes to the right host.
+	 */
+	private _resolveSglangTarget(id: string): { readonly server: NikaSglangServer; readonly rawId: string } | undefined {
+		const parsed = parseNikaSglangModelId(id);
+		if (!parsed) {
+			return undefined;
+		}
+		const servers = this._sglangServers();
+		const server = servers.find(candidate => candidate.id === parsed.serverId)
+			?? servers.find(candidate => slugifyNikaSglangServerId(candidate.baseUrl) === parsed.serverId);
+		return server ? { server, rawId: parsed.rawId } : undefined;
 	}
 
 	/**
@@ -793,6 +898,11 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		console.warn(`[Nika] llama.cpp model list failed: ${detail}`);
 	}
 
+	private logSglangError(error: unknown, server?: NikaSglangServer): void {
+		const detail = error instanceof Error ? error.message : String(error);
+		console.warn(`[Nika] SGLang model list failed${server ? ` for ${server.label} (${server.baseUrl})` : ''}: ${detail}`);
+	}
+
 	private logOpenRouterError(error: unknown): void {
 		const detail = error instanceof Error ? error.message : String(error);
 		console.warn(`[Nika] OpenRouter catalog failed: ${detail}`);
@@ -846,6 +956,9 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		}
 		if (isNikaLlamaCppModel(id)) {
 			return getNikaSelectedModels(providerConfig, 'llamacpp')?.includes(id) ?? false;
+		}
+		if (isNikaSglangModel(id)) {
+			return getNikaSelectedModels(providerConfig, 'sglang')?.includes(id) ?? false;
 		}
 		if (isNikaOllamaModel(id)) {
 			return getNikaSelectedModels(providerConfig, 'ollama')?.includes(id) ?? false;
@@ -1307,6 +1420,60 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			return;
 		}
 
+		if (isNikaSglangModel(model.id)) {
+			const target = this._resolveSglangTarget(model.id);
+			if (!target) {
+				throw new Error(vscode.l10n.t('The SGLang server this model belongs to is no longer configured. Re-add it in Nika Settings → Providers.'));
+			}
+			const key = await this._context.secrets.get(nikaSglangApiKeySecret(target.server.id)) ?? undefined;
+			// Refresh the catalog so the endpoint carries the model's real
+			// limits and parameter schema. An unreachable server is not fatal
+			// here: the response itself reports the failure with the actual
+			// connection error, and cached capabilities are reused when present.
+			try {
+				await this._sglangProvider.getCatalog(target.server, key);
+			} catch (error) {
+				this.logSglangError(error, target.server);
+			}
+
+			const trackedProgress = new TokenTrackingProgress(progress, () => this.usageTracker.notifyLiveChange());
+			const disposeStream = this.usageTracker.trackStream(trackedProgress);
+			const sessionId = typeof options.modelOptions?._nikaSessionId === 'string' ? options.modelOptions._nikaSessionId : undefined;
+			const title = extractPromptTitle(messages);
+			const workspace = currentWorkspaceName();
+			try {
+				const endpoint = this._sglangProvider.createEndpoint(target.rawId, target.server, key);
+				// Per-model vision preprocessing: SGLang serves multimodal models
+				// (Qwen-VL, InternVL, ...) whose image parts pass through as
+				// image_url data URIs, so images are preserved by default. The
+				// user can still opt into vision-backend descriptions, and PDFs
+				// are converted by the attachment processor either way.
+				const processed = await this._attachmentProcessor.process(messages, token, this._attachmentOptionsFor(model.id, true));
+				for (const marker of processed.replayMarkers) { trackedProgress.report(marker); }
+				await this._lmWrapper.provideLanguageModelResponse(endpoint, processed.messages, options, options.requestInitiator, trackedProgress, token);
+				this._recordUsage(model.id, trackedProgress, { sessionId, title, workspace, initiator: options.requestInitiator });
+			} catch (error) {
+				this.usageTracker.record({
+					model: model.id,
+					sessionId,
+					initiator: options.requestInitiator,
+					title,
+					workspace,
+					promptTokens: 0,
+					completionTokens: 0,
+					totalTokens: 0,
+					cachedTokens: 0,
+					reasoningTokens: 0,
+					provider: 'sglang',
+					error: true,
+				});
+				throw error;
+			} finally {
+				disposeStream();
+			}
+			return;
+		}
+
 		if (isNikaCursorModel(model.id)) {
 			const key = await this._context.secrets.get(NIKA_CURSOR_SECRET);
 			if (!key) {
@@ -1531,6 +1698,14 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 			const endpoint = this._llamaCppProvider.createEndpoint(model.id.slice(NIKA_LLAMACPP_MODEL_PREFIX.length), this._llamaCppBaseUrl(), await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined);
 			return this._lmWrapper.provideTokenCount(endpoint, text);
 		}
+		if (isNikaSglangModel(model.id)) {
+			const target = this._resolveSglangTarget(model.id);
+			if (!target) {
+				throw new Error(vscode.l10n.t('The SGLang server this model belongs to is no longer configured. Re-add it in Nika Settings → Providers.'));
+			}
+			const endpoint = this._sglangProvider.createEndpoint(target.rawId, target.server, await this._context.secrets.get(nikaSglangApiKeySecret(target.server.id)) ?? undefined);
+			return this._lmWrapper.provideTokenCount(endpoint, text);
+		}
 		if (isNikaCursorModel(model.id)) {
 			const endpoint = this._cursorProvider.createEndpoint(model.id.slice(NIKA_CURSOR_MODEL_PREFIX.length), await this._context.secrets.get(NIKA_CURSOR_SECRET) ?? '');
 			return this._lmWrapper.provideTokenCount(endpoint, text);
@@ -1568,7 +1743,8 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 	private _recordUsage(modelId: string, tracked: TokenTrackingProgress, meta: { sessionId?: string; title?: string; workspace?: string; initiator?: string }, pricing?: OpenRouterModelPricing): void {
 		const provider = isNikaOpenRouterModel(modelId) ? 'openrouter' as const
 			: isNikaLlamaCppModel(modelId) ? 'llamacpp' as const
-				: isNikaOllamaModel(modelId) ? 'ollama' as const
+				: isNikaSglangModel(modelId) ? 'sglang' as const
+					: isNikaOllamaModel(modelId) ? 'ollama' as const
 					: isNikaCursorModel(modelId) ? 'cursor' as const
 						: isNikaDeepSeekWebModel(modelId) ? 'deepseekweb' as const
 							: isNikaOpenAIModel(modelId) ? 'openai' as const
@@ -1728,6 +1904,9 @@ export class NikaLMProvider extends Disposable implements vscode.LanguageModelCh
 		}
 		if (isNikaLlamaCppModel(id)) {
 			return vscode.l10n.t('Model served by the configured llama.cpp server with native image input.');
+		}
+		if (isNikaSglangModel(id)) {
+			return vscode.l10n.t('Model served by a configured SGLang server with native image input.');
 		}
 		if (isNikaOllamaModel(id)) {
 			return vscode.l10n.t('Model served by the configured Ollama host with native image input.');

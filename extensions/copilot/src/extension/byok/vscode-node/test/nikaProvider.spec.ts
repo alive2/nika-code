@@ -11,6 +11,7 @@ import { NikaAttachmentProcessor } from '../nikaAttachments';
 import { NikaIndexingStatus } from '../nikaIndexingStatus';
 import { NikaOpenRouterProvider } from '../nikaOpenRouterProvider';
 import { NikaLlamaCppProvider } from '../nikaLlamaCppProvider';
+import { NikaSglangProvider } from '../nikaSglangProvider';
 import { NikaSettingsEditor } from '../nikaSettingsEditor';
 import { NikaUsageStatus } from '../nikaUsageStatus';
 import { NikaUsageTracker } from '../nikaUsageTracker';
@@ -53,7 +54,7 @@ vi.mock('vscode', async (importOriginal) => {
 		LanguageModelToolInformation: class LanguageModelToolInformation { },
 		workspace: {
 			getConfiguration: vi.fn(() => ({
-				get: (key: string, fallback: unknown) => key === 'openrouterFloor' ? floorEnabled : key === 'providers' ? providersConfig : fallback,
+				get: (key: string, fallback: unknown) => key === 'openrouterFloor' ? floorEnabled : key === 'providers' ? providersConfig : key === 'sglang.servers' ? sglangServersConfig : fallback,
 				inspect: (_key: string) => undefined,
 			})),
 			onDidChangeConfiguration: configurationChange.event,
@@ -75,6 +76,7 @@ vi.mock('vscode', async (importOriginal) => {
 // `providers` settings.
 let floorEnabled = false;
 let providersConfig: unknown;
+let sglangServersConfig: unknown;
 
 function createByokStorage() {
 	return {
@@ -105,6 +107,7 @@ function createInstantiationService(overrides: {
 	attachmentProcessor: { process: ReturnType<typeof vi.fn> };
 	openRouterProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	llamaCppProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
+	sglangProvider: { getCatalog: ReturnType<typeof vi.fn>; getKnownModels: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	geminiCatalogProvider: { getCatalog: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	cursorProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
 	zaiProvider: { getCatalog: ReturnType<typeof vi.fn>; createEndpoint: ReturnType<typeof vi.fn>; invalidateCache: ReturnType<typeof vi.fn> };
@@ -133,6 +136,9 @@ function createInstantiationService(overrides: {
 		}
 		if (Ctor === NikaLlamaCppProvider) {
 			return overrides.llamaCppProvider;
+		}
+		if (Ctor === NikaSglangProvider) {
+			return overrides.sglangProvider;
 		}
 		if (Ctor === NikaGeminiProvider) {
 			return overrides.geminiCatalogProvider;
@@ -239,6 +245,12 @@ function createFakes() {
 		createEndpoint: vi.fn(() => ({ dispose: () => { } })),
 		invalidateCache: vi.fn(),
 	};
+	const sglangProvider = {
+		getCatalog: vi.fn().mockResolvedValue(new Map()),
+		getKnownModels: vi.fn().mockResolvedValue({}),
+		createEndpoint: vi.fn(() => ({ dispose: () => { } })),
+		invalidateCache: vi.fn(),
+	};
 	const geminiCatalogProvider = {
 		getCatalog: vi.fn().mockResolvedValue(new Map()),
 		invalidateCache: vi.fn(),
@@ -269,7 +281,7 @@ function createFakes() {
 		provideTokenCount: vi.fn().mockResolvedValue(0),
 		invalidateCache: vi.fn(),
 	};
-	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, settingsEditor, attachmentProcessor, openRouterProvider, llamaCppProvider, geminiCatalogProvider, cursorProvider, zaiProvider, openAIProvider, anthropicProvider };
+	return { lmWrapper, geminiProvider, ollamaProvider, usageTracker, settingsEditor, attachmentProcessor, openRouterProvider, llamaCppProvider, sglangProvider, geminiCatalogProvider, cursorProvider, zaiProvider, openAIProvider, anthropicProvider };
 }
 
 function createProvider(overrides?: {
@@ -281,6 +293,7 @@ function createProvider(overrides?: {
 	zaiCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 	openAICatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 	anthropicCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
+	sglangCatalog?: Map<string, { id: string; name: string; capabilities: { name: string; toolCalling: boolean; vision: boolean; maxInputTokens: number; maxOutputTokens: number; supportsReasoningEffort?: string[] } }>;
 }) {
 	const fakes = createFakes();
 	const instantiation = createInstantiationService(fakes);
@@ -301,6 +314,9 @@ function createProvider(overrides?: {
 	}
 	if (overrides?.anthropicCatalog) {
 		vi.mocked(fakes.anthropicProvider.getCatalog).mockResolvedValue(overrides.anthropicCatalog as never);
+	}
+	if (overrides?.sglangCatalog) {
+		vi.mocked(fakes.sglangProvider.getCatalog).mockResolvedValue(overrides.sglangCatalog as never);
 	}
 	const provider = new NikaLMProvider(
 		createByokStorage() as never,
@@ -640,6 +656,244 @@ describe('Nika llama.cpp support', () => {
 
 		expect(models.length).toBeGreaterThan(0);
 		expect(models.filter(m => m.id.startsWith('llamacpp/'))).toHaveLength(0);
+	});
+});
+
+describe('Nika SGLang support', () => {
+	it('lists every registered server catalog under its own id segment and key', async () => {
+		sglangServersConfig = [
+			{ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000' },
+			{ id: 'box2', label: 'GPU 2', baseUrl: 'http://10.0.0.6:30000' },
+		];
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.sglang.box1.apiKey': 'key-one' } });
+			vi.mocked(fakes.sglangProvider.getCatalog).mockImplementation((async (server: { id: string }) => server.id === 'box1'
+				? new Map([['Qwen/Qwen3-32B', { id: 'Qwen/Qwen3-32B', name: 'Qwen/Qwen3-32B', contextWindow: 32768, capabilities: { name: 'Qwen/Qwen3-32B', toolCalling: true, vision: true, maxInputTokens: 28672, maxOutputTokens: 4096, contextWindow: 32768 } }]])
+				: new Map([['deepseek-ai/DeepSeek-V3', { id: 'deepseek-ai/DeepSeek-V3', name: 'deepseek-ai/DeepSeek-V3', contextWindow: 65536, capabilities: { name: 'deepseek-ai/DeepSeek-V3', toolCalling: true, vision: true, maxInputTokens: 61440, maxOutputTokens: 4096, contextWindow: 65536 } }]])) as never);
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			// Each server is queried with its own URL and its own key.
+			expect(fakes.sglangProvider.getCatalog).toHaveBeenCalledWith({ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000' }, 'key-one');
+			expect(fakes.sglangProvider.getCatalog).toHaveBeenCalledWith({ id: 'box2', label: 'GPU 2', baseUrl: 'http://10.0.0.6:30000' }, undefined);
+			const sglangIds = models.filter(m => m.id.startsWith('sglang/')).map(m => m.id);
+			expect(sglangIds).toEqual(['sglang/box1/Qwen/Qwen3-32B', 'sglang/box2/deepseek-ai/DeepSeek-V3']);
+			const first = models.find(m => m.id === 'sglang/box1/Qwen/Qwen3-32B')!;
+			expect(first.detail).toBe('Nika');
+			expect(first.isBYOK).toBe(true);
+			expect(first.capabilities.imageInput).toBe(true);
+			expect(first.statusIcon).toBeDefined();
+		} finally {
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('keeps one unreachable server from hiding the others', async () => {
+		sglangServersConfig = [
+			{ id: 'down', baseUrl: 'http://10.0.0.5:30000' },
+			{ id: 'up', baseUrl: 'http://10.0.0.6:30000' },
+		];
+		try {
+			const { provider, fakes } = createProvider();
+			vi.mocked(fakes.sglangProvider.getCatalog).mockImplementation((async (server: { id: string }) => {
+				if (server.id === 'down') {
+					throw new Error('ECONNREFUSED');
+				}
+				return new Map([['Qwen/Qwen3-32B', { id: 'Qwen/Qwen3-32B', name: 'Qwen/Qwen3-32B', contextWindow: 32768, capabilities: { name: 'Qwen/Qwen3-32B', toolCalling: true, vision: true, maxInputTokens: 28672, maxOutputTokens: 4096, contextWindow: 32768 } }]]);
+			}) as never);
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(models.filter(m => m.id.startsWith('sglang/')).map(m => m.id)).toEqual(['sglang/up/Qwen/Qwen3-32B']);
+		} finally {
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('adds no SGLang models when no server is registered', async () => {
+		sglangServersConfig = undefined;
+		const { provider, fakes } = createProvider();
+
+		const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+		expect(fakes.sglangProvider.getCatalog).not.toHaveBeenCalled();
+		expect(models.filter(m => m.id.startsWith('sglang/'))).toHaveLength(0);
+	});
+
+	it('routes SGLang models through the endpoint of the server in the id, with that server key', async () => {
+		sglangServersConfig = [
+			{ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000' },
+			{ id: 'box2', label: 'GPU 2', baseUrl: 'http://10.0.0.6:30000' },
+		];
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.sglang.box2.apiKey': 'key-two' } });
+			const model = { id: 'sglang/box2/Qwen/Qwen3-32B' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+			expect(fakes.sglangProvider.createEndpoint).toHaveBeenCalledWith('Qwen/Qwen3-32B', { id: 'box2', label: 'GPU 2', baseUrl: 'http://10.0.0.6:30000' }, 'key-two');
+			// Images pass through untouched: SGLang serves multimodal models, so
+			// only PDFs are converted to text by the attachment processor.
+			expect(fakes.attachmentProcessor.process).toHaveBeenCalledWith(messages, token, { preserveImages: true });
+			expect(fakes.lmWrapper.provideLanguageModelResponse).toHaveBeenCalledTimes(1);
+			expect(fakes.ollamaProvider.provideLanguageModelChatResponse).not.toHaveBeenCalled();
+		} finally {
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('creates an unauthenticated endpoint when the server has no key', async () => {
+		sglangServersConfig = [{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' }];
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.sglang.box1.apiKey': undefined } });
+			const model = { id: 'sglang/box1/Qwen/Qwen3-32B' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+			expect(fakes.sglangProvider.createEndpoint).toHaveBeenCalledWith('Qwen/Qwen3-32B', { id: 'box1', label: 'box1', baseUrl: 'http://10.0.0.5:30000' }, undefined);
+		} finally {
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('rejects a request whose server is no longer configured', async () => {
+		sglangServersConfig = [{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' }];
+		try {
+			const { provider, fakes } = createProvider();
+			const model = { id: 'sglang/removed/model-x' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow('no longer configured');
+			expect(fakes.lmWrapper.provideLanguageModelResponse).not.toHaveBeenCalled();
+		} finally {
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('reports an SGLang failure with the sglang provider in usage', async () => {
+		sglangServersConfig = [{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' }];
+		try {
+			const { provider, fakes } = createProvider();
+			fakes.lmWrapper.provideLanguageModelResponse.mockRejectedValueOnce(new Error('boom'));
+			const model = { id: 'sglang/box1/Qwen/Qwen3-32B' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow('boom');
+			expect(provider.usageTracker.record).toHaveBeenCalledWith(expect.objectContaining({ model: 'sglang/box1/Qwen/Qwen3-32B', provider: 'sglang', error: true }));
+		} finally {
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('records successful usage with the sglang provider', async () => {
+		sglangServersConfig = [{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' }];
+		try {
+			const { provider, fakes } = createProvider();
+			fakes.lmWrapper.provideLanguageModelResponse.mockImplementation(async (_endpoint, _messages, _options, _initiator, progress) => {
+				progress.report(new vscode.LanguageModelDataPart(new TextEncoder().encode(JSON.stringify({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 })), CustomDataPartMimeTypes.Usage));
+			});
+			const model = { id: 'sglang/box1/Qwen/Qwen3-32B' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await provider.provideLanguageModelChatResponse(model, messages, options, progress, token);
+
+			expect(provider.usageTracker.record).toHaveBeenCalledWith(expect.objectContaining({
+				model: 'sglang/box1/Qwen/Qwen3-32B',
+				provider: 'sglang',
+				promptTokens: 10,
+				completionTokens: 5,
+			}));
+		} finally {
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('filters the SGLang catalogs to the wizard selection in managed mode', async () => {
+		sglangServersConfig = [
+			{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' },
+			{ id: 'box2', baseUrl: 'http://10.0.0.6:30000' },
+		];
+		providersConfig = { sglang: { models: ['sglang/box2/Qwen/Qwen3-32B'] } };
+		try {
+			const { provider, fakes } = createProvider();
+			vi.mocked(fakes.sglangProvider.getCatalog).mockResolvedValue(new Map([
+				['Qwen/Qwen3-32B', { id: 'Qwen/Qwen3-32B', name: 'Qwen/Qwen3-32B', contextWindow: 32768, capabilities: { name: 'Qwen/Qwen3-32B', toolCalling: true, vision: true, maxInputTokens: 28672, maxOutputTokens: 4096, contextWindow: 32768 } }],
+			]) as never);
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			// The same raw id is served by two servers; only the selected one
+			// is exposed.
+			expect(models.filter(m => m.id.startsWith('sglang/')).map(m => m.id)).toEqual(['sglang/box2/Qwen/Qwen3-32B']);
+		} finally {
+			providersConfig = undefined;
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('skips every SGLang catalog when nothing is selected in managed mode', async () => {
+		sglangServersConfig = [{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' }];
+		providersConfig = { sglang: { models: [] } };
+		try {
+			const { provider, fakes } = createProvider();
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.sglangProvider.getCatalog).not.toHaveBeenCalled();
+			expect(models.filter(m => m.id.startsWith('sglang/'))).toHaveLength(0);
+		} finally {
+			providersConfig = undefined;
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('hides the SGLang catalogs when the provider was never added (leftover servers, managed mode)', async () => {
+		sglangServersConfig = [{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' }];
+		providersConfig = { deepseek: { models: ['deepseek-v4-flash'] } };
+		try {
+			const { provider, fakes } = createProvider();
+
+			const models = await provider.provideLanguageModelChatInformation(undefined as never, { isCancellationRequested: false } as never);
+
+			expect(fakes.sglangProvider.getCatalog).not.toHaveBeenCalled();
+			expect(models.filter(m => m.id.startsWith('sglang/'))).toHaveLength(0);
+		} finally {
+			providersConfig = undefined;
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('rejects sglang requests for unselected models in managed mode', async () => {
+		sglangServersConfig = [{ id: 'box1', baseUrl: 'http://10.0.0.5:30000' }];
+		providersConfig = { sglang: { models: ['sglang/box1/other-model'] } };
+		try {
+			const { provider, fakes } = createProvider();
+			const model = { id: 'sglang/box1/Qwen/Qwen3-32B' } as NikaLanguageModelChatInformation;
+			const { messages, options, progress, token } = deepSeekRequestArgs();
+
+			await expect(provider.provideLanguageModelChatResponse(model, messages, options, progress, token)).rejects.toThrow();
+			expect(fakes.sglangProvider.createEndpoint).not.toHaveBeenCalled();
+		} finally {
+			providersConfig = undefined;
+			sglangServersConfig = undefined;
+		}
+	});
+
+	it('counts tokens through the SGLang endpoint of the owning server', async () => {
+		sglangServersConfig = [{ id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000' }];
+		try {
+			const { provider, fakes } = createProvider({ keys: { 'nika.sglang.box1.apiKey': 'key-one' } });
+			const model = { id: 'sglang/box1/Qwen/Qwen3-32B' } as NikaLanguageModelChatInformation;
+
+			await provider.provideTokenCount(model, 'hello', { isCancellationRequested: false } as never);
+
+			expect(fakes.sglangProvider.createEndpoint).toHaveBeenCalledWith('Qwen/Qwen3-32B', { id: 'box1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000' }, 'key-one');
+			expect(fakes.lmWrapper.provideTokenCount).toHaveBeenCalledTimes(1);
+		} finally {
+			sglangServersConfig = undefined;
+		}
 	});
 });
 

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it } from 'vitest';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaChatGptSubModel, isNikaClaudeSubModel, isNikaDeepSeekModel, isNikaDeepSeekVisionModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, parseNikaProviderConfig, resolveNikaTokenLimits } from '../nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaChatGptSubModel, isNikaClaudeSubModel, isNikaDeepSeekModel, isNikaDeepSeekVisionModel, isNikaGeminiModel, isNikaLlamaCppModel, isNikaModelId, isNikaOllamaModel, isNikaSglangModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_RESPONSES_MODEL, nikaSglangApiKeySecret, nikaSglangModelId, parseNikaProviderConfig, parseNikaSglangModelId, parseNikaSglangServers, resolveNikaTokenLimits, slugifyNikaSglangServerId } from '../nikaModels';
 
 describe('Nika model metadata', () => {
 	it('uses the documented default budgets', () => {
@@ -212,5 +212,69 @@ describe('Nika model metadata', () => {
 		expect(getVisibleNikaModelIds(true, false)).toEqual([
 			'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-responses', 'deepseek-v4-pro-responses', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-flash-vision-exp-responses', 'gemma4:31b',
 		]);
+	});
+
+	it('recognizes multi-server SGLang model ids without an effort control', () => {
+		// The raw id may itself contain slashes (`Qwen/Qwen3-32B`); the first
+		// segment after the family prefix is always the server id.
+		expect(isNikaModelId('sglang/gpu-1/Qwen/Qwen3-32B')).toBe(true);
+		expect(isNikaSglangModel('sglang/gpu-1/Qwen/Qwen3-32B')).toBe(true);
+		expect(getNikaModelProvider('sglang/gpu-1/Qwen/Qwen3-32B')).toBe('sglang');
+		expect(getNikaModelProvider('nika/sglang/gpu-1/Qwen/Qwen3-32B')).toBe('sglang');
+		expect(getNikaEffortOptionsForModel('sglang/gpu-1/Qwen/Qwen3-32B')).toEqual([]);
+		expect(isNikaSglangModel('llamacpp/qwen2.5vl-7b')).toBe(false);
+	});
+
+	it('round-trips the exposed SGLang model id', () => {
+		const id = nikaSglangModelId('box1', 'Qwen/Qwen3-32B');
+		expect(id).toBe('sglang/box1/Qwen/Qwen3-32B');
+		expect(parseNikaSglangModelId(id)).toEqual({ serverId: 'box1', rawId: 'Qwen/Qwen3-32B' });
+		expect(parseNikaSglangModelId(`nika/${id}`)).toEqual({ serverId: 'box1', rawId: 'Qwen/Qwen3-32B' });
+		// A slash-free raw id still resolves; malformed ids do not.
+		expect(parseNikaSglangModelId('sglang/box1/llama-3.2-3b')).toEqual({ serverId: 'box1', rawId: 'llama-3.2-3b' });
+		expect(parseNikaSglangModelId('sglang/box1')).toBeUndefined();
+		expect(parseNikaSglangModelId('sglang/box1/')).toBeUndefined();
+		expect(parseNikaSglangModelId('/box1/model')).toBeUndefined();
+		expect(parseNikaSglangModelId('llamacpp/qwen2.5vl-7b')).toBeUndefined();
+	});
+
+	it('keeps every SGLang server API key in its own secret', () => {
+		expect(nikaSglangApiKeySecret('box1')).toBe('nika.sglang.box1.apiKey');
+		expect(nikaSglangApiKeySecret('box2')).not.toBe(nikaSglangApiKeySecret('box1'));
+	});
+
+	it('slugifies SGLang server ids into id-safe, secret-safe fragments', () => {
+		expect(slugifyNikaSglangServerId('GPU Rig #2')).toBe('gpu-rig-2');
+		expect(slugifyNikaSglangServerId('http://localhost:30000')).toBe('localhost-30000');
+		expect(slugifyNikaSglangServerId('  Box/One  ')).toBe('box-one');
+		expect(slugifyNikaSglangServerId('---')).toBe('server');
+		expect(slugifyNikaSglangServerId('')).toBe('server');
+	});
+
+	it('parses and normalizes nika.sglang.servers into unique servers', () => {
+		// Absent or malformed values mean "no servers".
+		expect(parseNikaSglangServers(undefined)).toEqual([]);
+		expect(parseNikaSglangServers('http://localhost:30000')).toEqual([]);
+		// Entries without an http(s) base URL are dropped.
+		expect(parseNikaSglangServers([{ label: 'no url' }, 'localhost:30000', '', 42, null])).toEqual([]);
+		// Objects and bare URL strings are both accepted; ids derive from the
+		// label, then the id, then the URL host, and duplicates get suffixes.
+		expect(parseNikaSglangServers([
+			{ id: 'gpu-1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000/' },
+			{ baseUrl: 'http://10.0.0.5:30001' },
+			'http://localhost:30000',
+			{ label: 'GPU 1', baseUrl: 'http://10.0.0.6:30000' },
+		])).toEqual([
+			{ id: 'gpu-1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000' },
+			{ id: '10-0-0-5-30001', label: '10.0.0.5:30001', baseUrl: 'http://10.0.0.5:30001' },
+			{ id: 'localhost-30000', label: 'localhost:30000', baseUrl: 'http://localhost:30000' },
+			{ id: 'gpu-1-2', label: 'GPU 1', baseUrl: 'http://10.0.0.6:30000' },
+		]);
+	});
+
+	it('accepts SGLang in the managed provider config', () => {
+		const config = parseNikaProviderConfig({ sglang: { models: ['sglang/gpu-1/Qwen/Qwen3-32B', 42] } });
+		expect(config).toEqual({ sglang: { models: ['sglang/gpu-1/Qwen/Qwen3-32B'] } });
+		expect(getNikaSelectedModels(config, 'sglang')).toEqual(['sglang/gpu-1/Qwen/Qwen3-32B']);
 	});
 });

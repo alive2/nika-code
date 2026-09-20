@@ -209,6 +209,143 @@ export const NIKA_CLAUDE_SUB_MODEL_PREFIX = 'claude/';
 export const NIKA_ZAI_MODEL_PREFIX = 'zai/';
 
 /**
+ * Provider-group prefix for SGLang server models contributed through the
+ * Nika provider. SGLang is self-hosted, so several servers can be configured
+ * at different URLs at once; each gets its own id segment. A model served by
+ * the server registered as `box1` under raw id `Qwen/Qwen3-32B` is exposed to
+ * the workbench as `sglang/box1/Qwen/Qwen3-32B` (and
+ * `nika/sglang/box1/Qwen/Qwen3-32B` once vendor-qualified).
+ */
+export const NIKA_SGLANG_MODEL_PREFIX = 'sglang/';
+
+/**
+ * Secret-key prefix for per-server SGLang API keys. A server registered under
+ * id `box1` stores its optional key under `nika.sglang.box1.apiKey`, so every
+ * configured server authenticates independently.
+ */
+export const NIKA_SGLANG_SECRET_PREFIX = 'nika.sglang.';
+
+/**
+ * Secret key holding one SGLang server's optional API key. SGLang servers are
+ * usually unauthenticated (local network), so a missing secret simply means
+ * requests go out without an `Authorization` header.
+ */
+export function nikaSglangApiKeySecret(serverId: string): string {
+	return `${NIKA_SGLANG_SECRET_PREFIX}${serverId}.apiKey`;
+}
+
+/**
+ * One configured SGLang server. `id` is a short, stable slug used in the
+ * exposed model ids (`sglang/<id>/<model>`) and in the per-server secret key;
+ * `label` is the human-readable name shown in pickers and the settings page.
+ */
+export interface NikaSglangServer {
+	readonly id: string;
+	readonly label: string;
+	readonly baseUrl: string;
+}
+
+/**
+ * Turns a free-form server label (or URL) into a stable, secret-safe id slug:
+ * lowercase alphanumerics and single dashes, never empty, never containing a
+ * `/` (which would break the `sglang/<server>/<model>` id shape).
+ */
+export function slugifyNikaSglangServerId(value: string): string {
+	const slug = value
+		.toLowerCase()
+		.replace(/^[a-z]+:\/\//, '')
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 40)
+		.replace(/-+$/g, '');
+	return slug || 'server';
+}
+
+/**
+ * Parses and normalizes the `nika.sglang.servers` setting. Accepts full
+ * objects (`{ id?, label?, baseUrl }`) and bare URL strings, validates that
+ * every entry has an http(s) base URL, derives missing ids from the label (or
+ * the URL host) and guarantees unique ids by suffixing duplicates. Returns an
+ * empty array for absent or malformed values, so a hand-edited settings file
+ * degrades to "no SGLang servers" instead of breaking model enumeration.
+ */
+export function parseNikaSglangServers(value: unknown): NikaSglangServer[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const servers: NikaSglangServer[] = [];
+	const used = new Set<string>();
+	for (const entry of value) {
+		const raw = typeof entry === 'string'
+			? { baseUrl: entry }
+			: (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined);
+		if (!raw) {
+			continue;
+		}
+		const baseUrl = typeof raw.baseUrl === 'string' ? raw.baseUrl.trim().replace(/\/+$/, '') : '';
+		if (!/^https?:\/\/.+/i.test(baseUrl)) {
+			continue;
+		}
+		const rawLabel = typeof raw.label === 'string' ? raw.label.trim() : '';
+		const rawId = typeof raw.id === 'string' ? raw.id.trim() : '';
+		const label = rawLabel || rawId || hostLabel(baseUrl);
+		let id = slugifyNikaSglangServerId(rawId || rawLabel || hostLabel(baseUrl));
+		let suffix = 2;
+		while (used.has(id)) {
+			id = `${slugifyNikaSglangServerId(rawId || rawLabel || hostLabel(baseUrl))}-${suffix++}`;
+		}
+		used.add(id);
+		servers.push({ id, label, baseUrl });
+	}
+	return servers;
+}
+
+/**
+ * The exposed SGLang model id for a raw model served by a registered server:
+ * `sglang/<server id>/<raw model id>`. Raw SGLang ids often contain slashes
+ * (`Qwen/Qwen3-32B`); the server segment is always the first path segment.
+ */
+export function nikaSglangModelId(serverId: string, rawId: string): string {
+	return `${NIKA_SGLANG_MODEL_PREFIX}${serverId}/${rawId}`;
+}
+
+/**
+ * Splits an exposed SGLang model id (`sglang/<server id>/<raw model id>`, with
+ * or without the `nika/` vendor prefix) back into its server and raw model
+ * segments. Returns undefined when the id is not an SGLang model id.
+ */
+export function parseNikaSglangModelId(value: string): { readonly serverId: string; readonly rawId: string } | undefined {
+	const id = value.startsWith('nika/') ? value.slice('nika/'.length) : value;
+	if (!id.startsWith(NIKA_SGLANG_MODEL_PREFIX)) {
+		return undefined;
+	}
+	const rest = id.slice(NIKA_SGLANG_MODEL_PREFIX.length);
+	const slash = rest.indexOf('/');
+	if (slash <= 0 || slash === rest.length - 1) {
+		return undefined;
+	}
+	return { serverId: rest.slice(0, slash), rawId: rest.slice(slash + 1) };
+}
+
+/**
+ * True for SGLang server model ids exposed through the Nika provider
+ * (`sglang/<server id>/<raw model id>`).
+ */
+export function isNikaSglangModel(value: string): boolean {
+	return value.startsWith(NIKA_SGLANG_MODEL_PREFIX);
+}
+
+/** A display label derived from a base URL's host and port (`host:port`). */
+function hostLabel(baseUrl: string): string {
+	try {
+		const url = new URL(baseUrl);
+		return url.port ? `${url.hostname}:${url.port}` : url.hostname;
+	} catch {
+		return baseUrl;
+	}
+}
+
+/**
  * Master switch for GitHub Copilot integration. Off (the default) makes
  * NikaCode run entirely on BYOK models without a GitHub account: no sign-in
  * prompts, no Copilot utility models, no GitHub MCP server. Turn it on to
@@ -245,7 +382,7 @@ export type NikaModelId =
  * The Nika provider families a user can add through the Providers wizard.
  * `gemma` (the legacy bare `gemma4:31b` id) maps to the Ollama connection.
  */
-export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
+export type NikaProviderId = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'sglang' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
 
 /**
  * Per-provider model selection persisted in the `nika.providers` setting. A
@@ -334,6 +471,7 @@ export function isNikaModelId(value: string): boolean {
 		|| value === NIKA_GEMMA_MODEL_ID
 		|| isNikaOpenRouterModel(value)
 		|| isNikaLlamaCppModel(value)
+		|| isNikaSglangModel(value)
 		|| isNikaOllamaModel(value)
 		|| isNikaGeminiCatalogModel(value)
 		|| isNikaCursorModel(value)
@@ -474,7 +612,7 @@ export function isNikaThinkingEffort(value: unknown): value is NikaThinkingEffor
  * llama.cpp server's OpenAI-compatible endpoint; `ollama/…` ids are the
  * dynamic Ollama catalog form of the same family.
  */
-export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
+export type NikaModelProvider = 'deepseek' | 'gemini' | 'gemma' | 'ollama' | 'openrouter' | 'llamacpp' | 'sglang' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
 
 /**
  * Strips the optional `nika/` vendor prefix used in settings values (e.g.
@@ -509,6 +647,9 @@ export function getNikaModelProvider(id: string): NikaModelProvider | undefined 
 	if (isNikaLlamaCppModel(value)) {
 		return 'llamacpp';
 	}
+	if (isNikaSglangModel(value)) {
+		return 'sglang';
+	}
 	if (isNikaOllamaModel(value)) {
 		return 'ollama';
 	}
@@ -541,8 +682,8 @@ export function getNikaModelProvider(id: string): NikaModelProvider | undefined 
  * supports the full range; Gemini omits `max`; OpenRouter uses `low`-`high`
  * with `medium` (its own magnitude) rather than `none`/`max`; the ChatGPT
  * subscription (codex backend) family accepts the codex range `low`-`ultra`;
- * Gemma and llama.cpp have no effort control (empty). For OpenRouter catalog
- * models the narrower per-model list from the catalog's
+ * Gemma, llama.cpp, and SGLang have no effort control (empty). For OpenRouter
+ * catalog models the narrower per-model list from the catalog's
  * `supportsReasoningEffort` should take precedence when building dropdowns.
  */
 export function getNikaEffortOptionsForModel(id: string): NikaThinkingEffort[] {
@@ -557,6 +698,7 @@ export function getNikaEffortOptionsForModel(id: string): NikaThinkingEffort[] {
 		case 'chatgpt':
 			return ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 		case 'llamacpp':
+		case 'sglang':
 		case 'ollama':
 		case 'gemma':
 		case 'cursor':
@@ -582,7 +724,7 @@ export function parseNikaProviderConfig(value: unknown): NikaProviderConfig | un
 		return undefined;
 	}
 	const config: NikaProviderConfig = {};
-	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'cursor', 'deepseekweb', 'openai', 'anthropic', 'chatgpt', 'claude', 'zai'] as const) {
+	for (const provider of ['deepseek', 'gemini', 'ollama', 'openrouter', 'llamacpp', 'sglang', 'cursor', 'deepseekweb', 'openai', 'anthropic', 'chatgpt', 'claude', 'zai'] as const) {
 		const entry = (value as Record<string, unknown>)[provider];
 		if (entry === undefined || entry === null || typeof entry !== 'object') {
 			continue;

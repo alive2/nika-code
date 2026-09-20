@@ -3321,6 +3321,31 @@
             "default": "http://localhost:8080",
             "markdownDescription": "%nika.config.llamaCppBaseUrl%"
           },
+          "nika.sglang.servers": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": [
+                "baseUrl"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "%nika.config.sglang.servers.id%"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "%nika.config.sglang.servers.label%"
+                },
+                "baseUrl": {
+                  "type": "string",
+                  "description": "%nika.config.sglang.servers.baseUrl%"
+                }
+              }
+            },
+            "markdownDescription": "%nika.config.sglang.servers%"
+          },
           "nika.deepseekWeb.deleteSessionsAfterVision": {
             "type": "boolean",
             "default": true,

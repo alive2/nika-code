@@ -14,7 +14,7 @@ import { getAnthropicTokenCost, getDeepSeekTokenCost, getOpenAITokenCost, getOpe
  * Which Nika provider produced a usage event. Legacy events (recorded before
  * provider tracking existed) default to `'deepseek'` when loaded.
  */
-export type NikaUsageProvider = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
+export type NikaUsageProvider = 'deepseek' | 'gemini' | 'ollama' | 'openrouter' | 'llamacpp' | 'sglang' | 'cursor' | 'deepseekweb' | 'openai' | 'anthropic' | 'chatgpt' | 'claude' | 'zai';
 
 /**
  * A single recorded DeepSeek request. Persisted in extension `globalState` so

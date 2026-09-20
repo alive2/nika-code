@@ -9,7 +9,7 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { IIndexingSchemeManager } from '../../../platform/workspaceChunkSearch/common/indexingScheme';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
-import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekVisionModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_ZAI_MODEL_PREFIX, NIKA_ZAI_SECRET, NIKA_RESPONSES_MODEL, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaTokenLimits, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, resolveNikaTokenLimits } from './nikaModels';
+import { getNikaEffortOptionsForModel, getNikaModelCapabilities, getNikaModelProvider, getNikaSelectedModels, getVisibleNikaModelIds, isNikaDeepSeekVisionModel, isNikaThinkingEffort, NIKA_AGENT_DEFAULTS, NIKA_ANTHROPIC_MODEL_PREFIX, NIKA_ANTHROPIC_SECRET, NIKA_CHATGPT_MODEL_PREFIX, NIKA_CHATGPT_SUB_SECRET, NIKA_CLAUDE_SUB_MODEL_PREFIX, NIKA_CLAUDE_SUB_SECRET, NIKA_CURSOR_MODEL_PREFIX, NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_MODEL_IDS, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_MODEL_IDS, NIKA_GEMINI_MODEL_PREFIX, NIKA_GEMINI_SECRET, NIKA_GEMMA_MODEL_ID, NIKA_LLAMACPP_MODEL_PREFIX, NIKA_LLAMACPP_SECRET, NIKA_OLLAMA_MODEL_PREFIX, NIKA_OPENAI_MODEL_PREFIX, NIKA_OPENAI_SECRET, NIKA_OPENROUTER_MODEL_PREFIX, NIKA_OPENROUTER_SECRET, NIKA_ZAI_MODEL_PREFIX, NIKA_ZAI_SECRET, NIKA_SGLANG_MODEL_PREFIX, NIKA_SGLANG_SECRET_PREFIX, NIKA_RESPONSES_MODEL, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, NikaChatGptSubscriptionToken, NikaClaudeSubscriptionToken, NikaModelId, NikaProviderConfig, NikaProviderId, NikaSglangServer, NikaTokenLimits, nikaSglangApiKeySecret, nikaSglangModelId, parseNikaChatGptSubscriptionToken, parseNikaClaudeSubscriptionToken, parseNikaProviderConfig, parseNikaSglangServers, resolveNikaTokenLimits } from './nikaModels';
 import { formatOpenRouterPriceLabel, getDeepSeekRatePeriod, isDeepSeekPeakHour, NIKA_ANTHROPIC_PRICES, NIKA_OPENAI_PRICES, NIKA_ZAI_PRICES } from './nikaPricing';
 import { NikaOpenRouterProvider, nikaOpenRouterModelId } from './nikaOpenRouterProvider';
 import { NikaOpenAIProvider } from './nikaOpenAIProvider';
@@ -18,6 +18,7 @@ import { BYOKKnownModels } from '../common/byokProvider';
 import { NikaChatGptSubProvider } from './nikaChatGptSubProvider';
 import { NikaClaudeSubProvider } from './nikaClaudeSubProvider';
 import { LLAMACPP_DEFAULT_CONTEXT_WINDOW, NikaLlamaCppProvider } from './nikaLlamaCppProvider';
+import { NikaSglangProvider } from './nikaSglangProvider';
 import { NikaCursorProvider } from './nikaCursorProvider';
 import { NikaZaiProvider, ZAI_BASE_URL } from './nikaZaiProvider';
 import { NikaGeminiProvider } from './nikaGeminiProvider';
@@ -61,6 +62,7 @@ function providerDisplayName(provider: NikaConnection): string {
 		case 'ollama': return 'Ollama';
 		case 'openrouter': return 'OpenRouter';
 		case 'llamacpp': return 'llama.cpp';
+		case 'sglang': return 'SGLang';
 		case 'cursor': return 'Cursor';
 		case 'deepseekweb': return 'DeepSeek Web';
 		case 'openai': return 'OpenAI';
@@ -110,6 +112,8 @@ export class NikaSettingsEditor extends Disposable {
 	private _geminiKey: string | undefined;
 	private readonly _output = this._register(vscode.window.createOutputChannel(vscode.l10n.t('Nika')));
 	private readonly _connections = new Map<NikaConnection, ConnectionResult>();
+	/** Per-server SGLang connection results, keyed by server id. */
+	private readonly _sglangConnections = new Map<string, ConnectionResult>();
 	/** Cancels an in-flight device-code sign-in when a new one starts. */
 	private _subSignInSource: vscode.CancellationTokenSource | undefined;
 
@@ -117,6 +121,7 @@ export class NikaSettingsEditor extends Disposable {
 		private readonly _usageTracker: NikaUsageTracker,
 		private readonly _openRouterProvider: NikaOpenRouterProvider,
 		private readonly _llamaCppProvider: NikaLlamaCppProvider,
+		private readonly _sglangProvider: NikaSglangProvider,
 		private readonly _geminiCatalogProvider: NikaGeminiProvider,
 		private readonly _cursorProvider: NikaCursorProvider,
 		private readonly _deepSeekWebProvider: NikaDeepSeekWebProvider,
@@ -151,7 +156,7 @@ export class NikaSettingsEditor extends Disposable {
 			}
 		}));
 		this._register(this._context.secrets.onDidChange(event => {
-			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET) {
+			if (event.key === NIKA_DEEPSEEK_SECRET || event.key === NIKA_GEMINI_SECRET || event.key === NIKA_OPENROUTER_SECRET || event.key === NIKA_LLAMACPP_SECRET || event.key === NIKA_CURSOR_SECRET || event.key === NIKA_DEEPSEEK_WEB_SECRET || event.key === NIKA_OPENAI_SECRET || event.key === NIKA_ANTHROPIC_SECRET || event.key === NIKA_CHATGPT_SUB_SECRET || event.key === NIKA_CLAUDE_SUB_SECRET || event.key === NIKA_ZAI_SECRET || event.key.startsWith(NIKA_SGLANG_SECRET_PREFIX)) {
 				void this._render(this._activeSection);
 			}
 		}));
@@ -336,6 +341,11 @@ export class NikaSettingsEditor extends Disposable {
 		const openRouterCatalog = openRouterKey ? await this._openRouterCatalogState(openRouterKey) : [];
 		const llamaCppBaseUrl = this._llamaCppBaseUrl();
 		const llamaCppCatalog = llamaCppBaseUrl ? await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined) : [];
+		// SGLang: every registered server contributes its own catalog, keyed by
+		// `sglang/<server id>/<raw model id>` so several servers coexist.
+		const sglangServers = this._sglangServers();
+		const sglangServerStates = await this._sglangServerStates(sglangServers);
+		const sglangCatalog = sglangServerStates.flatMap(state => state.models);
 		const ollamaBaseUrl = value('ollamaBaseUrl', 'http://localhost:11434');
 		// Ollama needs no secret, so it cannot be keyed on one. Probe its host
 		// only when it is actually in use: added through the provider wizard
@@ -379,6 +389,9 @@ export class NikaSettingsEditor extends Disposable {
 			openrouterModels: openRouterCatalog,
 			llamacppConfigured: !!llamaCppKey,
 			llamacppModels: llamaCppCatalog,
+			sglangConfigured: sglangServers.length > 0,
+			sglangServers: sglangServerStates.map(state => ({ id: state.server.id, label: state.server.label, baseUrl: state.server.baseUrl, configured: state.hasKey, models: state.models.length, error: state.error })),
+			sglangModels: sglangCatalog,
 			cursorConfigured: !!cursorKey,
 			deepseekwebConfigured: !!deepSeekWebToken,
 			openaiConfigured: !!openAIKey,
@@ -397,8 +410,8 @@ export class NikaSettingsEditor extends Disposable {
 			// Per-provider configured flag for status pills. Legacy mode keeps
 			// the classic rules; managed mode reflects the added providers.
 			providersConfigured: providersManaged
-				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb, openai: !!providers.openai, anthropic: !!providers.anthropic, chatgpt: !!providers.chatgpt, claude: !!providers.claude, zai: !!providers.zai }
-				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken, openai: !!openAIKey, anthropic: !!anthropicKey, chatgpt: !!chatGptSubToken, claude: !!claudeSubToken, zai: !!zaiKey },
+				? { deepseek: !!providers.deepseek, gemini: !!providers.gemini, ollama: !!providers.ollama, openrouter: !!providers.openrouter, llamacpp: !!providers.llamacpp, sglang: !!providers.sglang, cursor: !!providers.cursor, deepseekweb: !!providers.deepseekweb, openai: !!providers.openai, anthropic: !!providers.anthropic, chatgpt: !!providers.chatgpt, claude: !!providers.claude, zai: !!providers.zai }
+				: { deepseek: !!deepseekKey, gemini: !!geminiKey, ollama: true, openrouter: !!openRouterKey, llamacpp: !!llamaCppBaseUrl, sglang: sglangServers.length > 0, cursor: !!cursorKey, deepseekweb: !!deepSeekWebToken, openai: !!openAIKey, anthropic: !!anthropicKey, chatgpt: !!chatGptSubToken, claude: !!claudeSubToken, zai: !!zaiKey },
 			// Available models per provider for the wizard's selection step.
 			// Native entries are bare ids; catalog families carry their prefix
 			// so the wizard stores exactly what the picker gates on.
@@ -413,6 +426,7 @@ export class NikaSettingsEditor extends Disposable {
 				ollama: prefixCatalog(ollamaCatalog, NIKA_OLLAMA_MODEL_PREFIX),
 				openrouter: prefixCatalog(openRouterCatalog, NIKA_OPENROUTER_MODEL_PREFIX),
 				llamacpp: prefixCatalog(llamaCppCatalog, NIKA_LLAMACPP_MODEL_PREFIX),
+				sglang: prefixCatalog(sglangCatalog, NIKA_SGLANG_MODEL_PREFIX),
 				cursor: prefixCatalog(cursorCatalog, NIKA_CURSOR_MODEL_PREFIX),
 				openai: prefixCatalog(openAICatalog, NIKA_OPENAI_MODEL_PREFIX),
 				anthropic: prefixCatalog(anthropicCatalog, NIKA_ANTHROPIC_MODEL_PREFIX),
@@ -437,10 +451,11 @@ export class NikaSettingsEditor extends Disposable {
 			// Flattened, selection-gated model list for the Models / Agents /
 			// Vision dropdowns (native + Ollama + OpenRouter + llama.cpp +
 			// Gemini catalog + Cursor + OpenAI + Anthropic).
-			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, openAICatalog, anthropicCatalog, zaiCatalog, chatGptSubModels, claudeSubModels, providers),
+			modelChoices: await this._modelChoicesState(config, openRouterCatalog, llamaCppCatalog, sglangCatalog, ollamaCatalog, geminiCatalog, cursorCatalog, openAICatalog, anthropicCatalog, zaiCatalog, chatGptSubModels, claudeSubModels, providers),
 			hasOllama: true,
 			ollamaBaseUrl: value('ollamaBaseUrl', 'http://localhost:11434'),
 			llamaCppBaseUrl,
+			sglangConnections: Object.fromEntries(this._sglangConnections),
 			appVersion: vscode.version,
 			extensionVersion: String((this._context.extension.packageJSON as { version?: string }).version ?? 'unknown'),
 			connections: Object.fromEntries(this._connections),
@@ -778,6 +793,125 @@ export class NikaSettingsEditor extends Disposable {
 	}
 
 	/**
+	 * Registers one SGLang server in `nika.sglang.servers` and stores its
+	 * optional API key under the per-server secret. Several servers coexist, so
+	 * this always appends: an already-configured URL is repointed to the new
+	 * label/key instead of being duplicated.
+	 */
+	private async _addSglangServer(label: string, url: string, key: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const trimmedUrl = url.trim().replace(/\/+$/, '');
+		if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
+			throw new Error(vscode.l10n.t('Enter a full SGLang base URL, for example http://localhost:30000.'));
+		}
+		const trimmedLabel = label.trim();
+		const parsed = parseNikaSglangServers([{ label: trimmedLabel || undefined, baseUrl: trimmedUrl }])[0];
+		if (!parsed) {
+			throw new Error(vscode.l10n.t('Enter a valid SGLang base URL.'));
+		}
+		const existing = this._sglangServers();
+		const duplicate = existing.find(server => server.baseUrl === parsed.baseUrl);
+		// A new server keeps its own id (and therefore its own secret lane) even
+		// when the label matches another server's.
+		const usedIds = new Set(existing.filter(server => server !== duplicate).map(server => server.id));
+		let id = parsed.id;
+		let suffix = 2;
+		while (usedIds.has(id)) {
+			id = `${parsed.id}-${suffix++}`;
+		}
+		const server: NikaSglangServer = { id, label: trimmedLabel || parsed.label, baseUrl: parsed.baseUrl };
+		await config.update('sglang.servers', [...existing.filter(candidate => candidate.baseUrl !== server.baseUrl).map(candidate => ({ id: candidate.id, label: candidate.label, baseUrl: candidate.baseUrl })), { id: server.id, label: server.label, baseUrl: server.baseUrl }], vscode.ConfigurationTarget.Global);
+		if (key.trim()) {
+			await this._saveSglangServerKey(server.id, key, false);
+		}
+		// A failed first fetch is reported to the log but does not block the
+		// save: the server may just be starting up, and the model step can be
+		// revisited once it answers.
+		const [state] = await this._sglangServerStates([server]);
+		this.log('INFO', vscode.l10n.t('Added the SGLang server {0} at {1} with {2} model(s).', server.label, server.baseUrl, state?.models.length ?? 0));
+		if (state?.error) {
+			void vscode.window.showWarningMessage(vscode.l10n.t('The SGLang server {0} could not be reached: {1}', server.label, state.error));
+		}
+		await this._render('providers');
+	}
+
+	/** Removes one SGLang server and its API key. Other servers stay untouched. */
+	private async _removeSglangServer(id: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration('nika');
+		const existing = this._sglangServers();
+		const removed = existing.find(server => server.id === id);
+		if (!removed) {
+			return;
+		}
+		await config.update('sglang.servers', existing.filter(server => server.id !== id).map(server => ({ id: server.id, label: server.label, baseUrl: server.baseUrl })), vscode.ConfigurationTarget.Global);
+		await this._context.secrets.delete(nikaSglangApiKeySecret(id));
+		this._sglangConnections.delete(id);
+		// The models of a removed server must stop being selectable (or a
+		// stale selection would fail every request). Managed mode keeps the
+		// selection list otherwise intact.
+		const current = parseNikaProviderConfig(config.get('providers'));
+		if (current?.sglang) {
+			const models = current.sglang.models.filter(model => !model.startsWith(nikaSglangModelId(id, '')));
+			await config.update('providers', { ...current, sglang: { models } }, vscode.ConfigurationTarget.Global);
+		}
+		this.log('INFO', vscode.l10n.t('Removed the SGLang server {0}.', removed.label));
+		void vscode.window.showInformationMessage(vscode.l10n.t('SGLang server {0} removed.', removed.label));
+		await this._render('providers');
+	}
+
+	/** Stores (or clears) one SGLang server's optional API key. */
+	private async _saveSglangServerKey(id: string, value: string, notify = true): Promise<void> {
+		const server = this._sglangServers().find(candidate => candidate.id === id);
+		if (!server) {
+			throw new Error(vscode.l10n.t('The SGLang server is no longer configured.'));
+		}
+		const trimmed = value.trim();
+		if (trimmed) {
+			await this._context.secrets.store(nikaSglangApiKeySecret(id), trimmed);
+		} else {
+			await this._context.secrets.delete(nikaSglangApiKeySecret(id));
+		}
+		this._sglangConnections.delete(id);
+		if (notify) {
+			void vscode.window.showInformationMessage(trimmed
+				? vscode.l10n.t('SGLang key saved for {0}.', server.label)
+				: vscode.l10n.t('SGLang key cleared for {0}.', server.label));
+			await this._render('providers');
+		}
+	}
+
+	/** Probes one SGLang server's `/v1/models` endpoint and records the result. */
+	private async _testSglangServer(id: string): Promise<boolean> {
+		const server = this._sglangServers().find(candidate => candidate.id === id);
+		let result: ConnectionResult;
+		if (!server) {
+			result = { ok: false, message: vscode.l10n.t('The SGLang server is no longer configured.'), checkedAt: new Date().toISOString() };
+		} else {
+			try {
+				const key = await this._context.secrets.get(nikaSglangApiKeySecret(id)) ?? undefined;
+				const response = await this._fetcherService.fetch(`${server.baseUrl}/v1/models`, {
+					method: 'GET',
+					headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+					callSite: 'nika-sglang-test',
+				});
+				if (!response.ok) {
+					throw new Error(vscode.l10n.t('Connection returned HTTP {0}.', response.status));
+				}
+				result = { ok: true, message: vscode.l10n.t('Connection successful'), checkedAt: new Date().toISOString() };
+			} catch (error) {
+				result = { ok: false, message: error instanceof Error ? error.message : String(error), checkedAt: new Date().toISOString() };
+			}
+		}
+		this._sglangConnections.set(id, result);
+		this.log(result.ok ? 'INFO' : 'ERROR', `sglang/${id}: ${result.message}`);
+		void vscode.window.showInformationMessage(result.ok
+			? vscode.l10n.t('SGLang connection successful for {0}.', server?.label ?? id)
+			: vscode.l10n.t('SGLang connection failed for {0}: {1}', server?.label ?? id, result.message));
+		await this._render();
+		return result.ok;
+	}
+
+	/**
 	 * Flattened, selection-gated model list for the settings dropdowns (Models
 	 * page, Agents page, vision defaults). Mirrors the chat model picker's
 	 * visibility rules in `nikaProvider.provideLanguageModelChatInformation`:
@@ -788,7 +922,7 @@ export class NikaSettingsEditor extends Disposable {
 	 * family, capabilities (vision, effort levels), and optional
 	 * context/pricing for the catalog rows.
 	 */
-	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[], llamaCppCatalog: unknown[], ollamaCatalog: unknown[], geminiCatalog: unknown[], cursorCatalog: unknown[], openAICatalog: unknown[], anthropicCatalog: unknown[], zaiCatalog: unknown[], chatGptSubModels: unknown[], claudeSubModels: unknown[], providerConfig: NikaProviderConfig | undefined): Promise<unknown[]> {
+	private async _modelChoicesState(config: vscode.WorkspaceConfiguration, openRouterCatalog: unknown[], llamaCppCatalog: unknown[], sglangCatalog: unknown[], ollamaCatalog: unknown[], geminiCatalog: unknown[], cursorCatalog: unknown[], openAICatalog: unknown[], anthropicCatalog: unknown[], zaiCatalog: unknown[], chatGptSubModels: unknown[], claudeSubModels: unknown[], providerConfig: NikaProviderConfig | undefined): Promise<unknown[]> {
 		const limits = resolveNikaTokenLimits(
 			config.get<string>('contextWindow', '128K'),
 			config.get<string>('outputTokens', '8K'),
@@ -840,6 +974,27 @@ export class NikaSettingsEditor extends Disposable {
 					id: `nika/${NIKA_LLAMACPP_MODEL_PREFIX}${entry.id}`,
 					displayName: entry.name,
 					provider: 'llamacpp',
+					vision: entry.vision,
+					efforts: entry.efforts,
+					contextWindow: entry.contextWindow,
+				};
+			});
+		const sglangSelected = getNikaSelectedModels(providerConfig, 'sglang');
+		// SGLang catalog ids already carry their server segment
+		// (`<server id>/<raw id>`); only the family prefix is added here.
+		const sglangChoices = (sglangCatalog as unknown[])
+			.filter(model => {
+				if (sglangSelected === undefined) {
+					return providerConfig === undefined;
+				}
+				return sglangSelected.includes(`${NIKA_SGLANG_MODEL_PREFIX}${(model as { id: string }).id}`);
+			})
+			.map(model => {
+				const entry = model as { id: string; name: string; vision: boolean; efforts: string[]; contextWindow: number; serverLabel?: string };
+				return {
+					id: `nika/${NIKA_SGLANG_MODEL_PREFIX}${entry.id}`,
+					displayName: entry.serverLabel ? `${entry.name} · ${entry.serverLabel}` : entry.name,
+					provider: 'sglang',
 					vision: entry.vision,
 					efforts: entry.efforts,
 					contextWindow: entry.contextWindow,
@@ -1005,11 +1160,52 @@ export class NikaSettingsEditor extends Disposable {
 					efforts: entry.efforts,
 				};
 			});
-		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices, ...openAIChoices, ...anthropicChoices, ...zaiChoices, ...chatGptChoices, ...claudeChoices];
+		return [...nativeChoices, ...ollamaChoices, ...catalogChoices, ...llamaCppChoices, ...sglangChoices, ...geminiChoices, ...cursorChoices, ...deepSeekWebChoices, ...openAIChoices, ...anthropicChoices, ...zaiChoices, ...chatGptChoices, ...claudeChoices];
 	}
 
 	private _llamaCppBaseUrl(): string {
 		return vscode.workspace.getConfiguration('nika').get<string>('llamaCppBaseUrl', 'http://localhost:8080').replace(/\/$/, '');
+	}
+
+	/** The registered SGLang servers (`nika.sglang.servers`). */
+	private _sglangServers(): readonly NikaSglangServer[] {
+		return parseNikaSglangServers(vscode.workspace.getConfiguration('nika').get('sglang.servers'));
+	}
+
+	/**
+	 * Per-server SGLang status for the settings page: whether an API key is
+	 * stored, the serialized catalog for the wizard, and the fetch error (if
+	 * any). A server that is unreachable degrades to an empty model list plus
+	 * an error string instead of breaking the whole page.
+	 */
+	private async _sglangServerStates(servers: readonly NikaSglangServer[]): Promise<{ server: NikaSglangServer; hasKey: boolean; models: unknown[]; error?: string }[]> {
+		return Promise.all(servers.map(async server => {
+			const key = await this._context.secrets.get(nikaSglangApiKeySecret(server.id)) ?? undefined;
+			try {
+				const catalog = await this._sglangProvider.getCatalog(server, key);
+				const models = [...catalog.values()].map(model => ({
+					id: `${server.id}/${model.id}`,
+					name: model.name,
+					contextWindow: model.contextWindow,
+					vision: model.capabilities.vision,
+					toolCalling: model.capabilities.toolCalling,
+					reasoning: (model.capabilities.supportsReasoningEffort?.length ?? 0) > 0,
+					// SGLang has no reasoning-effort control.
+					efforts: [],
+					provider: 'sglang',
+					serverId: server.id,
+					serverLabel: server.label,
+					// Local inference is free: no price label.
+					priceLabel: '',
+					free: true,
+				}));
+				return { server, hasKey: !!key, models };
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				this.log('WARN', vscode.l10n.t('SGLang server {0} unavailable: {1}', server.label, detail));
+				return { server, hasKey: !!key, models: [], error: detail };
+			}
+		}));
 	}
 
 	private _usageState(): Record<string, unknown> {
@@ -1119,8 +1315,28 @@ export class NikaSettingsEditor extends Disposable {
 					}
 					break;
 				case 'testConnection':
-					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic' || message.provider === 'zai') {
+					if (message.provider === 'deepseek' || message.provider === 'gemini' || message.provider === 'ollama' || message.provider === 'openrouter' || message.provider === 'llamacpp' || message.provider === 'sglang' || message.provider === 'cursor' || message.provider === 'deepseekweb' || message.provider === 'openai' || message.provider === 'anthropic' || message.provider === 'zai') {
 						await this.testConnection(message.provider);
+					}
+					break;
+				case 'addSglangServer':
+					if (typeof message.url === 'string') {
+						await this._addSglangServer(typeof message.label === 'string' ? message.label : '', message.url, typeof message.value === 'string' ? message.value : '');
+					}
+					break;
+				case 'removeSglangServer':
+					if (typeof message.id === 'string' && message.id) {
+						await this._removeSglangServer(message.id);
+					}
+					break;
+				case 'saveSglangServerKey':
+					if (typeof message.id === 'string' && message.id && typeof message.value === 'string') {
+						await this._saveSglangServerKey(message.id, message.value);
+					}
+					break;
+				case 'testSglangServer':
+					if (typeof message.id === 'string' && message.id) {
+						await this._testSglangServer(message.id);
 					}
 					break;
 				case 'deepSeekWebSignIn':
@@ -1363,6 +1579,13 @@ export class NikaSettingsEditor extends Disposable {
 		if (llamaCppBaseUrl) {
 			const catalog = await this._llamaCppCatalogState(llamaCppBaseUrl, llamaCppKey ?? undefined);
 			seed.llamacpp = { models: (catalog as { id: string }[]).map(model => `${NIKA_LLAMACPP_MODEL_PREFIX}${model.id}`) };
+		}
+		// Every registered SGLang server is seeded with its own models (the ids
+		// already carry the server segment).
+		const sglangServers = this._sglangServers();
+		if (sglangServers.length > 0) {
+			const sglangStates = await this._sglangServerStates(sglangServers);
+			seed.sglang = { models: sglangStates.flatMap(state => state.models.map(model => `${NIKA_SGLANG_MODEL_PREFIX}${(model as { id: string }).id}`)) };
 		}
 		const ollamaConfig = vscode.workspace.getConfiguration('nika');
 		const ollamaBaseUrl = ollamaConfig.get<string>('ollamaBaseUrl', 'http://localhost:11434').replace(/\/$/, '');
@@ -1702,6 +1925,25 @@ export class NikaSettingsEditor extends Disposable {
 				const url = this._llamaCppBaseUrl();
 				const key = await this._context.secrets.get(NIKA_LLAMACPP_SECRET);
 				response = await this._fetcherService.fetch(`${url}/v1/models`, { method: 'GET', headers: key ? { Authorization: `Bearer ${key}` } : undefined, callSite: 'nika-llamacpp-test' });
+			} else if (provider === 'sglang') {
+				// SGLang is multi-server: probe every registered server and report
+				// an aggregate result, keeping the per-server outcomes in the
+				// servers card rows.
+				const servers = this._sglangServers();
+				if (servers.length === 0) {
+					throw new Error(vscode.l10n.t('No SGLang server is configured.'));
+				}
+				const results = await Promise.all(servers.map(server => this._testSglangServer(server.id)));
+				const failures = servers.filter((_, index) => !results[index]).map(server => server.label);
+				if (failures.length === 0) {
+					response = { ok: true, status: 200 };
+					this._connections.set(provider, { ok: true, message: servers.length === 1 ? vscode.l10n.t('Connection successful') : vscode.l10n.t('All {0} servers reachable.', servers.length), checkedAt: new Date().toISOString() });
+					this.log('INFO', `sglang: all ${servers.length} server(s) reachable`);
+					void vscode.window.showInformationMessage(vscode.l10n.t('All {0} SGLang servers are reachable.', servers.length));
+					await this._render();
+					return true;
+				}
+				throw new Error(vscode.l10n.t('Unreachable server(s): {0}', failures.join(', ')));
 			} else if (provider === 'cursor') {
 				const key = await this._context.secrets.get(NIKA_CURSOR_SECRET);
 				if (!key) { throw new Error(vscode.l10n.t('No Cursor key is configured.')); }
@@ -1860,6 +2102,8 @@ export class NikaSettingsEditor extends Disposable {
 			geminiConfigured: state.geminiConfigured,
 			openrouterConfigured: state.openrouterConfigured,
 			llamacppConfigured: state.llamacppConfigured,
+			sglangConfigured: state.sglangConfigured,
+			sglangServers: state.sglangServers,
 			chatgptConfigured: state.chatgptConfigured,
 			claudeConfigured: state.claudeConfigured,
 			chatgptStatus: state.chatgptStatus,
@@ -1868,6 +2112,7 @@ export class NikaSettingsEditor extends Disposable {
 			providers: state.providers,
 			openrouterModelCount: (state.openrouterModels as unknown[]).length,
 			llamacppModelCount: (state.llamacppModels as unknown[]).length,
+			sglangModelCount: (state.sglangModels as unknown[]).length,
 			connections: state.connections,
 			settings: state.settings,
 		};
@@ -1916,6 +2161,7 @@ ${[['overview', vscode.l10n.t('Overview')], ['providers', vscode.l10n.t('Provide
 <div class="card"><h2>${vscode.l10n.t('GitHub')}</h2><p class="hint">${vscode.l10n.t('NikaCode runs fully on your own models without a GitHub account. Turn GitHub on to restore Copilot integration.')}</p>${this._checkboxRow('github.enabled', vscode.l10n.t('Enable GitHub Copilot integration'))}<div class="row"><label><strong>${vscode.l10n.t('What this controls')}</strong><span class="hint">${vscode.l10n.t('When off (default), no GitHub sign-in is required anywhere: chat, agent mode, inline chat, and the Agents window all use your Nika models. When on, GitHub sign-in prompts, Copilot utility models, and the GitHub MCP server are restored.')}</span></label></div></div></section>
 <section id="providers"><h1>${vscode.l10n.t('Providers')}</h1><p class="lead">${vscode.l10n.t('Add only the providers you use. The models you select are the only ones that appear in chat, Agents, and the model dropdowns.')}</p>
 <div data-provider-cards></div>
+<div data-sglang-servers></div>
 <div class="actions"><button class="action" data-wizard-add>${vscode.l10n.t('Add Provider')}</button></div>
 <div data-wizard></div>
 </section>
@@ -1949,9 +2195,11 @@ ${this._selectRow('indexing.scheme', vscode.l10n.t('Indexing scheme'), [['off', 
 const settings=state.settings;let activeSection;document.getElementById('app-version').textContent=state.appVersion;document.getElementById('extension-version').textContent=state.extensionVersion;
 function status(id,configured){const result=state.connections[id];const text=result?(result.ok?${JSON.stringify(vscode.l10n.t('Connected'))}:result.message):(configured?${JSON.stringify(vscode.l10n.t('Configured'))}:${JSON.stringify(vscode.l10n.t('Not configured'))});const good=result?result.ok:configured;document.querySelectorAll('[data-provider-status="'+id+'"]').forEach(target=>{target.innerHTML='<span class="pill '+(good?'ok':'')+'"><span class="dot"></span></span> ';target.append(document.createTextNode(text));});}
 // --- Provider wizard (Add Provider flow + provider cards) ---
-const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',cursor:'Cursor',deepseekweb:'DeepSeek Web',openai:'OpenAI',anthropic:'Anthropic',chatgpt:'ChatGPT',claude:'Claude',zai:'Z.ai'};
-const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','cursor','deepseekweb','openai','anthropic','chatgpt','claude','zai'];
-const providerHints={deepseek:'Flash, Pro, Flash Vision, and Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota',zai:'The GLM lineup on platform.z.ai (GLM-5.x, GLM-4.x, vision models)'};
+const providerLabels={deepseek:'DeepSeek',gemini:'Gemini',ollama:'Ollama',openrouter:'OpenRouter',llamacpp:'llama.cpp',sglang:'SGLang',cursor:'Cursor',deepseekweb:'DeepSeek Web',openai:'OpenAI',anthropic:'Anthropic',chatgpt:'ChatGPT',claude:'Claude',zai:'Z.ai'};
+const providerOrder=['deepseek','gemini','ollama','openrouter','llamacpp','sglang','cursor','deepseekweb','openai','anthropic','chatgpt','claude','zai'];
+const providerHints={deepseek:'Flash, Pro, Flash Vision, and Responses',gemini:'Every Gemini model on the Google catalog',ollama:'Models pulled on the configured Ollama host (ollama pull <name> to add more)',openrouter:'The full catalog at OpenRouter prices',llamacpp:'Models loaded on the configured llama.cpp server',sglang:'Every model served by your registered SGLang servers (add one entry per server URL)',cursor:'Cursor API models billed to your Cursor account',deepseekweb:'DeepSeek chat via the web API; images upload automatically',openai:'The official OpenAI catalog (GPT-5, o3, GPT-4.1, and more)',anthropic:'Every Claude model on the official Anthropic catalog',chatgpt:'ChatGPT Plus/Pro via device sign-in; uses your plan quota',claude:'Claude Pro/Max via device sign-in; uses your plan quota',zai:'The GLM lineup on platform.z.ai (GLM-5.x, GLM-4.x, vision models)'};
+const sglangServers=state.sglangServers||[];
+const sglangConnections=state.sglangConnections||{};
 const providerModels=state.providerModels||{};
 const providerConfig=state.providers||{};
 const providersManaged=!!state.providersManaged;
@@ -1966,7 +2214,7 @@ function wizardState(){return (vscode.getState()||{}).wizard||null;}
 function setWizard(w){const saved=vscode.getState()||{};vscode.setState({...saved,wizard:w});}
 function modelNameFor(provider,id){
   let key=id;
-  ['deepseekweb/','gemini/','cursor/','openrouter/','ollama/','llamacpp/','openai/','anthropic/','chatgpt/','claude/','zai/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
+  ['deepseekweb/','gemini/','cursor/','openrouter/','ollama/','llamacpp/','sglang/','openai/','anthropic/','chatgpt/','claude/','zai/'].forEach(p=>{if(key.indexOf(p)===0){key=key.slice(p.length);}});
   const list=providerModels[provider]||[];
   const entry=list.find(m=>m.id===key)||list.find(m=>m.id===id);
   return entry?(entry.name||key):id;
@@ -1985,13 +2233,37 @@ function renderProviderCards(){
     ids.forEach(id=>status(id,true));
   });
 }
+// SGLang is the only multi-server provider: every registered URL keeps its
+// own models and its own optional API key. The manager renders once a server
+// exists (or the provider was added through the wizard), so setups that never
+// run SGLang see nothing extra.
+function renderSglangServers(){
+  const hosts=document.querySelectorAll('[data-sglang-servers]');
+  if(!hosts.length){return;}
+  const managed=providersManaged&&!!providerConfig.sglang;
+  if(!sglangServers.length&&!managed){hosts.forEach(el=>{el.innerHTML='';});return;}
+  const cards=sglangServers.map(s=>{
+    const result=sglangConnections[s.id];
+    const badge=result?(' <span class="pill'+(result.ok?' ok':'')+'"><span class="dot"></span></span> '+esc(result.ok?'Connected':result.message)):'';
+    const modelText=s.models===0?esc('No models reported'):esc(s.models===1?'1 model':s.models+' models');
+    const err=s.error?'<div class="row"><label><strong>'+esc('Last error')+'</strong></label><span class="hint" style="color:var(--vscode-errorForeground)">'+esc(s.error)+'</span></div>':'';
+    return '<div class="card"><div class="row"><label><strong>'+esc(s.label)+'</strong><span class="hint">'+esc(s.baseUrl)+' &middot; '+modelText+badge+'</span></label><div class="controls wrap"><button class="action secondary" data-sglang-test="'+esc(s.id)+'">'+esc('Test')+'</button><button class="action danger" data-sglang-remove="'+esc(s.id)+'">'+esc('Remove')+'</button></div></div>'+err+
+      '<div class="row"><label for="sglangKey-'+esc(s.id)+'"><strong>'+esc('API key (optional)')+'</strong><span class="hint">'+esc(s.configured?'A key is stored for this server.':'No key stored - requests are sent unauthenticated.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="sglangKey-'+esc(s.id)+'" placeholder="'+esc('New key, or empty to clear')+'"><button class="action secondary" data-sglang-key-save="'+esc(s.id)+'">'+esc('Save key')+'</button></div></div></div>';
+  }).join('');
+  const add='<div class="card"><h2>'+esc('Add SGLang server')+'</h2><p class="hint">'+esc('Register another SGLang server URL. Each server keeps its own models and its own optional API key, so several boxes can run side by side.')+'</p>'
+    +'<div class="row"><label for="sglangAddUrl"><strong>'+esc('Server URL')+'</strong></label><div class="controls"><input id="sglangAddUrl" type="text" placeholder="http://localhost:30000"></div></div>'
+    +'<div class="row"><label for="sglangAddName"><strong>'+esc('Name (optional)')+'</strong><span class="hint">'+esc('Shown in the model picker to tell your servers apart.')+'</span></label><div class="controls"><input id="sglangAddName" type="text" placeholder="'+esc('Defaults to the host and port')+'"></div></div>'
+    +'<div class="row"><label for="sglangAddKey"><strong>'+esc('API key (optional)')+'</strong></label><div class="controls"><input id="sglangAddKey" type="password" autocomplete="off" placeholder="'+esc('Only if the server requires one')+'"></div></div>'
+    +'<div class="actions"><button class="action" data-sglang-add>'+esc('Add server')+'</button><button class="action secondary" data-sglang-test-all>'+esc('Test all servers')+'</button></div></div>';
+  hosts.forEach(el=>{el.innerHTML=(cards||'<div class="empty">'+esc('No SGLang server registered yet.')+'</div>')+add;});
+}
 function wizardStepHtml(){
   const w=wizardState();if(!w){return '';}
   const label=providerLabels[w.provider]||'';
   let html='<h2>'+esc(w.step==='pick'?'Add Provider':(w.step==='models'?label+' · Select models':label))+'</h2>';
   if(w.step==='pick'){
     const available=providerOrder.filter(id=>!providersManaged||!providerConfig[id]);
-    const credentialPill={chatgpt:'Subscription',claude:'Subscription',deepseekweb:'Web token',ollama:'Local',llamacpp:'Local'};
+    const credentialPill={chatgpt:'Subscription',claude:'Subscription',deepseekweb:'Web token',ollama:'Local',llamacpp:'Local',sglang:'Multi-server'};
     const riskPill={chatgpt:'&#9888; Risk',claude:'&#9888; Risk'};
     html+=available.length?available.map(id=>{
       const pill=credentialPill[id]||'API key';
@@ -2006,6 +2278,10 @@ function wizardStepHtml(){
     }else if(w.provider==='llamacpp'){
       html+='<div class="row"><label for="wizardLlamaCppUrl"><strong>'+esc('llama.cpp host')+'</strong><span class="hint">'+esc('The OpenAI-compatible llama.cpp server (default http://localhost:8080).')+'</span></label><div class="controls"><input id="wizardLlamaCppUrl" type="text" value="'+esc(state.llamaCppBaseUrl||'http://localhost:8080')+'"><button class="action" data-wizard-next>'+esc('Save & Next')+'</button></div></div>';
       html+='<div class="row"><label><strong>'+esc('llama.cpp API key (optional)')+'</strong><span class="hint">'+esc('Leave empty for no authentication.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardLlamaCppKey" placeholder="'+esc('Paste your API key')+'"></div></div>';
+    }else if(w.provider==='sglang'){
+      html+='<div class="row"><label for="wizardSglangUrl"><strong>'+esc('SGLang server URL')+'</strong><span class="hint">'+esc('The OpenAI-compatible SGLang server, for example http://localhost:30000. Add one entry per server; each gets its own models and optional key.')+'</span></label><div class="controls"><input id="wizardSglangUrl" type="text" placeholder="http://localhost:30000"><button class="action" data-wizard-next>'+esc('Add & Next')+'</button></div></div>';
+      html+='<div class="row"><label for="wizardSglangLabel"><strong>'+esc('Server name (optional)')+'</strong><span class="hint">'+esc('Shown in the model picker to tell your servers apart, e.g. gpu-rig.')+'</span></label><div class="controls"><input id="wizardSglangLabel" type="text" placeholder="'+esc('Defaults to the host and port')+'"></div></div>';
+      html+='<div class="row"><label><strong>'+esc('SGLang API key (optional)')+'</strong><span class="hint">'+esc('Only needed when the server was launched with --api-key. Leave empty otherwise.')+'</span></label><div class="controls"><input type="password" autocomplete="off" id="wizardSglangKey" placeholder="'+esc('Paste the server API key')+'"></div></div>';
     }else if(w.provider==='chatgpt'||w.provider==='claude'){
       const risk=w.provider==='chatgpt'?'Unofficial integration: signs in with your ChatGPT (Plus/Pro) plan and routes requests through OpenAI’s codex backend. Not an official client — the provider may detect third-party clients; use at your own risk.':'Unofficial integration: signs in with your Claude (Pro/Max) plan and routes requests through Anthropic’s Claude Code OAuth. Not an official client — the provider may detect third-party clients; use at your own risk.';
       html+='<div class="row"><label><strong>'+esc('Sign in with '+label)+'</strong><span class="hint">'+esc(risk)+'</span></label><div class="controls"><button class="action" data-wizard-sub-signin>'+esc('Start device sign-in')+'</button></div></div>';
@@ -2030,6 +2306,7 @@ function wizardStepHtml(){
   if(!list.length&&w.provider==='zai'){html+='<p class="hint">'+esc('No catalog models available. Check that the Z.ai API key is valid.')+'</p>';}
   if(!list.length&&(w.provider==='chatgpt'||w.provider==='claude')){html+='<p class="hint">'+esc('No models available. Complete the sign-in first.')+'</p>';}
   if(!list.length&&(w.provider==='ollama'||w.provider==='llamacpp')){html+='<p class="hint">'+esc('No models found. Is the server running with models loaded? For Ollama, run ollama pull <model> to add one.')+'</p>';}
+  if(!list.length&&w.provider==='sglang'){html+='<p class="hint">'+esc('No models found on the registered SGLang servers. Check the server URLs and that each server is running with a model loaded.')+'</p>';}
   html+='<div data-wizard-model-list></div>';
   html+='<div class="actions"><button class="action secondary" data-wizard-back>'+esc('Back')+'</button><button class="action secondary" data-wizard-test>'+esc('Test connection')+'</button><button class="action" data-wizard-done>'+esc('Done')+'</button></div>';
   return html;
@@ -2051,7 +2328,10 @@ function renderWizard(){
     if(w&&(w.provider==='chatgpt'||w.provider==='claude')){renderSubFlow(w.provider);}
   });
 }
-renderProviderCards();renderWizard();
+renderProviderCards();renderSglangServers();renderWizard();
+const sglangAddBtn=document.querySelectorAll('[data-sglang-add]');
+sglangAddBtn.forEach(btn=>btn.addEventListener('click',()=>{const url=document.getElementById('sglangAddUrl');const name=document.getElementById('sglangAddName');const key=document.getElementById('sglangAddKey');post({type:'addSglangServer',label:name?name.value:'',url:url?url.value:'',value:key?key.value:''});}));
+document.querySelectorAll('[data-sglang-test-all]').forEach(btn=>btn.addEventListener('click',()=>post({type:'testConnection',provider:'sglang'})));
 document.querySelectorAll('[data-wizard-add]').forEach(btn=>btn.addEventListener('click',()=>{setWizard({step:'pick'});renderWizard();}));
 document.addEventListener('click',e=>{
   const pick=e.target.closest('[data-wizard-pick]');
@@ -2061,6 +2341,7 @@ document.addEventListener('click',e=>{
   const next=e.target.closest('[data-wizard-next]');
   if(next){const w=wizardState();if(!w)return;
     if(w.provider==='ollama'){const input=document.getElementById('wizardOllamaUrl');post({type:'saveSetting',key:'ollamaBaseUrl',value:input?input.value:'http://localhost:11434'});}
+    else if(w.provider==='sglang'){const host=document.getElementById('wizardSglangUrl');const name=document.getElementById('wizardSglangLabel');const key=document.getElementById('wizardSglangKey');post({type:'addSglangServer',label:name?name.value:'',url:host?host.value:'',value:key?key.value:''});}
     else if(w.provider==='llamacpp'){const host=document.getElementById('wizardLlamaCppUrl');post({type:'saveSetting',key:'llamaCppBaseUrl',value:host?host.value:'http://localhost:8080'});const key=document.getElementById('wizardLlamaCppKey');if(key&&key.value.trim()){post({type:'saveSecret',provider:'llamacpp',value:key.value});}}
     else{const input=document.getElementById('wizardKey');post({type:'saveSecret',provider:w.provider,value:input?input.value:''});}
     setWizard({provider:w.provider,step:'models',models:[]});
@@ -2087,7 +2368,13 @@ document.addEventListener('click',e=>{
   const manage=e.target.closest('[data-manage-models]');
   if(manage){const id=manage.dataset.manageModels;const existing=providerConfig[id]?providerConfig[id].models:[];setWizard({provider:id,step:'models',models:existing.slice()});renderWizard();renderWizardModelList('');return;}
   const remove=e.target.closest('[data-remove-provider]');
-  if(remove){post({type:'removeProvider',provider:remove.dataset.removeProvider});}
+  if(remove){post({type:'removeProvider',provider:remove.dataset.removeProvider});return;}
+  const sglangRemove=e.target.closest('[data-sglang-remove]');
+  if(sglangRemove){post({type:'removeSglangServer',id:sglangRemove.dataset.sglangRemove});return;}
+  const sglangTest=e.target.closest('[data-sglang-test]');
+  if(sglangTest){post({type:'testSglangServer',id:sglangTest.dataset.sglangTest});return;}
+  const sglangKey=e.target.closest('[data-sglang-key-save]');
+  if(sglangKey){const id=sglangKey.dataset.sglangKeySave;const input=document.getElementById('sglangKey-'+id);post({type:'saveSglangServerKey',id:id,value:input?input.value:''});if(input){input.value='';}return;}
 });
 // Subscription device-flow state is declared above (before the first render);
 // renderSubFlow renders the live flow card for the wizard's config step.
@@ -2264,6 +2551,7 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			openrouter: [vscode.l10n.t('OpenRouter'), vscode.l10n.t('The full model catalog at OpenRouter prices')],
 			ollama: [vscode.l10n.t('Ollama'), vscode.l10n.t('Models pulled on the configured host')],
 			llamacpp: [vscode.l10n.t('llama.cpp'), vscode.l10n.t('Models loaded on the configured llama.cpp server')],
+			sglang: [vscode.l10n.t('SGLang'), vscode.l10n.t('Models served by your registered SGLang servers')],
 			cursor: [vscode.l10n.t('Cursor'), vscode.l10n.t('Cursor API models billed to your Cursor account')],
 			chatgpt: [vscode.l10n.t('ChatGPT'), vscode.l10n.t('ChatGPT Plus/Pro sign-in; uses your plan quota')],
 			claude: [vscode.l10n.t('Claude'), vscode.l10n.t('Claude Pro/Max sign-in; uses your plan quota')],
@@ -2272,7 +2560,9 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 		const configured = (state.providersConfigured ?? {}) as Record<string, boolean>;
 		const ids = state.providersManaged
 			? Object.keys(configured).filter(id => configured[id])
-			: ['deepseek', 'gemini', 'openrouter', 'ollama', 'llamacpp', 'cursor'];
+			// Legacy mode keeps the classic rows; SGLang joins them only once a
+			// server URL is configured (it has no classic key to key off).
+			: [...['deepseek', 'gemini', 'openrouter', 'ollama', 'llamacpp', 'cursor'], ...(configured.sglang ? ['sglang'] : [])];
 		if (ids.length === 0) {
 			return `<div class="empty">${vscode.l10n.t('No providers added yet.')}</div>`;
 		}
@@ -2289,6 +2579,7 @@ window.__rateTimer=setInterval(renderRateCountdown,1000);
 			case 'gemma': return vscode.l10n.t('Ollama');
 			case 'openrouter': return vscode.l10n.t('OpenRouter');
 			case 'llamacpp': return vscode.l10n.t('llama.cpp');
+			case 'sglang': return vscode.l10n.t('SGLang');
 			case 'cursor': return vscode.l10n.t('Cursor');
 			case 'openai': return vscode.l10n.t('OpenAI');
 			case 'anthropic': return vscode.l10n.t('Anthropic');

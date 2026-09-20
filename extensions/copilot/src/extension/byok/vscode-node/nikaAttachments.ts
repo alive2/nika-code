@@ -8,7 +8,7 @@ import { IVSCodeExtensionContext } from '../../../platform/extContext/common/ext
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { createSha256Hash } from '../../../util/common/crypto';
 import { detectPdfPageRange, extractPdfText, hasPdfMagicBytes, isPdfMime } from '../node/nikaPdf';
-import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, getNikaModelProvider, isNikaDeepSeekVisionModel } from './nikaModels';
+import { NIKA_CURSOR_SECRET, NIKA_DEEPSEEK_SECRET, NIKA_DEEPSEEK_WEB_SECRET, NIKA_GEMINI_SECRET, NIKA_LLAMACPP_SECRET, NIKA_OPENROUTER_SECRET, NIKA_VISION_PREPROCESS_MAP_CONFIG_KEY, getNikaModelProvider, isNikaDeepSeekVisionModel, nikaSglangApiKeySecret, parseNikaSglangModelId, parseNikaSglangServers, slugifyNikaSglangServerId } from './nikaModels';
 import { NikaSettingsEditor } from './nikaSettingsEditor';
 import { NikaDeepSeekWebProvider } from './nikaDeepSeekWebProvider';
 
@@ -266,6 +266,23 @@ export class NikaAttachmentProcessor {
 					const baseUrl = config.get<string>('llamaCppBaseUrl', 'http://localhost:8080').replace(/\/$/, '');
 					const key = await this._context.secrets.get(NIKA_LLAMACPP_SECRET) ?? undefined;
 					return this._describeWithChatCompletions(data, mimeType, prompt, model, key, `${baseUrl}/v1/chat/completions`, 'nika-llamacpp-vision', 'llama.cpp', token);
+				}
+				case 'sglang': {
+					// The model id carries its server (`sglang/<server id>/<raw id>`),
+					// so the description request goes to that server's URL with that
+					// server's own API key.
+					const target = parseNikaSglangModelId(raw);
+					if (!target) {
+						throw new Error(vscode.l10n.t('The selected SGLang vision model is not a valid SGLang model id.'));
+					}
+					const servers = parseNikaSglangServers(config.get('sglang.servers'));
+					const server = servers.find(candidate => candidate.id === target.serverId)
+						?? servers.find(candidate => slugifyNikaSglangServerId(candidate.baseUrl) === target.serverId);
+					if (!server) {
+						throw new Error(vscode.l10n.t('The SGLang server behind the selected vision model is no longer configured.'));
+					}
+					const key = await this._context.secrets.get(nikaSglangApiKeySecret(server.id)) ?? undefined;
+					return this._describeWithChatCompletions(data, mimeType, prompt, target.rawId, key, `${server.baseUrl}/v1/chat/completions`, 'nika-sglang-vision', 'SGLang', token);
 				}
 				case 'cursor': {
 					// Cursor removed its OpenAI-compatible image endpoint along with

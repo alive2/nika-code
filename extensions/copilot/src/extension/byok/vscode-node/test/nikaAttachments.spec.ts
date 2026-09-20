@@ -215,6 +215,91 @@ describe('Nika DeepSeek vision backend', () => {
 	});
 });
 
+describe('Nika SGLang vision', () => {
+	it('describes an image through the SGLang server named in the vision model id', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ choices: [{ message: { content: 'A purple icon with a lightning bolt.' } }] }) });
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => {
+				if (key === 'visionModel') { return 'nika/sglang/gpu-1/Qwen/Qwen2.5-VL-7B-Instruct'; }
+				if (key === 'sglang.servers') { return [{ id: 'gpu-1', label: 'GPU 1', baseUrl: 'http://10.0.0.5:30000' }]; }
+				return fallback;
+			},
+		} as never);
+		const secrets = { get: vi.fn((key: string) => Promise.resolve(key === 'nika.sglang.gpu-1.apiKey' ? 'sk-sg-1' : undefined)) };
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			deepSeekWebProviderStub(),
+			{ secrets } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: fetchMock, makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
+		);
+		const image = new Uint8Array([11, 12, 13]);
+		const result = await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(image, 'image/png')]),
+		], new vscode.CancellationTokenSource().token);
+
+		const text = result.messages[0].content.find(part => part instanceof vscode.LanguageModelTextPart) as vscode.LanguageModelTextPart;
+		expect(text.value).toContain('A purple icon with a lightning bolt.');
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe('http://10.0.0.5:30000/v1/chat/completions');
+		// The server segment is stripped: the raw id goes on the wire.
+		expect(JSON.parse(init.body).model).toBe('Qwen/Qwen2.5-VL-7B-Instruct');
+		expect(init.headers.Authorization).toBe('Bearer sk-sg-1');
+		expect(init.callSite).toBe('nika-sglang-vision');
+		expect(secrets.get).toHaveBeenCalledWith('nika.sglang.gpu-1.apiKey');
+	});
+
+	it('sends no Authorization header when the server has no stored key', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ choices: [{ message: { content: 'ok' } }] }) });
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => {
+				if (key === 'visionModel') { return 'sglang/gpu-1/Qwen/Qwen2.5-VL-7B-Instruct'; }
+				if (key === 'sglang.servers') { return 'http://10.0.0.5:30000'; }
+				return fallback;
+			},
+		} as never);
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn().mockResolvedValue(undefined) } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: fetchMock, makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
+		);
+
+		await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(new Uint8Array([1]), 'image/png')]),
+		], new vscode.CancellationTokenSource().token);
+
+		// A malformed server list means no server: the describe pass fails loudly
+		// instead of silently hitting the wrong host.
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('falls back to a placeholder when the SGLang server is gone', async () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: (key: string, fallback: unknown) => {
+				if (key === 'visionModel') { return 'sglang/removed/Qwen/Qwen2.5-VL-7B-Instruct'; }
+				if (key === 'sglang.servers') { return [{ id: 'gpu-1', baseUrl: 'http://10.0.0.5:30000' }]; }
+				return fallback;
+			},
+		} as never);
+		const showWarningMessage = vi.fn();
+		vi.mocked(vscode.window.showWarningMessage).mockImplementation(showWarningMessage);
+		const processor = new NikaAttachmentProcessor(
+			{ log: vi.fn() } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[0],
+			deepSeekWebProviderStub(),
+			{ secrets: { get: vi.fn().mockResolvedValue(undefined) } } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[2],
+			{ fetch: vi.fn(), makeAbortController: vi.fn(() => ({ abort: vi.fn() })) } as unknown as ConstructorParameters<typeof NikaAttachmentProcessor>[3],
+		);
+
+		const result = await processor.process([
+			new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.User, [vscode.LanguageModelDataPart.image(new Uint8Array([2]), 'image/png')]),
+		], new vscode.CancellationTokenSource().token);
+
+		const text = result.messages[0].content[0] as vscode.LanguageModelTextPart;
+		expect(text.value).toContain('Image processing failed');
+		expect(showWarningMessage).toHaveBeenCalled();
+	});
+});
+
 describe('Nika DeepSeek Web vision', () => {
 	it('describes an image through the DeepSeek Web provider using the stored token', async () => {
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
